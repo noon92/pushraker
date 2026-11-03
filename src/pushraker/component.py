@@ -84,13 +84,16 @@ except Exception as e:
 
 from moonraker.common import JobEvent, KlippyState
 from . import settings as cfgmod
+from . import printers
 from . import __version__
 
 if TYPE_CHECKING:
     from moonraker.confighelper import ConfigHelper
     from moonraker.components.klippy_apis import KlippyAPI as APIComp
 
-EXCEPTION_EVENT = "snapmaker:exception_notification"
+# The printer's own fault event (see printers.py); listened for from the
+# start, it simply never fires on a printer without one
+EXCEPTION_EVENTS = printers.EXCEPTION_EVENTS
 REMOTE_METHOD = "push_notification"
 MILESTONES = (25, 50, 75)
 ROW_IDS = (
@@ -148,13 +151,10 @@ IMAGE_KINDS = ("render", "snapshot", "spool", "none")
 # from the touchscreen (klippy/extras/machine_state_manager.py); the
 # calibration is complete when the state goes back to IDLE (0; PRINTING
 # is 1, seen in the Moonraker log as "machine state: {...}")
-CALIBRATIONS = {2: "XYZ offset calibration", 3: "Bed levelling",
-                4: "Flow calibration", 5: "Input shaper calibration"}
-MSM_IDLE = 0
-MSM_ABNORMAL = 7
+# (the calibrations and their states are the printer's: printers.py)
 # action_code values (same file) of the steps that wait for a person:
 # MANUAL_CLEAN_EXTRUDER..3 (brush the nozzle, then tap the screen)
-MANUAL_CLEAN = {192: 1, 193: 2, 194: 3, 195: 4}
+# (manual_clean: printers.py)
 # ...and a calibration sitting at action IDLE (0) this long, with Klipper
 # idle too (idle_timeout "Ready": no moves, no heat-up running), is the
 # screen waiting for a tap (plate out / plate back in). Picking up and
@@ -184,8 +184,7 @@ CHAMBER_STALL_TIME = 600.
 # gives up at once with the lid off), and that is not worth two
 # notifications. Nothing is sent about a wait that ended sooner.
 CHAMBER_WAIT_MIN = 30.
-CHAMBER_SENSOR = "temperature_sensor cavity"
-ACTION_PREHEAT_CHAMBER = 3
+# (the chamber sensor's name and the preheat action: printers.py)
 DRAGONBREATH = "dragonbreath"
 # The settings file is re-read this often for edits made by hand
 SETTINGS_POLL = 20.
@@ -214,7 +213,7 @@ ACE_REFILL_WAIT = 180.
 MACRO_PREFIX = "notify "
 MACRO_SEP = " || "
 MACRO_LEVELS = ("min", "low", "default", "high", "max")
-RUNOUT_EXCEPTION_ID = 523
+# (runout_exception_id: printers.py)
 # Before each attempt, wait this long at most for the printer to have a
 # network (Wi-Fi is often not up yet right after boot). Waiting doesn't
 # count as an attempt; nothing has been sent, so it can't cause doubles.
@@ -263,7 +262,7 @@ PTC_FIELDS = ["extruder_map_table", "filament_spool_id", "extruders_used",
               "filament_sub_type", "filament_color_rgba",
               "filament_color_multi"]
 # The printer refills only from a toolhead with the same nozzle
-EXTRUDERS = ["extruder", "extruder1", "extruder2", "extruder3"]
+# (extruders: printers.py)
 NOZZLE_FIELDS = ["nozzle_diameter", "nozzle_volume_type"]
 # A job that starts this far into its file is a power-loss recovery
 RECOVERY_MIN_PROGRESS = 0.01
@@ -298,10 +297,7 @@ USAGE_GRACE = 0.05
 SEND_READ_TIMEOUT = 60.
 # Apprise's default (4 s) is short for a slow or relayed connection
 SEND_CONNECT_TIMEOUT = 10.
-PL_ENV_PATHS = (
-    "/home/lava/printer_data/klippy/pl_print_file_env.json",
-    "/home/lava/printer_data/config/snapmaker/pl_print_file_env.json",
-)
+# (power_loss_env_paths: printers.py)
 PL_WAIT_TIME = 60.
 BOOT_WINDOW = 600.
 # After boot the camera service may still be starting: the power-loss
@@ -314,7 +310,7 @@ GCODE_EXTS = (".gcode", ".gco", ".g")
 # The X and Y stepper drivers report their own temperature (TMC2240 ADC);
 # the alert goes once per print job, and again after a pause (so a print
 # job paused for the heat and resumed can warn a second time)
-DRIVERS = {"tmc2240 stepper_x": "X", "tmc2240 stepper_y": "Y"}
+# (drivers: printers.py, found from the object list)
 DRIVER_HOT_DEFAULT = 105
 # Print-by-object (Orca "print_sequence = by object"): the slicer's config
 # block at the end of the file says so, and its EXCLUDE_OBJECT markers tell
@@ -362,7 +358,10 @@ def format_code(ex: Dict[str, Any]) -> str:
 # screen shows its own text per code, from the firmware's exception text
 # file ("<id>-<index>-<code>": "<title>_<details>"); notifications use the
 # same. Faults it doesn't list keep Klipper's message.
-EXCEPTION_TEXT_PATHS = ("/home/lava/resource/text/exception_en-GB.json",)
+# (exception_text_paths: printers.py; set by the component once the
+# printer is known)
+EXCEPTION_TEXT_PATHS: Tuple[str, ...] = tuple(
+    p for cls in printers.PRINTERS for p in cls.exception_text_paths)
 _exception_text: Optional[Dict[str, str]] = None
 
 
@@ -678,8 +677,8 @@ class PushNotifications:
         self._init_state()
         self.server.register_event_handler(
             "job_state:state_changed", self._on_job_event)
-        self.server.register_event_handler(
-            EXCEPTION_EVENT, self._on_exception)
+        for event in EXCEPTION_EVENTS:
+            self.server.register_event_handler(event, self._on_exception)
         self.server.register_event_handler(
             "server:klippy_shutdown", self._on_klippy_shutdown)
         self.server.register_event_handler(
@@ -868,11 +867,12 @@ class PushNotifications:
         self._obj_cur: Optional[str] = None
         self._obj_start: Dict[str, int] = {}
         self._obj_first_sent: Set[str] = set()
+        # The printer behind the object list, known at Klipper's ready
+        self.printer: printers.Printer = printers.Printer([])
         self._status: Dict[str, Dict[str, Any]] = {
             "print_stats": {}, "virtual_sdcard": {}, "print_task_config": {},
             "exclude_object": {}, "machine_state_manager": {},
-            "idle_timeout": {}, ACE_OBJECT: {},
-            **{d: {} for d in DRIVERS}, **{e: {} for e in EXTRUDERS}}
+            "idle_timeout": {}, ACE_OBJECT: {}}
         self._cal_busy_at = 0.      # when Klipper was last seen busy
         # Filament loaded / unloaded: last reported filament_exist per
         # toolhead (None until seeded at klippy_ready), the filament each
@@ -2142,21 +2142,22 @@ class PushNotifications:
             done, self._calibrating = self._calibrating, None
             self._cal_action = None
             self._cal_hold += 1
-            if done is not None and state == MSM_ABNORMAL:
+            cal = self.printer.calibrations
+            if done is not None and state == self.printer.msm_abnormal:
                 self._spawn(self._send(
                     "calibration",
                     self._title("calibration_failed",
-                                what=CALIBRATIONS[done]),
+                                what=cal[done]),
                     "The printer reports an abnormal state; check the "
                     "screen.", camera_wait=0.))
-            elif done is not None and (state == MSM_IDLE
-                                       or state in CALIBRATIONS):
+            elif done is not None and (state == self.printer.msm_idle
+                                       or state in cal):
                 self._spawn(self._send(
                     "calibration",
-                    self._title("calibration", what=CALIBRATIONS[done]),
-                    "Printer is idle." if state == MSM_IDLE else
-                    f"{CALIBRATIONS[state]} starts next.", camera_wait=0.))
-            if state in CALIBRATIONS:
+                    self._title("calibration", what=cal[done]),
+                    "Printer is idle." if state == self.printer.msm_idle else
+                    f"{cal[state]} starts next.", camera_wait=0.))
+            if state in cal:
                 self._calibrating = state
             else:
                 return
@@ -2164,12 +2165,13 @@ class PushNotifications:
             return
         self._cal_action = action
         self._cal_hold += 1
-        what = CALIBRATIONS[state]
-        if action in MANUAL_CLEAN:
+        what = self.printer.calibrations[state]
+        if action in self.printer.manual_clean:
             self._spawn(self._send(
                 "calibration", self._title("intervention"),
                 self._lines(what, f"Brush the nozzle of Toolhead "
-                            f"{MANUAL_CLEAN[action]}, then tap the screen."),
+                            f"{self.printer.manual_clean[action]}, then "
+                            "tap the screen."),
                 camera_wait=0.))
         elif action == 0:
             self._spawn(self._intervention_hold(self._cal_hold, what))
@@ -2197,8 +2199,9 @@ class PushNotifications:
         except (TypeError, ValueError):
             return 0., None, ""
         if pur.get("power_detected") and target > 0:
-            temp = (self._status.get(CHAMBER_SENSOR) or {}).get("temperature")
-            waiting = action == ACTION_PREHEAT_CHAMBER
+            temp = (self._status.get(self.printer.chamber_sensor)
+                    or {}).get("temperature")
+            waiting = action == self.printer.action_preheat_chamber
             return target, (None if temp is None else float(temp)), \
                 "purifier" if waiting else "purifier_idle"
         return 0., None, ""
@@ -2484,16 +2487,25 @@ class PushNotifications:
             objs = await kapis.get_object_list(default=[])
         except Exception:
             objs = []
+        self.printer = printers.detect(objs)
+        if first_ready:
+            logging.info("[push_notifications] printer: %s (drivers: %s, "
+                         "extruders: %d)", self.printer.name,
+                         ", ".join(self.printer.drivers) or "none",
+                         len(self.printer.extruders))
+        for obj in list(self.printer.drivers) + self.printer.extruders:
+            self._status.setdefault(obj, {})
         self._ace_on = ACE_OBJECT in objs
         if any(r in self.rows for r in CHAMBER_ROWS):
             self._ch_heaters = [o for o in objs
                                 if o.startswith("heater_generic ")]
-            self._ch_sensor = CHAMBER_SENSOR in objs
+            self._ch_sensor = bool(self.printer.chamber_sensor) and \
+                self.printer.chamber_sensor in objs
             self._ch_purifier = "purifier" in objs
             self._ch_device = DRAGONBREATH in objs
             chamber = dict(
                 {h: ["temperature", "target"] for h in self._ch_heaters},
-                **({CHAMBER_SENSOR: ["temperature"]}
+                **({self.printer.chamber_sensor: ["temperature"]}
                    if self._ch_sensor else {}),
                 **({"purifier": ["power_detected", "desired_chamber_temp"]}
                    if self._ch_purifier else {}),
@@ -2508,15 +2520,17 @@ class PushNotifications:
                       "virtual_sdcard": ["progress", "file_position"],
                       "exclude_object": ["objects", "current_object",
                                          "excluded_objects"],
-                      **{d: ["temperature"] for d in DRIVERS},
+                      **{d: ["temperature"] for d in self.printer.drivers},
                       # Always: the runout hold and the backup-spool switch
                       # read the toolhead map and the refill settings from
                       # it, with or without Spoolman
-                      "print_task_config": PTC_FIELDS,
-                      **{e: NOZZLE_FIELDS for e in EXTRUDERS}},
+                      **({"print_task_config": PTC_FIELDS}
+                         if self.printer.toolhead_map else {}),
+                      **{e: NOZZLE_FIELDS for e in self.printer.extruders}},
                      **({"machine_state_manager": ["main_state",
                                                    "action_code"]}
-                        if "calibration" in self.rows
+                        if (self.printer.calibrations
+                            and "calibration" in self.rows)
                         or self._ch_purifier else {}),
                      **({"idle_timeout": ["state"]}
                         if "calibration" in self.rows else {}),
@@ -2568,9 +2582,9 @@ class PushNotifications:
             return
         filename = ps.get("filename") or ""
         if "driver_hot" in self.rows and not self._driver_hot_sent and \
-                any(d in data for d in DRIVERS):
-            temps = {axis: self._status[d].get("temperature")
-                     for d, axis in DRIVERS.items()}
+                any(d in data for d in self.printer.drivers):
+            temps = {axis: (self._status.get(d) or {}).get("temperature")
+                     for d, axis in self.printer.drivers.items()}
             hot = [a for a, t in temps.items()
                    if t is not None and float(t) >= self.driver_hot]
             if hot:
@@ -2581,7 +2595,7 @@ class PushNotifications:
                         f"{a} driver: {temps[a]:.0f} °C"
                         + (f" (alert at {self.driver_hot:.0f} °C)"
                            if a in hot else "")
-                        for a in DRIVERS.values()
+                        for a in self.printer.drivers.values()
                         if temps[a] is not None))))
         if self._by_object and not self._objects():
             # No EXCLUDE_OBJECT markers (label objects off): nothing to
@@ -2859,7 +2873,8 @@ class PushNotifications:
         else:
             return
         filename = ""
-        env_path = next((p for p in PL_ENV_PATHS if os.path.isfile(p)), None)
+        env_path = next((p for p in self.printer.power_loss_env_paths
+                         if os.path.isfile(p)), None)
         if env_path is not None:
             try:
                 with open(env_path, "r") as f:
@@ -3036,8 +3051,8 @@ class PushNotifications:
                 if isinstance(w, (int, float)) and w > 0}
 
     def _nozzle(self, ch: int) -> Tuple[Any, Any]:
-        st = self._status.get(EXTRUDERS[ch] if ch < len(EXTRUDERS)
-                              else "") or {}
+        ex = self.printer.extruders
+        st = self._status.get(ex[ch] if ch < len(ex) else "") or {}
         return st.get("nozzle_diameter"), st.get("nozzle_volume_type")
 
     @staticmethod
@@ -3621,7 +3636,8 @@ class PushNotifications:
         try:
             # 523 is the whole toolhead module (tangles, pickup and park
             # failures too); code 0 with "runout" is the runout itself
-            runout = int(ex.get("id", -1)) == RUNOUT_EXCEPTION_ID and \
+            runout = self.printer.runout_exception_id is not None and \
+                int(ex.get("id", -1)) == self.printer.runout_exception_id and \
                 int(ex.get("code", -1)) == 0 and \
                 "runout" in str(ex.get("message", "")).lower()
             ch = int(ex.get("index", -1))
@@ -3888,7 +3904,7 @@ class PushNotifications:
         emap = self._job_map or []
         chs = {emap[t] for t in self._job_tools
                if t < len(emap) and isinstance(emap[t], int)}
-        return chs or set(range(len(EXTRUDERS)))
+        return chs or set(range(len(self.printer.extruders)))
 
     def _track_ace(self) -> None:
         """head_source changing for a head whose runout is being held: a

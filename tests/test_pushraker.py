@@ -1726,8 +1726,9 @@ async def test_backup_order():
     print("Backup spools: the printer's rule, in the order it uses them")
     reset_world()
     _server, c = make({}, {})
+    c.printer = pn.printers.SnapmakerU1(["print_task_config"])
     B = c._backups
-    for n, e in enumerate(pn.EXTRUDERS):
+    for n, e in enumerate(c.printer.extruders):
         c._status[e] = {"nozzle_diameter": 0.4, "nozzle_volume_type": "std"}
     ptc = dict(auto_replenish_filament=True, replenish_ignore_color=True,
                filament_spool_id=[1, 2, 3, 4], filament_exist=[1, 1, 1, 1],
@@ -1919,7 +1920,14 @@ async def test_driver_hot():
                      {"driver_hot": [("ntfy", ntfy, False)],
                       "paused": [("ntfy", ntfy, False)],
                       "resumed": [("ntfy", ntfy, False)]})
+    # The drivers are found from Klipper's object list
+    STATE["tmc2240 stepper_x"] = {"temperature": 40}
+    STATE["tmc2240 stepper_y"] = {"temperature": 40}
     await start_job(server)
+    check("the X and Y drivers are found from the object list",
+          c.printer.drivers == {"tmc2240 stepper_x": "X",
+                                "tmc2240 stepper_y": "Y"}
+          and c.printer.name == "Snapmaker U1", c.printer.drivers)
     events = server.handlers["job_state:state_changed"]
 
     async def temps(x, y):
