@@ -40,10 +40,10 @@
         .pr-status { flex-basis: 100%; }
     }
     .btn-save:hover:not(:disabled) { background: #388e3c; }
-    .pr-console { background: #111; color: #ddd; font-family: monospace; font-size: 12px; padding: 12px; border-radius: 6px; white-space: pre-wrap; max-height: 320px; overflow: auto; margin-bottom: 16px; display: none; }
+    .pr-console { background: #111; color: #ddd; font-family: monospace; font-size: 12px; padding: 12px; border-radius: 6px; white-space: pre-wrap; max-height: 320px; overflow: auto; margin-bottom: 16px; display: none; scroll-margin-bottom: 90px; }
     .pr-console .err { color: var(--error); font-weight: 600; }
     .pr-console .ok { color: var(--success); }
-    .pr-error { color: var(--error); font-size: 13px; margin: 8px 0; font-weight: 500; }
+    .pr-error { color: var(--error); font-size: 13px; margin: 8px 0; font-weight: 500; scroll-margin-bottom: 90px; }
     .pr-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 10; padding: 20px; }
     .pr-modal.open { display: flex; }
     .pr-modal-box { background: var(--card); border-radius: 8px; padding: 20px; max-width: 480px; width: 100%; }
@@ -990,6 +990,7 @@
     function showError(msg) {
         el('pr-error').textContent = msg || '';
         el('pr-error').style.display = msg ? '' : 'none';
+        if (msg) el('pr-error').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
     function showConsole(lines, ok) {
@@ -998,8 +999,11 @@
             const c = l.startsWith('!! ') ? 'err' : (/^(Sent to|Test notification sent|Settings saved)/.test(l) ? 'ok' : '');
             return `<div class="${c}">${esc(l.replace(/^!! /, ''))}</div>`;
         }).join('');
-        box.style.display = lines.length ? '' : 'none';
+        box.style.display = lines.length ? 'block' : 'none';
         box.scrollTop = box.scrollHeight;
+        // The console is at the end of the page: bring it into view, or
+        // on a long page it is never seen
+        if (lines.length) box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
     function busy(on, what) {
@@ -1017,8 +1021,8 @@
             const data = await api('/server/pushraker/config', 'POST', payload);
             const notes = (data.notes || []).slice();
             render(data);
-            showConsole(['Settings saved and applied.'].concat(notes), true);
-            el('pr-status').textContent = data.meta.summary || 'Saved';
+            showConsole(['Settings saved and applied. Nothing restarts: they are in effect now, during a print job too.'].concat(notes), true);
+            el('pr-status').textContent = 'Saved and applied';
         } catch (e) {
             showError(e.message);
             el('pr-status').textContent = '';
