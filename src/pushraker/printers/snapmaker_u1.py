@@ -44,7 +44,7 @@ class SnapmakerU1(Printer):
     # 323, 0)
     preprint_calibrations = {
         "auto_bed_leveling": "Bed levelling",
-        "flow_calibrate": "Flow calibration (pressure advance)",
+        "flow_calibrate": "Extrusion flow calibration (pressure advance)",
         "shaper_calibrate": "Input shaper calibration",
     }
     preprint_codes = {

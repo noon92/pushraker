@@ -2263,7 +2263,7 @@ async def test_preprint():
     await asyncio.sleep(0.3)
     check("Print started lists the chosen calibrations",
           len(log) == 1 and "Pre-print calibrations selected: Bed levelling, "
-          "Flow calibration (pressure advance)." in log[0]["body"],
+          "Extrusion flow calibration (pressure advance)." in log[0]["body"],
           [e["body"] for e in log])
     log.clear()
     for a in (136, 0, 2, 0, 257, 258, 256, 0):   # as logged on a U1
@@ -2277,7 +2277,7 @@ async def test_preprint():
     check("complete once the last one is back to idle",
           [e["title"] for e in log] ==
           ["▶️ U1 pre-print calibrations complete"]
-          and "Bed levelling and Flow calibration (pressure advance) done"
+          and "Bed levelling and Extrusion flow calibration (pressure advance) done"
           in log[0]["body"], [(e["title"], e["body"]) for e in log])
     log.clear()
     await c._on_status_update({"print_stats": {"info": {"current_layer": 1}}}, 0)
