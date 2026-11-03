@@ -48,6 +48,7 @@ import asyncio
 import datetime
 import html
 import http
+import inspect
 import json
 import logging
 import os
@@ -651,7 +652,8 @@ class PushNotifications:
             app_args = self.server.get_app_args()
         except Exception:
             app_args = {}
-        data_path = app_args.get("data_path") or "/home/lava/printer_data"
+        data_path = app_args.get("data_path") or os.path.expanduser(
+            "~/printer_data")
         config_dir = os.path.dirname(app_args.get("config_file") or "") \
             or os.path.join(data_path, "config")
         self._low_path = os.path.join(data_path, ".push_notifications.json")
@@ -741,6 +743,42 @@ class PushNotifications:
                 return min(hi, max(lo, float(get(key, str(default)))))
             except ValueError:
                 return default
+        # The destinations first: a bad address leaves everything as it was
+        rows: Dict[str, Tuple[str, List[Destination]]] = {}
+        for rid in ROW_IDS:
+            image = ""
+            dests: List[Destination] = []
+            for key, email in ((rid, False), (f"{rid}_email", True),
+                               (f"{rid}_webhook", False)):
+                value = opts.get(key)
+                if not value:
+                    continue
+                kind, _, url = value.partition(",")
+                kind, url = kind.strip(), url.strip()
+                if kind not in IMAGE_KINDS or not url:
+                    raise ValueError(
+                        f"{key}: expected '<render|snapshot|spool|none>, "
+                        "<url>'")
+                ap = apprise.Apprise()
+                if not ap.add(url):
+                    raise ValueError(f"{key}: invalid notification URL")
+                for srv in ap:
+                    srv.socket_read_timeout = max(
+                        srv.socket_read_timeout, SEND_READ_TIMEOUT)
+                    srv.socket_connect_timeout = max(
+                        srv.socket_connect_timeout, SEND_CONNECT_TIMEOUT)
+                channel = "email" if email else url.split(":", 1)[0]
+                channel = {"ntfys": "ntfy", "pover": "pushover",
+                           "gotifys": "gotify",
+                           "tgram": "telegram", "discordhook": "discord",
+                           "discorddm": "discord", "json": "webhook",
+                           "jsons": "webhook"}.get(
+                    channel, channel)
+                image = image or kind
+                dests.append(Destination(channel, ap, email))
+            if dests:
+                rows[rid] = (image, dests)
+        self.rows = rows
         self.name: str = get("name", "Printer")
         self.snapshot_url: Optional[str] = opts.get("snapshot_url") or None
         # "Layer N complete" is reported when layer N + 1 starts
@@ -781,40 +819,6 @@ class PushNotifications:
             self.error_index_url = opts["error_index_url"]
         # RESPOND PREFIX=notify MSG="title || message || priority"
         self.macro_priority: str = get("macro_priority", "default")
-        self.rows: Dict[str, Tuple[str, List[Destination]]] = {}
-        for rid in ROW_IDS:
-            image = ""
-            dests: List[Destination] = []
-            for key, email in ((rid, False), (f"{rid}_email", True),
-                               (f"{rid}_webhook", False)):
-                value = opts.get(key)
-                if not value:
-                    continue
-                kind, _, url = value.partition(",")
-                kind, url = kind.strip(), url.strip()
-                if kind not in IMAGE_KINDS or not url:
-                    raise ValueError(
-                        f"{key}: expected '<render|snapshot|spool|none>, "
-                        "<url>'")
-                ap = apprise.Apprise()
-                if not ap.add(url):
-                    raise ValueError(f"{key}: invalid notification URL")
-                for srv in ap:
-                    srv.socket_read_timeout = max(
-                        srv.socket_read_timeout, SEND_READ_TIMEOUT)
-                    srv.socket_connect_timeout = max(
-                        srv.socket_connect_timeout, SEND_CONNECT_TIMEOUT)
-                channel = "email" if email else url.split(":", 1)[0]
-                channel = {"ntfys": "ntfy", "pover": "pushover",
-                           "gotifys": "gotify",
-                           "tgram": "telegram", "discordhook": "discord",
-                           "discorddm": "discord", "json": "webhook",
-                           "jsons": "webhook"}.get(
-                    channel, channel)
-                image = image or kind
-                dests.append(Destination(channel, ap, email))
-            if dests:
-                self.rows[rid] = (image, dests)
         logging.info("[push_notifications] enabled: %s", ", ".join(
             f"{rid} ({'+'.join(d.channel for d in dests)})"
             for rid, (_, dests) in self.rows.items()) or "none")
@@ -915,13 +919,23 @@ class PushNotifications:
         try:
             wc = self.server.lookup_component("webcam", None)
             if wc is not None:
-                for name, cam in (await wc.get_webcams()).items():
+                found = wc.get_webcams()
+                if inspect.isawaitable(found):    # sync in Moonraker 0.9+
+                    found = await found
+                for name, cam in dict(found).items():
                     if not getattr(cam, "enabled", True):
                         continue
                     snap = str(getattr(cam, "snapshot_url", "") or "")
                     stream = str(getattr(cam, "stream_url", "") or "")
-                    if snap and "://" not in snap:
-                        snap = "http://127.0.0.1/" + snap.lstrip("/")
+                    if snap:
+                        # Moonraker roots a partial URL on its own default
+                        # host and turns a local address into 127.0.0.1
+                        try:
+                            snap = await cam.get_snapshot_url(
+                                convert_local=True)
+                        except Exception:
+                            if "://" not in snap:
+                                snap = "http://127.0.0.1/" + snap.lstrip("/")
                     cams[str(name)] = {"snapshot": snap, "stream": stream}
         except Exception as e:
             logging.warning("[push_notifications] webcams: %s", e)
@@ -929,7 +943,7 @@ class PushNotifications:
         try:
             sm = self.server.lookup_component("spoolman", None)
             url = str(getattr(sm, "spoolman_url", "") or "") if sm else ""
-            spoolman = re.sub(r"/api/v\d+/?$", "", url.rstrip("/"))
+            spoolman = re.sub(r"/api(/v\d+)?/?$", "", url.rstrip("/"))
         except Exception:
             spoolman = ""
         try:
@@ -949,7 +963,10 @@ class PushNotifications:
             return
         self.env = await self._env()
         self.settings = self.store.load()
-        err = cfgmod.stored_error(self.settings, self.env)
+        try:
+            err = cfgmod.stored_error(self.settings, self.env)
+        except Exception as e:
+            err = f"unreadable ({e})"
         if err:
             logging.warning("[push_notifications] settings need attention "
                             "(%s); keeping the last applied ones", err)
@@ -957,7 +974,7 @@ class PushNotifications:
         try:
             opts = cfgmod.render_options(self.settings, self.env)
             self._apply_options(opts)
-        except (ValueError, KeyError) as e:
+        except Exception as e:
             logging.error("[push_notifications] settings not applied: %s", e)
             return
         logging.info("[push_notifications] settings applied (%s)", why)
@@ -984,6 +1001,7 @@ class PushNotifications:
         if self.store is None or not self._ready_once:
             return
         values = cfgmod.hook_values(self.settings, self.env)
+        values["lift_ceiling"] = self.printer.lift_ceiling
         if values == self.hook_values:
             return
         kapis: APIComp = self.server.lookup_component("klippy_apis")
@@ -1014,11 +1032,22 @@ class PushNotifications:
         return cfgmod.public_view(self.settings, self.env, self._busy(),
                                   __version__)
 
-    async def _ep_config(self, web_request: Any) -> Dict[str, Any]:
+    async def _refresh(self) -> None:
+        """Before answering the page: pick up a hand edit (and apply it,
+        like the watcher would) and the printer's current webcams."""
         assert self.store is not None
         if self.store.changed() or not self.settings:
+            if self._ready_once:
+                await self._reload("file changed")
+            else:
+                self.env = await self._env()
+                self.settings = self.store.load()
+        else:
             self.env = await self._env()
-            self.settings = self.store.load()
+
+    async def _ep_config(self, web_request: Any) -> Dict[str, Any]:
+        assert self.store is not None
+        await self._refresh()
         if web_request.get_action() == "GET":
             return await self._view()
         data = web_request.get_args()
@@ -1034,7 +1063,6 @@ class PushNotifications:
         """Validate, look up what the page can't (Telegram chat, Discord
         owner), check the addresses with Apprise, store, apply live."""
         assert self.store is not None
-        self.env = await self._env()
         s = cfgmod.validate(data, self.settings, self.env)
         notes: List[str] = []
         if s["enabled"]:
@@ -1079,9 +1107,7 @@ class PushNotifications:
 
     async def _ep_status(self, web_request: Any) -> Dict[str, Any]:
         assert self.store is not None
-        if self.store.changed() or not self.settings:
-            self.env = await self._env()
-            self.settings = self.store.load()
+        await self._refresh()
         return {"version": __version__,
                 "enabled": bool(self.settings.get("enabled")),
                 "summary": cfgmod.summary(self.settings, self.env),
@@ -1096,7 +1122,7 @@ class PushNotifications:
         assert self.store is not None
         data = dict(web_request.get_args())
         data["enabled"] = True
-        self.env = await self._env()
+        await self._refresh()
         try:
             s = cfgmod.validate(data, self.settings, self.env)
             for lookup in (cfgmod.telegram_find_chat,
@@ -1151,11 +1177,8 @@ class PushNotifications:
         cam = cfgmod.camera(s, env)
         path = None
         if cam and cam.get("snapshot"):
-            old, self.snapshot_url = self.snapshot_url, cam["snapshot"]
-            try:
-                path = await self._fetch_snapshot(quiet=True)
-            finally:
-                self.snapshot_url = old
+            path = await self.eventloop.run_in_thread(
+                self._fetch_snapshot_sync, True, cam["snapshot"])
             lines.append("Attaching a camera snapshot" if path else
                          "Camera snapshot unavailable; sending without "
                          "an image")
@@ -1296,12 +1319,13 @@ class PushNotifications:
             return "cancelled"
         return None
 
-    def _fetch_snapshot_sync(self, quiet: bool = False) -> Optional[str]:
-        if not self.snapshot_url:
+    def _fetch_snapshot_sync(self, quiet: bool = False,
+                             url: Optional[str] = None) -> Optional[str]:
+        url = url or self.snapshot_url
+        if not url:
             return None
         try:
-            with urllib.request.urlopen(
-                    self.snapshot_url, timeout=SNAPSHOT_TIMEOUT) as resp:
+            with urllib.request.urlopen(url, timeout=SNAPSHOT_TIMEOUT) as resp:
                 data = resp.read(SNAPSHOT_MAX + 1)
         except Exception as e:
             if not quiet:
@@ -1874,9 +1898,10 @@ class PushNotifications:
             # Snapmaker resumes a power-loss print as a new job, part-way
             # into the file with its print time kept. A small file's start
             # G-code alone is past 1 %, so the print time decides there.
-            recovered = progress >= RECOVERY_MIN_PROGRESS and (
-                float(ps.get("print_duration") or 0.) > RECOVERY_MIN_TIME
-                or progress >= RECOVERY_SURE_PROGRESS)
+            recovered = bool(self.printer.power_loss_env_paths) and \
+                progress >= RECOVERY_MIN_PROGRESS and (
+                    float(ps.get("print_duration") or 0.) > RECOVERY_MIN_TIME
+                    or progress >= RECOVERY_SURE_PROGRESS)
             self._thread_start(filename, recovered)
             if recovered:
                 # Snapmaker resumes a power-loss print as a new job
@@ -2485,9 +2510,14 @@ class PushNotifications:
     async def _on_klippy_ready(self) -> None:
         first_ready = not self._ready_once
         self._ready_once = True
+        # Klipper restarted: its macro variables are back at their defaults
+        self.hook_values = {}
         if self.store is not None:
             # The printer's webcams and Spoolman are known now
-            await self._reload("klippy ready")
+            try:
+                await self._reload("klippy ready")
+            except Exception as e:
+                logging.error("[push_notifications] settings: %s", e)
         kapis: APIComp = self.server.lookup_component("klippy_apis")
         chamber = {}
         try:
@@ -2503,7 +2533,9 @@ class PushNotifications:
         for obj in list(self.printer.drivers) + self.printer.extruders:
             self._status.setdefault(obj, {})
         self._ace_on = ACE_OBJECT in objs
-        if any(r in self.rows for r in CHAMBER_ROWS):
+        # Subscribed whether or not their rows are on: the rows can be
+        # turned on from the page at any time (the objects are cheap)
+        if True:
             self._ch_heaters = [o for o in objs
                                 if o.startswith("heater_generic ")]
             self._ch_sensor = bool(self.printer.chamber_sensor) and \
@@ -2536,11 +2568,8 @@ class PushNotifications:
                       **{e: NOZZLE_FIELDS for e in self.printer.extruders}},
                      **({"machine_state_manager": ["main_state",
                                                    "action_code"]}
-                        if (self.printer.calibrations
-                            and "calibration" in self.rows)
-                        or self._ch_purifier else {}),
-                     **({"idle_timeout": ["state"]}
-                        if "calibration" in self.rows else {}),
+                        if "machine_state_manager" in objs else {}),
+                     **{"idle_timeout": ["state"]},
                      **({ACE_OBJECT: ACE_FIELDS} if self._ace_on else {}),
                      **chamber),
                 self._on_status_update, default={})
@@ -2563,7 +2592,8 @@ class PushNotifications:
                                        self._progress(), check_start=False)
         else:
             self._job_active = False
-        if first_ready and "power_loss" in self.rows and self._booted_recently():
+        if first_ready and "power_loss" in self.rows and \
+                self.printer.power_loss_env_paths and self._booted_recently():
             self._spawn(self._check_power_loss())
 
     async def _on_status_update(

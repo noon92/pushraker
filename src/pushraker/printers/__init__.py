@@ -50,6 +50,9 @@ class Printer:
     # The printer's own toolhead map and refill (print_task_config): with
     # it, runouts can be refilled from another toolhead
     toolhead_map = False
+    # The print-end snapshot lift keeps Z at or below this; 0 means 5 mm
+    # under the printer's axis maximum (the macro file reads it)
+    lift_ceiling = 0
 
     def __init__(self, objects: Sequence[str]) -> None:
         self.objects = list(objects)

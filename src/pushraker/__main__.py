@@ -93,15 +93,15 @@ def write(path: str, text: str, mode: int = 0o644,
     """Write if different; returns whether it changed. Files take the
     owner of their directory unless --owner says otherwise."""
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             if f.read() == text:
                 return False
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         pass
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
     os.chmod(tmp, mode)
     chown(tmp, owner, os.path.dirname(path))
@@ -134,36 +134,63 @@ def remove(path: str) -> bool:
         return False
 
 
-def ensure_section(conf: str, section: str, text: str, owner: str) -> bool:
-    """Append a section to a config file if it has none."""
+SAVE_CONFIG_HEADER = "#*# <---------------------- SAVE_CONFIG"
+
+
+def read_lines(conf: str) -> List[str]:
     try:
-        with open(conf) as f:
-            lines = f.read()
-    except OSError:
-        lines = ""
-    key = f"[{section}]".lower().replace(" ", "")
-    if any(ln.strip().lower().replace(" ", "") == key
-           for ln in lines.splitlines()):
+        with open(conf, encoding="utf-8") as f:
+            return f.read().splitlines(True)
+    except (OSError, UnicodeDecodeError):
+        return []
+
+
+def is_header(line: str, section: str) -> bool:
+    s = line.strip()
+    return s.startswith("[") and s.endswith("]") and \
+        s.lower().replace(" ", "") == f"[{section}]".lower().replace(" ", "")
+
+
+def ensure_section(conf: str, section: str, text: str, owner: str) -> bool:
+    """Add a section to a config file if it has none: before Klipper's
+    SAVE_CONFIG block when there is one (Klipper refuses anything after
+    that header and drops the saved calibration), else at the end."""
+    lines = read_lines(conf)
+    if any(is_header(ln, section) for ln in lines):
         return False
-    sep = "" if not lines or lines.endswith("\n\n") else (
-        "\n" if lines.endswith("\n") else "\n\n")
-    return write(conf, lines + sep + text, owner=owner)
+    at = next((i for i, ln in enumerate(lines)
+               if ln.startswith(SAVE_CONFIG_HEADER)), len(lines))
+    block = text if text.endswith("\n") else text + "\n"
+    before = "".join(lines[:at])
+    if before and not before.endswith("\n"):
+        before += "\n"
+    if before and not before.endswith("\n\n"):
+        before += "\n"
+    after = "".join(lines[at:])
+    return write(conf, before + block + ("\n" + after if after else ""),
+                 owner=owner)
 
 
 def drop_section(conf: str, section: str, owner: str) -> bool:
-    """Remove a section (to the next header) from a config file."""
-    try:
-        with open(conf) as f:
-            lines = f.read().splitlines(True)
-    except OSError:
+    """Remove a section from a config file: an [include ...] is its one
+    line; anything else runs to the next header or Klipper's SAVE_CONFIG
+    block."""
+    lines = read_lines(conf)
+    if not lines:
         return False
     out: List[str] = []
     skipping = False
-    key = f"[{section}]".lower().replace(" ", "")
+    one_line = section.lower().startswith("include ")
     for ln in lines:
         s = ln.strip()
-        if s.startswith("[") and s.endswith("]"):
-            skipping = s.lower().replace(" ", "") == key
+        if is_header(ln, section):
+            if one_line:
+                continue
+            skipping = True
+            continue
+        if skipping and ((s.startswith("[") and s.endswith("]"))
+                         or ln.startswith(SAVE_CONFIG_HEADER)):
+            skipping = False
         if not skipping:
             out.append(ln)
     text = "".join(out)
@@ -206,6 +233,11 @@ def section_text(a: argparse.Namespace) -> str:
 def cmd_install(a: argparse.Namespace) -> int:
     p = places(a)
     changed = []
+    if p["moonraker_include"] and os.path.realpath(p["moonraker_include"]) \
+            == os.path.realpath(p["klipper_include"]):
+        print("ERROR: --moonraker-include-dir and the Klipper include "
+              "directory are the same; both files are named pushraker.cfg")
+        return 1
     if not os.path.isdir(os.path.dirname(p["shim"])):
         print(f"ERROR: no Moonraker components directory at "
               f"{os.path.dirname(p['shim'])} (--moonraker-dir)")

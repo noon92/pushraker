@@ -201,13 +201,22 @@ class Webcam:
         self.name, self.snapshot_url, self.stream_url = name, snapshot, stream
         self.enabled = enabled
 
+    async def get_snapshot_url(self, convert_local=False):
+        # As Moonraker does: a partial URL on its default host
+        return self.snapshot_url if "://" in self.snapshot_url \
+            else "http://127.0.0.1/" + self.snapshot_url.lstrip("/")
+
 
 class Webcams:
     def __init__(self, cams):
         self.cams = cams
 
-    async def get_webcams(self):
+    def get_webcams(self):      # sync in Moonraker (0.9+)
         return {c.name: c for c in self.cams}
+
+
+class Spoolman:
+    spoolman_url = "http://spoolman:7912/api"   # as Moonraker sets it
 
 
 class Config:
@@ -1229,7 +1238,8 @@ async def test_file_mode():
     server = Server()
     server.extra_components = {"webcam": Webcams([
         Webcam("case", "/webcam/snapshot.jpg", "/webcam/webrtc"),
-        Webcam("usb", "/webcam2/snapshot.jpg", "/webcam2/webrtc", enabled=False)])}
+        Webcam("usb", "/webcam2/snapshot.jpg", "/webcam2/webrtc", enabled=False)]),
+        "spoolman": Spoolman()}
     c = pn.PushNotifications(Config(server, dict(
         name="U1", settle_time="0.1",
         error_index_url="https://wiki.example.com/errors")))
@@ -1249,8 +1259,10 @@ async def test_file_mode():
           view["name"] == "U1" and view["meta"]["cameras"] == {
               "case": {"snapshot": True, "stream": True}}
           and view["meta"]["default_name"] == "U1"
-          and not view["meta"]["spoolman"] and view["meta"]["summary"]
+          and view["meta"]["spoolman"] and view["meta"]["summary"]
           == "Disabled", view["meta"])
+    check("Spoolman's base URL from Moonraker's [spoolman] (its URL ends in /api)",
+          c.env.spoolman_url == "http://spoolman:7912", c.env.spoolman_url)
     try:
         await server.endpoints["/server/push_notifications/config"](
             WebRequest("POST", dict(enabled=True, provider="ntfy",
@@ -1279,6 +1291,11 @@ async def test_file_mode():
     check("...pushraker.conf written as INI",
           "[pushraker]" in conf and "server: https://ntfy.example.com" in conf
           and "progress_25: on, low, image, no_email" in conf, conf[:200])
+    # Klipper restarts: its macro variables are back at their defaults
+    GCODE.clear()
+    await server.handlers["server:klippy_ready"]()
+    check("the hooks are set again after a Klipper restart",
+          any("VARIABLE=complete VALUE=2" in g for g in GCODE), GCODE)
     # A hand edit: picked up by the watcher
     with open(os.path.join(WORK, "data", "config", "pushraker.conf"), "a") as f:
         f.write("name: Edited\n")
@@ -1287,6 +1304,16 @@ async def test_file_mode():
     await asyncio.sleep(0.5)
     check("a hand edit to pushraker.conf is applied", c.name == "Edited",
           c.name)
+    # A hand edit seen first by the page is applied too, not just shown
+    with open(os.path.join(WORK, "data", "config", "pushraker.conf"), "a") as f:
+        f.write("name: Edited2\n")
+    os.utime(os.path.join(WORK, "data", "config", "pushraker.conf"), None)
+    pn.SETTINGS_POLL = 20.
+    view = await server.endpoints["/server/push_notifications/config"](
+        WebRequest("GET"))
+    check("a hand edit the page reads is applied as well",
+          view["name"] == "Edited2" and c.name == "Edited2", c.name)
+    pn.SETTINGS_POLL = 0.1
     # A hand edit that doesn't validate keeps the last applied settings
     with open(os.path.join(WORK, "data", "config", "pushraker.conf"), "a") as f:
         f.write("server: ftp://nope\n")
@@ -1325,7 +1352,7 @@ async def test_file_mode():
                                     server="https://ntfy.example.com",
                                     topic="u1", camera="")))
         check("test endpoint: sends to the push service, reports lines",
-              res["ok"] and sent and sent[0][0] == "🔔 Edited test"
+              res["ok"] and sent and sent[0][0] == "🔔 Edited2 test"
               and any(l.startswith("Sent to https://ntfy.example.com/u1")
                       for l in res["lines"])
               and res["lines"][-1] == "Test notification sent.", res)
@@ -2109,6 +2136,7 @@ def main():
     asyncio.run(run_component_tests())
     import test_settings
     test_settings.run_settings_tests()
+    test_settings.run_installer_tests()
     _passes += test_settings._passes
     _failures += test_settings._failures
     shutil.rmtree(WORK, ignore_errors=True)

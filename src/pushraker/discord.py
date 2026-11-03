@@ -167,7 +167,13 @@ def bot_info(token: str) -> Tuple[Optional[Dict[str, Any]], str]:
         return None, "Discord doesn't accept this bot token"
     if r.status_code != 200:
         return None, "Discord: HTTP %d, %s" % (r.status_code, _error(r)[1])
-    return r.json(), ""
+    try:
+        app = r.json()
+    except ValueError:
+        return None, "Discord answered with something that isn't JSON"
+    if not isinstance(app, dict) or "id" not in app:
+        return None, "Discord's answer has no application in it"
+    return app, ""
 
 
 def owner_id(app: Dict[str, Any]) -> str:

@@ -44,7 +44,10 @@ location /notifications/ {
 ```
 
 and open `http://<printer>/notifications/`. The page talks to Moonraker
-through the `/server/` proxy of that nginx (or Moonraker's own port).
+through the `/server/` proxy of that nginx; without one it falls back to
+Moonraker's own port, which needs the page's origin in `cors_domains`
+under `[authorization]` in `moonraker.conf`. With Moonraker's
+authorization on, the page asks for an API key the first time.
 
 Call `_PRINT_END_NTFY` at the start of your `PRINT_END` macro and
 `_CANCEL_PRINT_NTFY` at the start of `CANCEL_PRINT` for the print-end and

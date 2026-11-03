@@ -339,7 +339,59 @@ def run_settings_tests():
     return _failures
 
 
+def run_installer_tests():
+    """python -m pushraker install/uninstall on printer.cfg and moonraker.conf."""
+    print("pushraker installer")
+    import pushraker.__main__ as cli
+    work = tempfile.mkdtemp(prefix="pushraker_install_")
+    cfg = os.path.join(work, "printer.cfg")
+    saved = ("[printer]\nkinematics: corexy\n\n"
+             "#*# <---------------------- SAVE_CONFIG ---------------------->\n"
+             "#*# DO NOT EDIT THIS BLOCK OR BELOW. The contents are auto-generated.\n"
+             "#*#\n#*# [probe]\n#*# z_offset = 1.234\n")
+    with open(cfg, "w") as f:
+        f.write(saved)
+    cli.ensure_section(cfg, "include pushraker.cfg", "[include pushraker.cfg]\n", "")
+    text = open(cfg).read()
+    check("the include goes before Klipper's SAVE_CONFIG block",
+          text.index("[include pushraker.cfg]") < text.index("#*# <---")
+          and text.endswith("#*# z_offset = 1.234\n")
+          and "\n\n[include pushraker.cfg]\n\n#*# <---" in text, text)
+    check("...and only once", not cli.ensure_section(
+        cfg, "include pushraker.cfg", "[include pushraker.cfg]\n", ""))
+    cli.drop_section(cfg, "include pushraker.cfg", "")
+    text = open(cfg).read()
+    check("uninstall removes just that line; the saved calibration stays",
+          "[include" not in text and "#*# z_offset = 1.234" in text
+          and "[printer]\nkinematics: corexy" in text, text)
+    moon = os.path.join(work, "moonraker.conf")
+    with open(moon, "w") as f:
+        f.write("[server]\nhost: 0.0.0.0\n")
+    cli.ensure_section(moon, "push_notifications", "[push_notifications]\nname: X\n", "")
+    cli.ensure_section(moon, "push_notifications", "[push_notifications]\nname: Y\n", "")
+    cli.drop_section(moon, "push_notifications", "")
+    check("a section is added once and removed whole",
+          open(moon).read() == "[server]\nhost: 0.0.0.0\n\n",
+          repr(open(moon).read()))
+    # The import of older settings: provider none, bad printer URL
+    check("provider none (older settings) becomes push off with a valid provider",
+          st.parse_section({"provider": "none"}, fresh())["provider"] == "ntfy")
+    for url in ("http://u1:99999", "http://[::1"):
+        try:
+            st.validate(dict(enabled=True, provider="telegram",
+                             secret="12345:" + "A" * 35, telegram_chat="1",
+                             printer_url=url), fresh(), ENV)
+            check(f"a printer URL that urlparse chokes on ({url}) is refused", False)
+        except st.ConfigError:
+            check(f"a printer URL that urlparse chokes on ({url}) is refused", True)
+        except ValueError as e:
+            check(f"a printer URL that urlparse chokes on ({url}) is refused", False,
+                  f"ValueError {e}")
+    return _failures
+
+
 if __name__ == "__main__":
     run_settings_tests()
+    run_installer_tests()
     print(f"\n{_passes} passed, {_failures} failed")
     sys.exit(1 if _failures else 0)

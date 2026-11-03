@@ -144,7 +144,7 @@ RX_DISCORD_MENTION = re.compile(r"|\d{5,25}|role:\d{5,25}|everyone|here")
 RX_WEBHOOK = re.compile(r"https?://[^\s]{3,2000}")
 RX_PRINTER_URL = re.compile(r"https?://[A-Za-z0-9.\-\[\]:]+(/[^\s]*)?")
 RX_NAME = re.compile(r"[\w .()\-]{1,32}")     # \w: letters in any script
-RX_CAMERA = re.compile(r"[\w .()\-]{0,64}")
+RX_CAMERA = re.compile(r"[^\x00-\x1f\x7f]{0,64}")   # a Moonraker webcam name
 RX_TIMEZONE = re.compile(r"[A-Za-z0-9_+\-/]{0,64}")
 RX_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 RX_HOST = re.compile(r"[A-Za-z0-9.\-]{1,253}")
@@ -300,11 +300,12 @@ def parse_section(sec: Any, s: Dict[str, Any]) -> Dict[str, Any]:
     for key in BOOL_FIELDS:
         if key in sec:
             s[key] = sec.get(key, "").strip().lower() == "true"
-    if sec.get("provider", "").strip() == "none":
-        s["push_enabled"] = False    # older settings: no push service
     for key in STRING_FIELDS + SECRET_FIELDS:
         if key in sec:
             s[key] = sec.get(key).strip()
+    if s["provider"] == "none":
+        s["push_enabled"] = False    # older settings: no push service
+        s["provider"] = "ntfy"
     for key in INT_FIELDS:
         try:
             s[key] = int(sec.get(key, str(s[key])))
@@ -330,8 +331,8 @@ def parse_section(sec: Any, s: Dict[str, Any]) -> Dict[str, Any]:
 def read_ini(path: str) -> configparser.RawConfigParser:
     cfg = configparser.RawConfigParser(strict=False, interpolation=None)
     try:
-        cfg.read(path)
-    except configparser.Error:
+        cfg.read(path, encoding="utf-8")
+    except (configparser.Error, UnicodeDecodeError):
         pass
     return cfg
 
@@ -414,7 +415,7 @@ class Store:
             return
         tmp = path + ".tmp"
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         os.chmod(tmp, mode)
         try:
@@ -429,9 +430,9 @@ def _read_ini_or_json_section(path: str, section: str) -> Dict[str, str]:
     """A section of an INI file, or a key of a JSON object (Moonraker's
     secrets file can be either)."""
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             text = f.read()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return {}
     try:
         data = json.loads(text)
@@ -577,6 +578,14 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
         raise ConfigError("Invalid time zone")
     if s["printer_url"] and not RX_PRINTER_URL.fullmatch(s["printer_url"]):
         raise ConfigError("Printer URL must look like http://100.64.0.1")
+    if s["printer_url"]:
+        try:
+            u = urlparse(s["printer_url"])
+            if not u.hostname or (u.port is not None
+                                  and not 0 < u.port < 65536):
+                raise ValueError("host or port")
+        except ValueError:
+            raise ConfigError("Printer URL must look like http://100.64.0.1")
     if s["printer_url"] and s["provider"] == "telegram" and s["push_enabled"]:
         host = urlparse(printer_root(s, env)).hostname or ""
         if "." not in host and ":" not in host:
@@ -810,10 +819,13 @@ def printer_root(s: Dict[str, Any], env: Optional[Env]) -> str:
     root = s["printer_url"].rstrip("/")
     if env and s["provider"] == "telegram" and s["push_enabled"]:
         host, ip = env.tailscale
-        u = urlparse(root)
-        if host and ip and (u.hostname or "").lower() == host.lower():
-            port = f":{u.port}" if u.port else ""
-            root = u._replace(netloc=f"{ip}{port}").geturl()
+        try:
+            u = urlparse(root)
+            if host and ip and (u.hostname or "").lower() == host.lower():
+                port = f":{u.port}" if u.port else ""
+                root = u._replace(netloc=f"{ip}{port}").geturl()
+        except ValueError:
+            pass
     return root
 
 
