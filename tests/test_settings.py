@@ -339,6 +339,58 @@ def run_settings_tests():
     return _failures
 
 
+def run_hidden_rows_tests():
+    """Rows a printer can't produce: off by default and left off the page,
+    unless turned on in pushraker.conf; a save from the page keeps them."""
+    print("rows a printer can't produce")
+    gone = ("calibration", "warning", "power_loss")
+    env = st.Env(cameras=ENV.cameras, rows_unavailable=gone)
+    d = st.defaults("Hi", gone)
+    check("they start off (push and email) on that printer",
+          all(not d["rows"][r]["enabled"] and not d["rows"][r]["email"]
+              for r in gone) and d["rows"]["error"]["enabled"],
+          {r: d["rows"][r] for r in gone})
+    check("...and as usual elsewhere",
+          st.defaults("U1")["rows"]["warning"]["enabled"])
+    meta = {m["id"]: m for m in st.public_view(d, env, False, "0")["meta"]["rows"]}
+    check("off and unavailable: hidden on the page",
+          all(meta[r]["hidden"] for r in gone) and not meta["error"]["hidden"])
+    work = tempfile.mkdtemp(prefix="pushraker_hidden_")
+    store = st.Store(os.path.join(work, "config"), work, name="Hi")
+    store.unavailable = gone
+    store.save(store.load())
+    text = open(store.settings_path).read()
+    check("the settings file lists them, off",
+          "\nwarning: off, max, image, no_email\n" in text, text[-400:])
+    with open(store.settings_path, "w") as f:
+        f.write(text.replace("\nwarning: off, max, image, no_email\n",
+                             "\nwarning: on, max, image, no_email\n"))
+    edited = store.load()
+    meta = {m["id"]: m for m in st.public_view(edited, env, False, "0")
+            ["meta"]["rows"]}
+    check("turned on by hand: shown on the page",
+          not meta["warning"]["hidden"] and meta["warning"]["available"] is False
+          and meta["calibration"]["hidden"])
+    # The page sends only the rows it shows; a hidden one keeps its setting
+    edited["rows"]["calibration"]["email"] = False
+    page_rows = {rid: dict(edited["rows"][rid]) for rid in st.ROW_IDS
+                 if rid not in ("calibration", "power_loss")}
+    page_rows["error"]["priority"] = "high"
+    saved = st.validate(dict(enabled=True, provider="ntfy",
+                             server="https://ntfy.example.com", topic="hi",
+                             rows=page_rows), edited, env)
+    store.save(saved)
+    back = store.load()
+    check("a save from the page keeps the rows it doesn't show, and the "
+          "hand-enabled one",
+          back["rows"]["warning"]["enabled"]
+          and not back["rows"]["calibration"]["enabled"]
+          and back["rows"]["error"]["priority"] == "high", back["rows"]["warning"])
+    check("...and the hand-enabled row is sent like any other",
+          "warning" in st.render_options(back, env))
+    return _failures
+
+
 def run_installer_tests():
     """python -m pushraker install/uninstall on printer.cfg and moonraker.conf."""
     print("pushraker installer")
@@ -392,6 +444,7 @@ def run_installer_tests():
 
 if __name__ == "__main__":
     run_settings_tests()
+    run_hidden_rows_tests()
     run_installer_tests()
     print(f"\n{_passes} passed, {_failures} failed")
     sys.exit(1 if _failures else 0)

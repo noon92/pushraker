@@ -199,7 +199,8 @@ class Env:
       error_index_url  the printer maker's error-code index, linked from
                     fault notifications ("" for none)
       name          the printer's default name
-      rows_unavailable  rows the printer can't produce (left off the page)
+      rows_unavailable  rows the printer can't produce (off by default and
+                    left off the page unless turned on in pushraker.conf)
     """
 
     def __init__(self, cameras: Optional[Dict[str, Dict[str, str]]] = None,
@@ -218,7 +219,20 @@ class Env:
 
 # ---- defaults and storage ---------------------------------------------
 
-def defaults(name: str = "Printer") -> Dict[str, Any]:
+def defaults(name: str = "Printer",
+             unavailable: Sequence[str] = ()) -> Dict[str, Any]:
+    """The settings a new install starts with. Rows the printer can't
+    produce start off (push and email), so they don't show on its page;
+    turned on in pushraker.conf, they show and work as any other."""
+    s = _defaults(name)
+    for rid in unavailable:
+        if rid in s["rows"]:
+            s["rows"][rid]["enabled"] = False
+            s["rows"][rid]["email"] = False
+    return s
+
+
+def _defaults(name: str) -> Dict[str, Any]:
     return {
         "format": SETTINGS_FORMAT,
         "enabled": False,
@@ -353,6 +367,9 @@ class Store:
         self.settings_path = os.path.join(config_dir, CONF_NAME)
         self.secrets_path = os.path.join(data_dir, SECRETS_NAME)
         self.default_name = name
+        # Rows the printer can't produce (set once it is known): they start
+        # off when there is no settings file yet
+        self.unavailable: Sequence[str] = ()
         self._stamp: Any = None
 
     def exists(self) -> bool:
@@ -374,7 +391,7 @@ class Store:
         return self.stamp() != self._stamp
 
     def load(self) -> Dict[str, Any]:
-        s = defaults(self.default_name)
+        s = defaults(self.default_name, self.unavailable)
         cfg = read_ini(self.settings_path)
         if cfg.has_section(SECTION):
             parse_section(cfg[SECTION], s)
@@ -1231,7 +1248,12 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
         "version": version,
         "rows": [{"id": r[0], "label": r[1], "icon": r[2],
                   "image": r[5], "group": r[6],
-                  "available": r[0] not in env.rows_unavailable}
+                  "available": r[0] not in env.rows_unavailable,
+                  # Left off the page only when the printer can't produce
+                  # it and it is off: one turned on in pushraker.conf shows
+                  "hidden": r[0] in env.rows_unavailable
+                  and not s["rows"][r[0]]["enabled"]
+                  and not s["rows"][r[0]]["email"]}
                  for r in ROWS],
         "email_presets": EMAIL_PRESETS,
         "spoolman": bool(env.spoolman_url),

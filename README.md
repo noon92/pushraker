@@ -19,7 +19,11 @@ installer are new. Other printers: the generic parts work (Klipper's
 standard objects: print_stats, exclude_object, heater_generic, tmc
 drivers, Moonraker's webcams and Spoolman); printer-specific parts are
 behind `printers/`, one module per printer; `snapmaker_u1.py` is the
-first.
+first. Notifications a printer can't produce (the U1's touchscreen
+calibrations, coded warnings, power-loss recovery, toolhead-map refills,
+MMU slots) start off on other printers and are left off the page; turn
+one on in `pushraker.conf` and it shows on the page and is sent like any
+other.
 
 ## Install (any Moonraker printer)
 

@@ -1370,6 +1370,42 @@ async def test_file_mode():
         t.cancel()
 
 
+async def test_generic_printer():
+    print("A printer without Snapmaker's objects: its own defaults")
+    reset_world()
+    STATE.pop("print_task_config", None)
+    for name in ("config/pushraker.conf", "pushraker.secrets"):
+        try:
+            os.remove(os.path.join(WORK, "data", name))
+        except OSError:
+            pass
+    server = Server()
+    c = pn.PushNotifications(Config(server, dict(name="Hi", settle_time="0.1")))
+    STATE["print_stats"] = ps("standby")
+    await server.handlers["server:klippy_ready"]()
+    conf = os.path.join(WORK, "data", "config", "pushraker.conf")
+    check("generic printer detected, settings file written at first start",
+          c.printer.name == "generic" and os.path.exists(conf))
+    text = open(conf).read()
+    check("...with the rows it can't produce off",
+          "\ncalibration: off," in text and "\nwarning: off," in text
+          and "\nerror: on," in text, text[-500:])
+    view = await server.endpoints["/server/push_notifications/config"](
+        WebRequest("GET"))
+    meta = {m["id"]: m for m in view["meta"]["rows"]}
+    check("...and hidden on the page", meta["calibration"]["hidden"]
+          and not meta["error"]["hidden"] and not meta["chamber_waiting"]["hidden"])
+    with open(conf, "w") as f:
+        f.write(text.replace("\nwarning: off,", "\nwarning: on,"))
+    os.utime(conf, None)
+    view = await server.endpoints["/server/push_notifications/config"](
+        WebRequest("GET"))
+    meta = {m["id"]: m for m in view["meta"]["rows"]}
+    check("turned on in pushraker.conf: shown", not meta["warning"]["hidden"])
+    for t in list(c._tasks):
+        t.cancel()
+
+
 async def test_status_report():
     print("Status report every N minutes of print time")
     reset_world()
@@ -2178,7 +2214,7 @@ async def run_component_tests():
     for t in (test_order_and_priority, test_expiry_and_independence,
               test_fault_dedup, test_same_preparation_everywhere,
               test_email_threads, test_filament_measured, test_filament_alerts,
-              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
+              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
               test_driver_hot,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines):
@@ -2198,6 +2234,7 @@ def main():
     asyncio.run(run_component_tests())
     import test_settings
     test_settings.run_settings_tests()
+    test_settings.run_hidden_rows_tests()
     test_settings.run_installer_tests()
     _passes += test_settings._passes
     _failures += test_settings._failures

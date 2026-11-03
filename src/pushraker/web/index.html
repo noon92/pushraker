@@ -476,8 +476,10 @@
         el('nt-rows').innerHTML = state.meta.rows.map(meta => {
             const row = state.rows[meta.id];
             let html = '';
-            // Rows this printer can't produce, and Spoolman's without Spoolman
-            if (meta.available === false || (meta.group === 'spoolman' && !state.meta.spoolman)) return html;
+            // Rows this printer can't produce and that are off (one turned
+            // on in pushraker.conf shows), and Spoolman's without Spoolman.
+            // A row left off isn't sent on save, so it keeps its setting.
+            if (meta.hidden || (meta.group === 'spoolman' && !state.meta.spoolman)) return html;
             if (meta.group !== group) {
                 group = meta.group;
                 if (GROUP_LABELS[group]) {

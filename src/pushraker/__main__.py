@@ -271,12 +271,15 @@ def cmd_install(a: argparse.Namespace) -> int:
                       f"[{a.import_ini[1]}] to {store.settings_path}")
             else:
                 s = None
-        store.save(s or cfgmod.defaults(a.name))
-        chown(store.settings_path, a.owner,
-              os.path.dirname(store.settings_path))
-        if os.path.exists(store.secrets_path):
-            chown(store.secrets_path, a.owner, a.data_dir)
-        changed.append(store.settings_path)
+        if s is not None:
+            store.save(s)
+            chown(store.settings_path, a.owner,
+                  os.path.dirname(store.settings_path))
+            if os.path.exists(store.secrets_path):
+                chown(store.secrets_path, a.owner, a.data_dir)
+            changed.append(store.settings_path)
+        # Otherwise the component writes it at its first start, with the
+        # defaults for the printer it finds
     for path in changed:
         print(f"Wrote {path}")
     if not changed:

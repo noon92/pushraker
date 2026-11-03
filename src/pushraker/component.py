@@ -2521,12 +2521,6 @@ class PushNotifications:
         self._ready_once = True
         # Klipper restarted: its macro variables are back at their defaults
         self.hook_values = {}
-        if self.store is not None:
-            # The printer's webcams and Spoolman are known now
-            try:
-                await self._reload("klippy ready")
-            except Exception as e:
-                logging.error("[push_notifications] settings: %s", e)
         kapis: APIComp = self.server.lookup_component("klippy_apis")
         chamber = {}
         try:
@@ -2539,6 +2533,19 @@ class PushNotifications:
                          "extruders: %d)", self.printer.name,
                          ", ".join(self.printer.drivers) or "none",
                          len(self.printer.extruders))
+        if self.store is not None:
+            # The printer, its webcams and Spoolman are known now
+            self.store.unavailable = tuple(self.printer.rows_unavailable)
+            try:
+                if not self.store.exists():
+                    # A settings file to edit by hand from the start, with
+                    # this printer's defaults
+                    self.store.save(self.store.load())
+                    logging.info("[push_notifications] wrote %s",
+                                 self.store.settings_path)
+                await self._reload("klippy ready")
+            except Exception as e:
+                logging.error("[push_notifications] settings: %s", e)
         for obj in list(self.printer.drivers) + self.printer.extruders:
             self._status.setdefault(obj, {})
         self._ace_on = ACE_OBJECT in objs
