@@ -39,6 +39,14 @@
     .pr-modal-box h3 { color: #fff; margin-bottom: 12px; font-size: 16px; }
     .pr-modal-box p { white-space: pre-wrap; margin-bottom: 20px; font-size: 14px; line-height: 1.5; }
     .pr-modal-box .pr-buttons { display: flex; gap: 10px; justify-content: flex-end; }
+    .pr-discard .pr-modal-box { border: 3px solid #d32f2f; }
+    .pr-discard h3 { color: #ff5252; font-size: 24px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }
+    .pr-discard p { color: #ff8a80; font-size: 18px; font-weight: 700; }
+    .pr-discard .btn { font-size: 15px; min-height: 42px; padding: 10px 18px; }
+    .btn-keep { background: #2e7d32; color: #fff; }
+    .btn-keep:hover { background: #388e3c; }
+    .btn-discard { background: #c62828; color: #fff; }
+    .btn-discard:hover:not(:disabled) { background: #d32f2f; }
     .pr-loading { color: var(--muted); padding: 24px; text-align: center; }
     .pr-hidden { display: none !important; }
     .nt { font-size: 14px; }
@@ -386,8 +394,19 @@
 <div class="pr-actions">
     <button type="button" class="btn btn-primary" id="pr-save">Save &amp; Apply</button>
     <button type="button" class="btn btn-secondary" id="pr-test">Send Test</button>
-    <button type="button" class="btn btn-secondary" id="pr-close">Close without saving</button>
+    <button type="button" class="btn btn-secondary" id="pr-close">Cancel</button>
     <span class="pr-status" id="pr-status"></span>
+</div>
+
+<div class="pr-modal pr-discard" id="pr-discard" role="alertdialog" aria-labelledby="pr-discard-title">
+    <div class="pr-modal-box">
+        <h3 id="pr-discard-title">⚠ Warning: your changes will be lost</h3>
+        <p>You are leaving without saving. The changes you made on this page will NOT be kept.</p>
+        <div class="pr-buttons">
+            <button type="button" class="btn btn-discard" id="pr-discard-yes" disabled>Discard changes</button>
+            <button type="button" class="btn btn-keep" id="pr-discard-no">Keep editing</button>
+        </div>
+    </div>
 </div>
 
 <div class="pr-modal" id="pr-modal">
@@ -1033,7 +1052,36 @@
     // tell the host, which closes it; on its own, go back to the page it
     // was opened from, or close the tab, or go to the printer's start page
     let closing = false;
-    el('pr-close').onclick = () => {
+    const dirty = () => !!state && JSON.stringify(collect(false)) !== saved;
+    // With unsaved changes, a warning first: the discard button only
+    // works after 5 seconds, so a misclick can't throw the changes away
+    function confirmDiscard() {
+        return new Promise(resolve => {
+            const box = el('pr-discard'), yes = el('pr-discard-yes'), no = el('pr-discard-no');
+            let left = 5, timer = null;
+            const tick = () => {
+                yes.disabled = left > 0;
+                yes.textContent = left > 0 ? `Discard changes (${left})` : 'Discard changes';
+                if (left-- > 0) timer = setTimeout(tick, 1000);
+            };
+            const done = v => {
+                clearTimeout(timer);
+                document.removeEventListener('keydown', esc);
+                box.classList.remove('open');
+                resolve(v);
+            };
+            const esc = e => { if (e.key === 'Escape') done(false); };
+            yes.onclick = () => { if (!yes.disabled) done(true); };
+            no.onclick = () => done(false);
+            box.onclick = e => { if (e.target === box) done(false); };
+            document.addEventListener('keydown', esc);
+            box.classList.add('open');
+            no.focus();
+            tick();
+        });
+    }
+    el('pr-close').onclick = async () => {
+        if (dirty() && !(await confirmDiscard())) return;
         closing = true;
         if (window.parent !== window) {
             window.parent.postMessage({ type: 'pushraker:close' }, '*');
@@ -1045,7 +1093,7 @@
     };
     window.addEventListener('beforeunload', e => {
         if (closing) return;
-        if (state && JSON.stringify(collect(false)) !== saved) { e.preventDefault(); e.returnValue = ''; }
+        if (dirty()) { e.preventDefault(); e.returnValue = ''; }
     });
     load();
 })();
