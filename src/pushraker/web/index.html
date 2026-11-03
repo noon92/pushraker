@@ -420,14 +420,21 @@
     if (location.port !== '7125') bases.push(`${location.protocol}//${location.hostname}:7125`);
     let base = null;
 
+    // Moonraker's authorization: a browser outside trusted_clients needs an
+    // API key (Fluidd: Settings > Authorization > API key), kept in this
+    // browser only
+    const apiKey = () => { try { return localStorage.getItem('pushraker.apiKey') || ''; } catch (e) { return ''; } };
+
     async function api(path, method, body) {
         const tries = base !== null ? [base] : bases;
         let last;
         for (const b of tries) {
             try {
+                const headers = body ? { 'Content-Type': 'application/json' } : {};
+                if (apiKey()) headers['X-Api-Key'] = apiKey();
                 const r = await fetch(b + path, {
                     method: method || 'GET',
-                    headers: body ? { 'Content-Type': 'application/json' } : {},
+                    headers,
                     body: body ? JSON.stringify(body) : undefined,
                     credentials: 'same-origin'
                 });
@@ -436,6 +443,7 @@
                 try { data = JSON.parse(text); } catch (e) { data = null; }
                 if (r.status === 404 && base === null && (!data || !data.error)) { last = new Error('not here'); continue; }
                 base = b;
+                if (r.status === 401 || r.status === 403) { const e = new Error('Moonraker needs an API key'); e.auth = true; throw e; }
                 if (!r.ok) {
                     const msg = data && data.error && data.error.message ? data.error.message : `HTTP ${r.status}`;
                     throw new Error(msg);
@@ -994,6 +1002,19 @@
         try {
             render(await api('/server/push_notifications/config'));
         } catch (e) {
+            if (e.auth) {
+                el('pr-loading').innerHTML = 'Moonraker\'s authorization is on and this browser isn\'t a trusted client. ' +
+                    'Paste an API key (Fluidd: Settings &gt; Authorization &gt; API key): ' +
+                    '<div class="nt-inline" style="margin-top:10px"><input class="nt-input" id="pr-api-key" autocomplete="off" spellcheck="false"> ' +
+                    '<button type="button" class="btn btn-primary" id="pr-api-key-ok">Use key</button></div>';
+                el('pr-api-key-ok').onclick = () => {
+                    try { localStorage.setItem('pushraker.apiKey', el('pr-api-key').value.trim()); } catch (err) { /* private mode */ }
+                    base = null;
+                    el('pr-loading').textContent = 'Loading settings…';
+                    load();
+                };
+                return;
+            }
             el('pr-loading').textContent = `Could not load the settings from Moonraker: ${e.message}. Is the push_notifications component enabled?`;
         }
     }

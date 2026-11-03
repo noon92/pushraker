@@ -701,6 +701,13 @@ class PushNotifications:
                                   path, e)
             self._spawn(self._watch_settings())
 
+    async def close(self) -> None:
+        """Moonraker shutting down or restarting (it reuses the process):
+        stop the settings watcher and whatever else is in flight."""
+        for task in list(self._tasks):
+            task.cancel()
+        self._tasks.clear()
+
     def _legacy_options(self, config: ConfigHelper) -> Dict[str, str]:
         """The options of a [push_notifications] section that carries the
         notifications itself (URLs may refer to Moonraker's secrets)."""
