@@ -10,8 +10,8 @@ own web page, live, with no Moonraker or Klipper restart.
 
 It grew out of the Push Notifications feature of the
 [Snapmaker U1 Extended Firmware](https://github.com/paxx12-snapmaker-u1/SnapmakerU1-Extended-Firmware),
-where it is built in; the user documentation lives there
-for now: [notifications](https://snapmakeru1-extended-firmware.pages.dev/notifications).
+where it is built in. User documentation: the
+[Push Notifications guide](docs/guide.md).
 
 **Status: 0.2.** The component has been in
 use on the Snapmaker U1 for a while; the page, the settings file and the
@@ -87,6 +87,7 @@ it out again; `--purge` also removes the settings and secrets.
 - `src/pushraker/web/index.html` — the settings page
 - `src/pushraker/klipper/pushraker.cfg` — the Klipper macro file
 - `src/pushraker/__main__.py` — `python -m pushraker install|uninstall|status`
+- `docs/guide.md` — the user guide
 - `tests/` — `python tests/test_pushraker.py` (the component against a
   stand-in Moonraker; also runs `test_settings.py`)
 
