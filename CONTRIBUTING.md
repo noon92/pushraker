@@ -16,7 +16,8 @@ on printers that upgrade it from a button, often unattended, so:
   between. A new field goes after the priority, and `*` in the priority
   place will mean "the default", so `title || message || * || new` stays
   readable by older and newer releases alike.
-- **Moonraker endpoints** (`/server/push_notifications/*`), the webhook's
+- **Moonraker endpoints** (`/server/pushraker/*`, and the 0.1 names
+  under `/server/push_notifications/*`), the webhook's
   JSON fields and its `event` names, and the Klipper macros
   (`_PRINT_END_NTFY`, `_CANCEL_PRINT_NTFY`, `_NTFY_HOOKS`) only gain
   things; nothing is renamed or removed.
@@ -26,7 +27,7 @@ on printers that upgrade it from a button, often unattended, so:
 If a change can't be made without breaking one of these, it isn't made in
 a release on its own: it needs a plan agreed first (a deprecation period
 in which both forms work), and harnesses that pin releases (the Snapmaker
-U1 firmware's `PUSHRAKER_MAX_VERSION`) are told before it ships.
+U1 extended firmware builds one release in) are told before it ships.
 
 ## Commit messages are the release notes
 

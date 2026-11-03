@@ -10,7 +10,7 @@ own web page, live, with no Moonraker or Klipper restart.
 
 It grew out of the Push Notifications feature of the
 [Snapmaker U1 Extended Firmware](https://github.com/paxx12-snapmaker-u1/SnapmakerU1-Extended-Firmware),
-where it is installed with one setting; the user documentation lives there
+where it is built in; the user documentation lives there
 for now: [notifications](https://snapmakeru1-extended-firmware.pages.dev/notifications).
 
 **Status: 0.2.** The component has been in
