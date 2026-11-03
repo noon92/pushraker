@@ -23,7 +23,7 @@ import socket
 import subprocess
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import quote, urlparse
 
 PROVIDERS = ["ntfy", "gotify", "pushover", "telegram", "discord",
@@ -196,13 +196,16 @@ class Env:
       error_index_url  the printer maker's error-code index, linked from
                     fault notifications ("" for none)
       name          the printer's default name
+      rows_unavailable  rows the printer can't produce (left off the page)
     """
 
     def __init__(self, cameras: Optional[Dict[str, Dict[str, str]]] = None,
                  spoolman_url: str = "", local_ip: str = "",
                  tailscale: Tuple[str, str] = ("", ""),
-                 error_index_url: str = "", name: str = "Printer") -> None:
+                 error_index_url: str = "", name: str = "Printer",
+                 rows_unavailable: Sequence[str] = ()) -> None:
         self.cameras = cameras or {}
+        self.rows_unavailable = set(rows_unavailable)
         self.spoolman_url = spoolman_url.rstrip("/")
         self.local_ip = local_ip
         self.tailscale = tailscale
@@ -1214,7 +1217,9 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
     out["meta"] = {
         "version": version,
         "rows": [{"id": r[0], "label": r[1], "icon": r[2],
-                  "image": r[5], "group": r[6]} for r in ROWS],
+                  "image": r[5], "group": r[6],
+                  "available": r[0] not in env.rows_unavailable}
+                 for r in ROWS],
         "email_presets": EMAIL_PRESETS,
         "spoolman": bool(env.spoolman_url),
         "priorities": PRIORITIES,

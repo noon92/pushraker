@@ -954,7 +954,8 @@ class PushNotifications:
                           local_ip=cfgmod.local_ip(), tailscale=ts,
                           error_index_url=self.error_index_url,
                           name=self.store.default_name if self.store
-                          else self.name)
+                          else self.name,
+                          rows_unavailable=self.printer.rows_unavailable)
 
     async def _reload(self, why: str) -> None:
         """Read pushraker.conf and apply it. Settings that don't pass

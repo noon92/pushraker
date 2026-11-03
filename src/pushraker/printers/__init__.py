@@ -53,6 +53,13 @@ class Printer:
     # The print-end snapshot lift keeps Z at or below this; 0 means 5 mm
     # under the printer's axis maximum (the macro file reads it)
     lift_ceiling = 0
+    # Notification rows that need something this printer doesn't have
+    # (the page leaves them out): touchscreen calibrations, the toolhead
+    # map's filament sensing and refills, an MMU, power-loss recovery,
+    # coded warnings
+    rows_unavailable: Sequence[str] = ("calibration", "filament_change",
+                                       "spool_switch", "slot_empty",
+                                       "power_loss", "warning")
 
     def __init__(self, objects: Sequence[str]) -> None:
         self.objects = list(objects)

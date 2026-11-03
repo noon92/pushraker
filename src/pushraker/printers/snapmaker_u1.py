@@ -36,6 +36,7 @@ class SnapmakerU1(Printer):
         "/home/lava/printer_data/config/snapmaker/pl_print_file_env.json",
     )
     toolhead_map = True
+    rows_unavailable: Sequence[str] = ()
     # The stock PRINT_END / CANCEL_PRINT raise Z by 5 mm below 265 mm; the
     # lift stays inside that
     lift_ceiling = 265

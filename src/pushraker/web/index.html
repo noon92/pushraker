@@ -476,7 +476,9 @@
         el('nt-rows').innerHTML = state.meta.rows.map(meta => {
             const row = state.rows[meta.id];
             let html = '';
-            if (meta.group !== group && !(meta.group === 'spoolman' && !state.meta.spoolman)) {
+            // Rows this printer can't produce, and Spoolman's without Spoolman
+            if (meta.available === false || (meta.group === 'spoolman' && !state.meta.spoolman)) return html;
+            if (meta.group !== group) {
                 group = meta.group;
                 if (GROUP_LABELS[group]) {
                     html += `<tr class="nt-group"><td colspan="5">${GROUP_LABELS[group]}</td></tr>`;
@@ -519,7 +521,6 @@
             const image = meta.image
                 ? `<input type="checkbox" data-image="${meta.id}"${row.image ? ' checked' : ''}>`
                 : '<span class="nt-na">—</span>';
-            if (meta.group === 'spoolman' && !state.meta.spoolman) return html;
             return html + `<tr data-row="${meta.id}">
                 <td><span class="nt-icon">${meta.icon}</span>${layer ? `${layer} <span class="nt-name">layer complete</span>` : `<span class="nt-name">${esc(meta.label)}</span>`}${objects}${driver}${calib}</td>
                 <td class="nt-c nt-col-push"><input type="checkbox" data-enabled="${meta.id}"${row.enabled ? ' checked' : ''}></td>
