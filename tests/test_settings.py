@@ -165,7 +165,7 @@ def run_settings_tests():
                                        "fault": 0}
           and st.render_options(off, ENV) == {})
 
-    tok = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"
+    tok = "12345:" + "TESTTOKEN" + "x" * 26   # format only; GitHub wants 8+ digits
     t = st.validate(dict(enabled=True, provider="telegram", secret=tok,
                          telegram_chat="555"), fresh(), ENV)
     url = st.row_url(t, "progress_25", "low", ENV)
