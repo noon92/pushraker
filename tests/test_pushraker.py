@@ -32,6 +32,7 @@ import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "src")
+sys.path.insert(0, HERE)
 
 _passes = 0
 _failures = 0
@@ -84,6 +85,7 @@ pn.FILAMENT_POLL = 0.2
 pn.SEND_GAP = {}       # tested on its own in test_send_gap
 
 STATE = {}
+GCODE = []
 META = {}
 SPOOLS = {}
 SECRETS = {}
@@ -121,7 +123,10 @@ class Klippy:
         return {k: copy.deepcopy(STATE.get(k, {})) for k in objs}
 
     async def get_object_list(self, default=None):
-        return list(STATE)
+        return list(STATE) + ["gcode_macro _NTFY_HOOKS"]
+
+    async def run_gcode(self, script, default=None):
+        GCODE.append(script)
 
 
 class Resp:
@@ -158,6 +163,15 @@ class Server:
     def register_remote_method(self, name, fn):
         self.remote[name] = fn
 
+    def register_endpoint(self, path, methods, handler):
+        self.endpoints = getattr(self, "endpoints", {})
+        self.endpoints[path] = handler
+
+    class error(Exception):
+        def __init__(self, message, status=500):
+            super().__init__(message)
+            self.status_code = status
+
     def lookup_component(self, name, default=None):
         extra = getattr(self, "extra_components", {})
         if name in extra:
@@ -166,7 +180,34 @@ class Server:
                 "http_client": Http()}.get(name, default)
 
     def get_app_args(self):
-        return {"data_path": os.path.join(WORK, "data")}
+        return {"data_path": os.path.join(WORK, "data"),
+                "config_file": os.path.join(WORK, "data", "config",
+                                            "moonraker.conf")}
+
+
+class WebRequest:
+    def __init__(self, action, args=None):
+        self.action, self.args = action, args or {}
+
+    def get_action(self):
+        return self.action
+
+    def get_args(self):
+        return self.args
+
+
+class Webcam:
+    def __init__(self, name, snapshot, stream, enabled=True):
+        self.name, self.snapshot_url, self.stream_url = name, snapshot, stream
+        self.enabled = enabled
+
+
+class Webcams:
+    def __init__(self, cams):
+        self.cams = cams
+
+    async def get_webcams(self):
+        return {c.name: c for c in self.cams}
 
 
 class Config:
@@ -210,6 +251,8 @@ class Config:
 
 class FakeServer:
     headers = {}
+    socket_connect_timeout = 1.
+    socket_read_timeout = 1.
 
 
 class FakeService:
@@ -257,7 +300,7 @@ def make(values, services):
     if os.path.exists(state):
         os.remove(state)
     c = pn.PushNotifications(Config(server, dict(
-        dict(name="U1", settle_time="0.1"), **values)))
+        dict(name="U1", settle_time="0.1", settings="options"), **values)))
     c.rows = {rid: ("snapshot" if not rid.startswith(("filament", "spool", "slot"))
                     else "spool",
                     [pn.Destination(ch, fake, em) for ch, fake, em in dests])
@@ -1174,6 +1217,132 @@ async def test_file_pauses():
         JobEvent.COMPLETE, {}, ps("complete"))
 
 
+async def test_file_mode():
+    print("Settings from pushraker.conf, the page's endpoints, live apply")
+    reset_world()
+    os.makedirs(os.path.join(WORK, "data", "config"), exist_ok=True)
+    for name in ("config/pushraker.conf", "pushraker.secrets"):
+        try:
+            os.remove(os.path.join(WORK, "data", name))
+        except OSError:
+            pass
+    server = Server()
+    server.extra_components = {"webcam": Webcams([
+        Webcam("case", "/webcam/snapshot.jpg", "/webcam/webrtc"),
+        Webcam("usb", "/webcam2/snapshot.jpg", "/webcam2/webrtc", enabled=False)])}
+    c = pn.PushNotifications(Config(server, dict(
+        name="U1", settle_time="0.1",
+        error_index_url="https://wiki.example.com/errors")))
+    check("file mode: endpoints registered, no rows yet",
+          set(server.endpoints) == {"/server/push_notifications/config",
+                                    "/server/push_notifications/test",
+                                    "/server/push_notifications/status"}
+          and c.rows == {} and c.store is not None)
+    STATE["print_stats"] = ps("standby")
+    await server.handlers["server:klippy_ready"]()
+    check("klippy ready without a settings file: defaults, nothing enabled",
+          c.rows == {} and c.settings["name"] == "U1"
+          and not c.settings["enabled"])
+    view = await server.endpoints["/server/push_notifications/config"](
+        WebRequest("GET"))
+    check("GET config: the view with the printer's webcams and defaults",
+          view["name"] == "U1" and view["meta"]["cameras"] == {
+              "case": {"snapshot": True, "stream": True}}
+          and view["meta"]["default_name"] == "U1"
+          and not view["meta"]["spoolman"] and view["meta"]["summary"]
+          == "Disabled", view["meta"])
+    try:
+        await server.endpoints["/server/push_notifications/config"](
+            WebRequest("POST", dict(enabled=True, provider="ntfy",
+                                    server="ftp://x", topic="u1")))
+        check("POST config: a bad setting is a 400 with the reason", False)
+    except Server.error as e:
+        check("POST config: a bad setting is a 400 with the reason",
+              e.status_code == 400 and "Server must look like" in str(e),
+              str(e))
+    GCODE.clear()
+    view = await server.endpoints["/server/push_notifications/config"](
+        WebRequest("POST", dict(enabled=True, provider="ntfy",
+                                server="https://ntfy.example.com", topic="u1",
+                                camera="case", printer_url="http://u1",
+                                rows={"progress_25": {"enabled": True}})))
+    check("POST config: saved, applied live (rows, snapshot, links)",
+          "started" in c.rows and "progress_25" in c.rows
+          and c.snapshot_url == "http://127.0.0.1/webcam/snapshot.jpg"
+          and c.name == "U1" and c.error_index_url.endswith("/errors")
+          and view["meta"]["summary"] == "Enabled: ntfy", (sorted(c.rows),
+                                                            c.snapshot_url))
+    check("...the Klipper hooks are told what to do",
+          any("MACRO=_NTFY_HOOKS VARIABLE=complete VALUE=2" in g for g in GCODE)
+          and any("VARIABLE=fault VALUE=2" in g for g in GCODE), GCODE)
+    conf = open(os.path.join(WORK, "data", "config", "pushraker.conf")).read()
+    check("...pushraker.conf written as INI",
+          "[pushraker]" in conf and "server: https://ntfy.example.com" in conf
+          and "progress_25: on, low, image, no_email" in conf, conf[:200])
+    # A hand edit: picked up by the watcher
+    with open(os.path.join(WORK, "data", "config", "pushraker.conf"), "a") as f:
+        f.write("name: Edited\n")
+    os.utime(os.path.join(WORK, "data", "config", "pushraker.conf"), None)
+    pn.SETTINGS_POLL = 0.1
+    await asyncio.sleep(0.5)
+    check("a hand edit to pushraker.conf is applied", c.name == "Edited",
+          c.name)
+    # A hand edit that doesn't validate keeps the last applied settings
+    with open(os.path.join(WORK, "data", "config", "pushraker.conf"), "a") as f:
+        f.write("server: ftp://nope\n")
+    await asyncio.sleep(0.4)
+    view = await server.endpoints["/server/push_notifications/config"](
+        WebRequest("GET"))
+    check("a bad hand edit: last settings kept, the page says why",
+          "started" in c.rows and "Server must look like"
+          in view["meta"]["stored_error"], view["meta"]["stored_error"])
+    status = await server.endpoints["/server/push_notifications/status"](
+        WebRequest("GET"))
+    check("status endpoint", status["enabled"] and "started" in status["rows"]
+          and status["cameras"] == ["case"], status)
+    # The test endpoint: Apprise stand-in
+    sent = []
+
+    class FakeAp:
+        def __init__(self):
+            self.urls = []
+
+        def add(self, url):
+            self.urls.append(url)
+            return "nope" not in url
+
+        def __iter__(self):
+            return iter([FakeServer()])
+
+        async def async_notify(self, title, body, attach=None, **_kw):
+            sent.append((title, body, attach))
+            return "fail" not in body
+    real = pn.apprise.Apprise
+    pn.apprise.Apprise = FakeAp
+    try:
+        res = await server.endpoints["/server/push_notifications/test"](
+            WebRequest("POST", dict(provider="ntfy",
+                                    server="https://ntfy.example.com",
+                                    topic="u1", camera="")))
+        check("test endpoint: sends to the push service, reports lines",
+              res["ok"] and sent and sent[0][0] == "🔔 Edited test"
+              and any(l.startswith("Sent to https://ntfy.example.com/u1")
+                      for l in res["lines"])
+              and res["lines"][-1] == "Test notification sent.", res)
+    finally:
+        pn.apprise.Apprise = real
+    try:
+        await server.endpoints["/server/push_notifications/test"](
+            WebRequest("POST", dict(provider="ntfy", server="", topic="")))
+        check("test endpoint: incomplete settings are a 400", False)
+    except Server.error as e:
+        check("test endpoint: incomplete settings are a 400",
+              e.status_code == 400, str(e))
+    pn.SETTINGS_POLL = 20.
+    for t in list(c._tasks):
+        t.cancel()
+
+
 async def test_time_left():
     print("Time left: slicer estimate early, measured later")
     reset_world()
@@ -1912,7 +2081,7 @@ async def run_component_tests():
     for t in (test_order_and_priority, test_expiry_and_independence,
               test_fault_dedup, test_same_preparation_everywhere,
               test_email_threads, test_filament_measured, test_filament_alerts,
-              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
+              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
               test_driver_hot,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines):
@@ -1927,8 +2096,13 @@ async def run_component_tests():
 
 
 def main():
+    global _passes, _failures
     print("Testing pushraker.component")
     asyncio.run(run_component_tests())
+    import test_settings
+    test_settings.run_settings_tests()
+    _passes += test_settings._passes
+    _failures += test_settings._failures
     shutil.rmtree(WORK, ignore_errors=True)
     print(f"\n{_passes} passed, {_failures} failed")
     return 1 if _failures else 0

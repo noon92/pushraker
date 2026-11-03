@@ -83,6 +83,8 @@ except Exception as e:
     discord = None  # type: ignore
 
 from moonraker.common import JobEvent, KlippyState
+from . import settings as cfgmod
+from . import __version__
 
 if TYPE_CHECKING:
     from moonraker.confighelper import ConfigHelper
@@ -185,8 +187,10 @@ CHAMBER_WAIT_MIN = 30.
 CHAMBER_SENSOR = "temperature_sensor cavity"
 ACTION_PREHEAT_CHAMBER = 3
 DRAGONBREATH = "dragonbreath"
-ERROR_INDEX_URL = ("https://wiki.snapmaker.com/en/snapmaker_u1/"
-                   "troubleshooting/u1_error_codes")
+# The settings file is re-read this often for edits made by hand
+SETTINGS_POLL = 20.
+# The Klipper macro holding what the print hooks do (klipper/pushraker.cfg)
+HOOKS_MACRO = "_NTFY_HOOKS"
 ORDINALS = {1: "1st", 2: "2nd", 3: "3rd"}
 SNAPSHOT_TIMEOUT = 5.
 SNAPSHOT_MAX = 5 * 1024 * 1024
@@ -643,20 +647,106 @@ class PushNotifications:
         self._console_pending: Dict[Tuple[Any, ...], List[str]] = {}
         self.server = config.get_server()
         self.eventloop = self.server.get_event_loop()
-        self.name: str = config.get("name", "U1")
-        self.snapshot_url: Optional[str] = config.get("snapshot_url", None)
+        self.config_name = config.get_name()
+        try:
+            app_args = self.server.get_app_args()
+        except Exception:
+            app_args = {}
+        data_path = app_args.get("data_path") or "/home/lava/printer_data"
+        config_dir = os.path.dirname(app_args.get("config_file") or "") \
+            or os.path.join(data_path, "config")
+        self._low_path = os.path.join(data_path, ".push_notifications.json")
+        # Where the settings come from: pushraker.conf (the page edits it,
+        # the component re-reads it), or, when the [push_notifications]
+        # section itself carries notification options, those (the old
+        # generated config, and the tests)
+        self.store: Optional[cfgmod.Store] = None
+        self.settings: Dict[str, Any] = {}
+        self.env = cfgmod.Env()
+        self.error_index_url: str = config.get("error_index_url", "")
+        self.hook_values: Dict[str, int] = {}
+        self._hooks_warned = False
+        legacy = config.get("settings", "file") == "options" or any(
+            config.get(k, None) is not None for rid in ROW_IDS
+            for k in (rid, f"{rid}_email", f"{rid}_webhook"))
+        if not legacy:
+            self.store = cfgmod.Store(
+                config.get("config_dir", config_dir),
+                config.get("data_dir", data_path),
+                name=config.get("name", "Printer"))
+        self._apply_options(self._legacy_options(config) if legacy else {})
+        self._init_state()
+        self.server.register_event_handler(
+            "job_state:state_changed", self._on_job_event)
+        self.server.register_event_handler(
+            EXCEPTION_EVENT, self._on_exception)
+        self.server.register_event_handler(
+            "server:klippy_shutdown", self._on_klippy_shutdown)
+        self.server.register_event_handler(
+            "server:klippy_ready", self._on_klippy_ready)
+        self.server.register_remote_method(REMOTE_METHOD, self._on_remote)
+        self.server.register_event_handler(
+            "server:gcode_response", self._on_gcode_response)
+        if self.store is not None:
+            for path, methods, handler in (
+                    ("/server/push_notifications/config", ["GET", "POST"],
+                     self._ep_config),
+                    ("/server/push_notifications/test", ["POST"],
+                     self._ep_test),
+                    ("/server/push_notifications/status", ["GET"],
+                     self._ep_status)):
+                try:
+                    self.server.register_endpoint(path, methods, handler)
+                except Exception as e:
+                    logging.error("[push_notifications] endpoint %s: %s",
+                                  path, e)
+            self._spawn(self._watch_settings())
+
+    def _legacy_options(self, config: ConfigHelper) -> Dict[str, str]:
+        """The options of a [push_notifications] section that carries the
+        notifications itself (URLs may refer to Moonraker's secrets)."""
+        out: Dict[str, str] = {}
+        for key in ("name", "snapshot_url", "layers_complete",
+                    "first_layer_objects", "filament_change_events",
+                    "timezone", "min_level", "settle_time", "repeat_interval",
+                    "spoolman_url", "filament_low_percent",
+                    "filament_low_grams", "filament_unknown", "driver_temp",
+                    "web_ui_url", "camera_url", "macro_priority",
+                    "error_index_url"):
+            v = config.get(key, None)
+            if v is not None:
+                out[key] = str(v)
+        for rid in ROW_IDS:
+            for key in (rid, f"{rid}_email", f"{rid}_webhook"):
+                v = self._option(config, key)
+                if v:
+                    out[key] = v
+        return out
+
+    def _apply_options(self, opts: Dict[str, str]) -> None:
+        """Set everything that depends on the settings (the options the
+        generated Moonraker config used to hold). Safe to call again: a
+        changed settings file replaces the destinations in place."""
+        def get(key: str, default: str) -> str:
+            return str(opts.get(key, default))
+
+        def num(key: str, default: float, lo: float, hi: float) -> float:
+            try:
+                return min(hi, max(lo, float(get(key, str(default)))))
+            except ValueError:
+                return default
+        self.name: str = get("name", "Printer")
+        self.snapshot_url: Optional[str] = opts.get("snapshot_url") or None
         # "Layer N complete" is reported when layer N + 1 starts
-        self.layers_complete: int = config.getint(
-            "layers_complete", 2, minval=1, maxval=3)
+        self.layers_complete: int = int(num("layers_complete", 2, 1, 3))
         # Print-by-object: "layer N complete" for each object, or once
-        self.first_layer_objects: str = config.get(
-            "first_layer_objects", "each")
+        self.first_layer_objects: str = get("first_layer_objects", "each")
         # Which of loaded / unloaded the Filament loaded / unloaded row sends
         self.filament_change_events = {
-            e.strip() for e in config.get(
+            e.strip() for e in get(
                 "filament_change_events", "loaded,unloaded").split(",")}
         self.tz: Optional[datetime.tzinfo] = None
-        tz_name = config.get("timezone", "")
+        tz_name = get("timezone", "")
         if tz_name:
             try:
                 from zoneinfo import ZoneInfo
@@ -665,23 +755,65 @@ class PushNotifications:
                 logging.warning("[push_notifications] time zone %s "
                                 "unavailable, ETA shown as time left only: %s",
                                 tz_name, e)
-        self.min_level: int = config.getint("min_level", 1, minval=1)
-        self.settle_time: float = config.getfloat(
-            "settle_time", 3., minval=0.)
-        self.repeat_interval: float = config.getfloat(
-            "repeat_interval", 60., minval=0.)
-        self.spoolman_url: str = config.get("spoolman_url", "").rstrip("/")
-        self.filament_low_percent: float = config.getfloat(
-            "filament_low_percent", 10., minval=0., maxval=100.)
-        self.filament_low_grams: float = config.getfloat(
-            "filament_low_grams", 50., minval=0.)
+        self.min_level: int = int(num("min_level", 1, 1, 9))
+        self.settle_time: float = num("settle_time", 3., 0., 3600.)
+        self.repeat_interval: float = num("repeat_interval", 60., 0., 1e9)
+        self.spoolman_url: str = get("spoolman_url", "").rstrip("/")
+        self.filament_low_percent: float = num(
+            "filament_low_percent", 10., 0., 100.)
+        self.filament_low_grams: float = num("filament_low_grams", 50., 0., 1e9)
         # Warn at print start about a loaded spool Spoolman shows at 0 g
         # ("amount unknown"); off for people who don't track weights
-        self.filament_unknown: bool = config.getboolean(
-            "filament_unknown", True)
+        self.filament_unknown: bool = get(
+            "filament_unknown", "true").strip().lower() in ("true", "1", "yes")
         # The option is driver_temp: driver_hot is the row
-        self.driver_hot: float = config.getfloat(
-            "driver_temp", DRIVER_HOT_DEFAULT, minval=40., maxval=150.)
+        self.driver_hot: float = num(
+            "driver_temp", DRIVER_HOT_DEFAULT, 40., 150.)
+        self.web_ui_url: str = get("web_ui_url", "")
+        self.camera_url: str = get("camera_url", "")
+        if opts.get("error_index_url"):
+            self.error_index_url = opts["error_index_url"]
+        # RESPOND PREFIX=notify MSG="title || message || priority"
+        self.macro_priority: str = get("macro_priority", "default")
+        self.rows: Dict[str, Tuple[str, List[Destination]]] = {}
+        for rid in ROW_IDS:
+            image = ""
+            dests: List[Destination] = []
+            for key, email in ((rid, False), (f"{rid}_email", True),
+                               (f"{rid}_webhook", False)):
+                value = opts.get(key)
+                if not value:
+                    continue
+                kind, _, url = value.partition(",")
+                kind, url = kind.strip(), url.strip()
+                if kind not in IMAGE_KINDS or not url:
+                    raise ValueError(
+                        f"{key}: expected '<render|snapshot|spool|none>, "
+                        "<url>'")
+                ap = apprise.Apprise()
+                if not ap.add(url):
+                    raise ValueError(f"{key}: invalid notification URL")
+                for srv in ap:
+                    srv.socket_read_timeout = max(
+                        srv.socket_read_timeout, SEND_READ_TIMEOUT)
+                    srv.socket_connect_timeout = max(
+                        srv.socket_connect_timeout, SEND_CONNECT_TIMEOUT)
+                channel = "email" if email else url.split(":", 1)[0]
+                channel = {"ntfys": "ntfy", "pover": "pushover",
+                           "gotifys": "gotify",
+                           "tgram": "telegram", "discordhook": "discord",
+                           "discorddm": "discord", "json": "webhook",
+                           "jsons": "webhook"}.get(
+                    channel, channel)
+                image = image or kind
+                dests.append(Destination(channel, ap, email))
+            if dests:
+                self.rows[rid] = (image, dests)
+        logging.info("[push_notifications] enabled: %s", ", ".join(
+            f"{rid} ({'+'.join(d.channel for d in dests)})"
+            for rid, (_, dests) in self.rows.items()) or "none")
+
+    def _init_state(self) -> None:
         self._driver_hot_sent = False
         self._filament_job = 0      # bumped per job; stops an old watcher
         self._job_map: List[Any] = []       # extruder_map_table at start
@@ -710,50 +842,6 @@ class PushNotifications:
         self._pl_file = ""       # file of the print a power loss stopped
         # Spools already reported as running low (spool id -> time)
         self._low_sent: Optional[Dict[str, float]] = None
-        try:
-            data_path = self.server.get_app_args().get("data_path") or ""
-        except Exception:
-            data_path = ""
-        data_path = data_path or "/home/lava/printer_data"
-        self._low_path = os.path.join(data_path, ".push_notifications.json")
-        self.web_ui_url: str = config.get("web_ui_url", "")
-        self.camera_url: str = config.get("camera_url", "")
-        self.rows: Dict[str, Tuple[str, List[Destination]]] = {}
-        for rid in ROW_IDS:
-            image = ""
-            dests: List[Destination] = []
-            for key, email in ((rid, False), (f"{rid}_email", True),
-                               (f"{rid}_webhook", False)):
-                value = self._option(config, key)
-                if not value:
-                    continue
-                kind, _, url = value.partition(",")
-                kind, url = kind.strip(), url.strip()
-                if kind not in IMAGE_KINDS or not url:
-                    raise config.error(
-                        f"[{config.get_name()}] {key}: expected "
-                        "'<render|snapshot|spool|none>, <url>'")
-                ap = apprise.Apprise()
-                if not ap.add(url):
-                    raise config.error(f"[{config.get_name()}] {key}: "
-                                       "invalid notification URL")
-                for srv in ap:
-                    srv.socket_read_timeout = max(
-                        srv.socket_read_timeout, SEND_READ_TIMEOUT)
-                    srv.socket_connect_timeout = max(
-                        srv.socket_connect_timeout, SEND_CONNECT_TIMEOUT)
-                channel = "email" if email else url.split(":", 1)[0]
-                channel = {"ntfys": "ntfy", "pover": "pushover",
-                           "gotifys": "gotify",
-                           "tgram": "telegram", "discordhook": "discord",
-                           "discorddm": "discord", "json": "webhook",
-                           "jsons": "webhook"}.get(
-                    channel, channel)
-                image = image or kind
-                dests.append(Destination(channel, ap, email))
-            if dests:
-                self.rows[rid] = (image, dests)
-
         self._tasks: Set[asyncio.Task] = set()
         # Faults already reported: key -> monotonic time
         self._faults_sent: Dict[FaultKey, float] = {}
@@ -812,22 +900,328 @@ class PushNotifications:
         self._cal_action: Optional[int] = None   # its last action_code
         self._cal_hold = 0                       # bumps on every action change
 
-        self.server.register_event_handler(
-            "job_state:state_changed", self._on_job_event)
-        self.server.register_event_handler(
-            EXCEPTION_EVENT, self._on_exception)
-        self.server.register_event_handler(
-            "server:klippy_shutdown", self._on_klippy_shutdown)
-        self.server.register_event_handler(
-            "server:klippy_ready", self._on_klippy_ready)
-        self.server.register_remote_method(REMOTE_METHOD, self._on_remote)
-        # RESPOND PREFIX=notify MSG="title || message || priority"
-        self.macro_priority: str = config.get("macro_priority", "default")
-        self.server.register_event_handler(
-            "server:gcode_response", self._on_gcode_response)
-        logging.info("[push_notifications] enabled: %s", ", ".join(
-            f"{rid} ({'+'.join(d.channel for d in dests)})"
-            for rid, (_, dests) in self.rows.items()) or "none")
+    # ---- settings: pushraker.conf, the page's endpoints ---------------------
+
+    async def _env(self) -> cfgmod.Env:
+        """What the printer offers right now."""
+        cams: Dict[str, Dict[str, str]] = {}
+        try:
+            wc = self.server.lookup_component("webcam", None)
+            if wc is not None:
+                for name, cam in (await wc.get_webcams()).items():
+                    if not getattr(cam, "enabled", True):
+                        continue
+                    snap = str(getattr(cam, "snapshot_url", "") or "")
+                    stream = str(getattr(cam, "stream_url", "") or "")
+                    if snap and "://" not in snap:
+                        snap = "http://127.0.0.1/" + snap.lstrip("/")
+                    cams[str(name)] = {"snapshot": snap, "stream": stream}
+        except Exception as e:
+            logging.warning("[push_notifications] webcams: %s", e)
+        spoolman = ""
+        try:
+            sm = self.server.lookup_component("spoolman", None)
+            url = str(getattr(sm, "spoolman_url", "") or "") if sm else ""
+            spoolman = re.sub(r"/api/v\d+/?$", "", url.rstrip("/"))
+        except Exception:
+            spoolman = ""
+        try:
+            ts = await self.eventloop.run_in_thread(cfgmod.tailscale_info)
+        except Exception:
+            ts = ("", "")
+        return cfgmod.Env(cameras=cams, spoolman_url=spoolman,
+                          local_ip=cfgmod.local_ip(), tailscale=ts,
+                          error_index_url=self.error_index_url,
+                          name=self.store.default_name if self.store
+                          else self.name)
+
+    async def _reload(self, why: str) -> None:
+        """Read pushraker.conf and apply it. Settings that don't pass
+        validation keep the last applied ones (the page shows why)."""
+        if self.store is None:
+            return
+        self.env = await self._env()
+        self.settings = self.store.load()
+        err = cfgmod.stored_error(self.settings, self.env)
+        if err:
+            logging.warning("[push_notifications] settings need attention "
+                            "(%s); keeping the last applied ones", err)
+            return
+        try:
+            opts = cfgmod.render_options(self.settings, self.env)
+            self._apply_options(opts)
+        except (ValueError, KeyError) as e:
+            logging.error("[push_notifications] settings not applied: %s", e)
+            return
+        logging.info("[push_notifications] settings applied (%s)", why)
+        await self._push_hooks()
+
+    async def _watch_settings(self) -> None:
+        """Re-read the settings file when it is edited by hand."""
+        while True:
+            try:
+                await asyncio.sleep(SETTINGS_POLL)
+                if self.store is not None and self.store.changed() \
+                        and self._ready_once:
+                    await self._reload("file changed")
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logging.error("[push_notifications] settings watch: %s", e)
+
+    async def _push_hooks(self) -> None:
+        """Tell the Klipper print hooks what to do (SET_GCODE_VARIABLE on
+        _NTFY_HOOKS, see klipper/pushraker.cfg): 0 nothing, 1 report, 2
+        lift for the snapshot and report. Nothing to do when the macro
+        file isn't included."""
+        if self.store is None or not self._ready_once:
+            return
+        values = cfgmod.hook_values(self.settings, self.env)
+        if values == self.hook_values:
+            return
+        kapis: APIComp = self.server.lookup_component("klippy_apis")
+        try:
+            objs = await kapis.get_object_list(default=[])
+            if f"gcode_macro {HOOKS_MACRO}" not in objs:
+                if not self._hooks_warned:
+                    self._hooks_warned = True
+                    logging.warning(
+                        "[push_notifications] Klipper has no %s macro: "
+                        "include pushraker.cfg in printer.cfg for the "
+                        "print-end and cancel snapshots", HOOKS_MACRO)
+                return
+            for key, value in values.items():
+                await kapis.run_gcode(
+                    f"SET_GCODE_VARIABLE MACRO={HOOKS_MACRO} "
+                    f"VARIABLE={key} VALUE={value}")
+            self.hook_values = values
+        except Exception as e:
+            logging.warning("[push_notifications] print hooks not set: %s", e)
+
+    def _busy(self) -> bool:
+        return self._status["print_stats"].get("state") in (
+            "printing", "paused")
+
+    async def _view(self) -> Dict[str, Any]:
+        assert self.store is not None
+        return cfgmod.public_view(self.settings, self.env, self._busy(),
+                                  __version__)
+
+    async def _ep_config(self, web_request: Any) -> Dict[str, Any]:
+        assert self.store is not None
+        if self.store.changed() or not self.settings:
+            self.env = await self._env()
+            self.settings = self.store.load()
+        if web_request.get_action() == "GET":
+            return await self._view()
+        data = web_request.get_args()
+        try:
+            notes = await self._save(dict(data))
+        except cfgmod.ConfigError as e:
+            raise self.server.error(str(e), 400)
+        view = await self._view()
+        view["notes"] = notes
+        return view
+
+    async def _save(self, data: Dict[str, Any]) -> List[str]:
+        """Validate, look up what the page can't (Telegram chat, Discord
+        owner), check the addresses with Apprise, store, apply live."""
+        assert self.store is not None
+        self.env = await self._env()
+        s = cfgmod.validate(data, self.settings, self.env)
+        notes: List[str] = []
+        if s["enabled"]:
+            for lookup in (cfgmod.telegram_find_chat,
+                           cfgmod.discord_find_user):
+                line = await self.eventloop.run_in_thread(lookup, s)
+                if line:
+                    notes.append(line)
+        try:
+            opts = cfgmod.render_options(s, self.env)
+        except ValueError as e:
+            raise cfgmod.ConfigError(f"Invalid settings: {e}")
+        for key, value in opts.items():
+            if "," not in value or not value.split(",", 1)[1].strip():
+                continue
+            if key in ROW_IDS or key.endswith(("_email", "_webhook")) \
+                    or key.startswith(("macro_", "object_", "file_pause")):
+                url = value.split(",", 1)[1].strip()
+                if not apprise.Apprise().add(url):
+                    what = ("email" if key.endswith("_email") else
+                            "webhook" if key.endswith("_webhook") else
+                            "push service")
+                    raise cfgmod.ConfigError(
+                        f"The {what} settings don't make a valid address; "
+                        "check them (server, user name, addresses)")
+        try:
+            self.store.save(s)
+        except OSError as e:
+            raise cfgmod.ConfigError(f"Could not write the settings: {e}. "
+                                     "Nothing was saved.")
+        self.settings = s
+        self._apply_options(opts)
+        await self._push_hooks()
+        if cfgmod.push_configured(s) and s["provider"] == "gotify":
+            notes.append("Text only: picture attachments not supported by "
+                         "Gotify.")
+        if cfgmod.configured(s) and s["camera"] and \
+                not cfgmod.camera(s, self.env):
+            notes.append(f'No webcam named "{s["camera"]}" in Moonraker; '
+                         "notifications are sent without camera images.")
+        return notes
+
+    async def _ep_status(self, web_request: Any) -> Dict[str, Any]:
+        assert self.store is not None
+        if self.store.changed() or not self.settings:
+            self.env = await self._env()
+            self.settings = self.store.load()
+        return {"version": __version__,
+                "enabled": bool(self.settings.get("enabled")),
+                "summary": cfgmod.summary(self.settings, self.env),
+                "busy": self._busy(),
+                "rows": sorted(self.rows),
+                "cameras": sorted(self.env.cameras),
+                "spoolman": bool(self.env.spoolman_url)}
+
+    async def _ep_test(self, web_request: Any) -> Dict[str, Any]:
+        """Send a test notification with the settings the page holds (not
+        necessarily saved) to every destination they set up."""
+        assert self.store is not None
+        data = dict(web_request.get_args())
+        data["enabled"] = True
+        self.env = await self._env()
+        try:
+            s = cfgmod.validate(data, self.settings, self.env)
+            for lookup in (cfgmod.telegram_find_chat,
+                           cfgmod.discord_find_user):
+                await self.eventloop.run_in_thread(lookup, s)
+            return await self._run_test(s)
+        except cfgmod.ConfigError as e:
+            raise self.server.error(str(e), 400)
+
+    async def _run_test(self, s: Dict[str, Any]) -> Dict[str, Any]:
+        env = self.env
+        lines: List[str] = []
+        title = f"🔔 {s['name']} test"
+        body = "Test notification from pushraker."
+        dests: List[Tuple[str, str, Optional[str]]] = []
+        btns = cfgmod.links(s, "test", env)
+        if cfgmod.push_configured(s):
+            target = {"ntfy": f"{s['server']}/{s['topic']}",
+                      "gotify": s["gotify_server"],
+                      "pushover": "Pushover",
+                      "telegram": f"Telegram chat {s['telegram_chat']}",
+                      "discord": "the Discord channel",
+                      "discord_dm": f"Discord user {s['discord_user']}"}[
+                          s["provider"]]
+            text = body
+            if s["provider"] == "telegram":
+                text = body + "\n \n" + " · ".join(
+                    f'<a href="{html.escape(u)}">{html.escape(t)}</a>'
+                    for t, u in btns)
+            elif s["provider"] in ("discord", "discord_dm") and discord:
+                text = body + "\n\n" + " · ".join(
+                    discord.link(t, u) for t, u in btns)
+            elif s["provider"] == "gotify":
+                text = body + "\n\n" + " · ".join(
+                    f"[{t}]({u})" for t, u in btns)
+            # Max priority: the test must come through however the phone's
+            # notification settings treat lower priorities
+            dests.append((target, cfgmod.row_url(s, "test", "max", env),
+                          text.strip()))
+        if cfgmod.email_configured(s):
+            dests.append((f"email ({s['email_to']}) via {s['email_host']}",
+                          cfgmod.email_url(s), None))
+        if cfgmod.webhook_configured(s):
+            dests.append(("the webhook", cfgmod.webhook_url(s, "test", env),
+                          body))
+        if not dests:
+            raise cfgmod.ConfigError(
+                "Set up a push service, email or a webhook first")
+        if cfgmod.push_configured(s) and s["provider"] == "gotify":
+            lines.append("Text only: picture attachments not supported by "
+                         "Gotify.")
+        cam = cfgmod.camera(s, env)
+        path = None
+        if cam and cam.get("snapshot"):
+            old, self.snapshot_url = self.snapshot_url, cam["snapshot"]
+            try:
+                path = await self._fetch_snapshot(quiet=True)
+            finally:
+                self.snapshot_url = old
+            lines.append("Attaching a camera snapshot" if path else
+                         "Camera snapshot unavailable; sending without "
+                         "an image")
+        elif s["camera"]:
+            lines.append(f'No webcam named "{s["camera"]}" in Moonraker; '
+                         "sending without an image")
+        failed = 0
+        t0 = time.monotonic()
+        try:
+            for target, url, text in dests:
+                if text is None and email_html is not None:
+                    text = email_html.render(
+                        title, body, btns, "info",
+                        os.path.basename(path) if path else None,
+                        datetime.datetime.now(self.tz), s["name"])
+                ap = apprise.Apprise()
+                if not ap.add(url):
+                    lines.append(f"!! Could not build a notification "
+                                 f"address for {target}")
+                    failed += 1
+                    continue
+                for srv in ap:
+                    srv.socket_connect_timeout = max(
+                        srv.socket_connect_timeout, SEND_CONNECT_TIMEOUT)
+                    srv.socket_read_timeout = max(
+                        srv.socket_read_timeout, SEND_READ_TIMEOUT)
+                channel = "email" if url.startswith("mailto") else (
+                    "webhook" if url.startswith("json") else
+                    url.split(":", 1)[0])
+                self.apprise_log.take(channel)
+                lines.append(f"Sending to {target}...")
+                ok = await ap.async_notify(
+                    title=title, body=text or body,
+                    attach=None if url.startswith("gotify") else path)
+                if not ok and path:
+                    lines.append("Sending failed; retrying without the image")
+                    retry = (email_html.without_image(text)
+                             if text and text.startswith("<!doctype html>")
+                             and email_html else
+                             (text or body) + "\n(image could not be attached)")
+                    ok = await ap.async_notify(title=title, body=retry)
+                if ok:
+                    lines.append(f"Sent to {target} "
+                                 f"({time.monotonic() - t0:.0f} s).")
+                else:
+                    failed += 1
+                    why = short_cause(self.apprise_log.take(channel))
+                    lines.append(f"!! Not delivered to {target}"
+                                 + (f" ({why})" if why else "") + ".")
+                    if url.startswith("mailto"):
+                        lines.extend(self._email_hint(why))
+        finally:
+            if path:
+                shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+        if failed:
+            lines.append(f"!! {failed} of {len(dests)} test notifications "
+                         "were not delivered.")
+        else:
+            lines.append("Test notification sent.")
+        return {"ok": failed == 0, "lines": lines}
+
+    @staticmethod
+    def _email_hint(why: str) -> List[str]:
+        text = why or ""
+        if "Unauthorized IP" in text or "Unauthorised IP" in text:
+            return ["The mail server doesn't accept connections from this "
+                    "network's IP address. On Brevo, allow it, or turn off "
+                    "IP blocking, under Security > Authorised IPs."]
+        if "535" in text or "534" in text or "authentication" in text.lower():
+            return ["The mail server rejected the username or password. "
+                    "Gmail needs an app password; Brevo needs an SMTP key "
+                    "(not your account password)."]
+        return []
 
     # ---- helpers -------------------------------------------------------
 
@@ -1180,8 +1574,8 @@ class PushNotifications:
             out.append(("Web UI", self.web_ui_url))
         if self.camera_url:
             out.append(("Live Camera", self.camera_url))
-        if rid in FAULT_ROWS:
-            out.append(("Error Index", ERROR_INDEX_URL))
+        if rid in FAULT_ROWS and self.error_index_url:
+            out.append(("Error Index", self.error_index_url))
         return out
 
     async def _image(
@@ -2081,6 +2475,9 @@ class PushNotifications:
     async def _on_klippy_ready(self) -> None:
         first_ready = not self._ready_once
         self._ready_once = True
+        if self.store is not None:
+            # The printer's webcams and Spoolman are known now
+            await self._reload("klippy ready")
         kapis: APIComp = self.server.lookup_component("klippy_apis")
         chamber = {}
         try:
