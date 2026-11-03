@@ -2243,6 +2243,80 @@ async def test_config_lines():
     SECRETS.clear()
 
 
+async def test_preprint():
+    print("Pre-print calibrations: listed at the start, then complete")
+    reset_world()
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    server, c = make({}, {"started": [("ntfy", ntfy, False)],
+                          "preprint_done": [("ntfy", ntfy, False)]})
+    STATE["print_task_config"] = dict(
+        auto_bed_leveling=True, flow_calibrate=True, shaper_calibrate=False,
+        flow_calib_extruders=[True] * 4,
+        extruders_used=[False, False, False, True])
+
+    async def msm(action):
+        await c._on_status_update(
+            {"machine_state_manager": {"main_state": 1,
+                                       "action_code": action}}, 0)
+    await start_job(server)
+    await asyncio.sleep(0.3)
+    check("Print started lists the chosen calibrations",
+          len(log) == 1 and "Pre-print calibrations selected: Bed levelling, "
+          "Flow calibration (pressure advance)." in log[0]["body"],
+          [e["body"] for e in log])
+    log.clear()
+    for a in (136, 0, 2, 0, 257, 258, 256, 0):   # as logged on a U1
+        await msm(a)
+    await asyncio.sleep(0.3)
+    check("not complete while a chosen one (T4's flow) is still to run",
+          log == [], [e["title"] for e in log])
+    await msm(323)
+    await msm(0)
+    await asyncio.sleep(0.3)
+    check("complete once the last one is back to idle",
+          [e["title"] for e in log] ==
+          ["▶️ U1 pre-print calibrations complete"]
+          and "Bed levelling and Flow calibration (pressure advance) done"
+          in log[0]["body"], [(e["title"], e["body"]) for e in log])
+    log.clear()
+    await c._on_status_update({"print_stats": {"info": {"current_layer": 1}}}, 0)
+    await asyncio.sleep(0.2)
+    check("sent once", log == [], [e["title"] for e in log])
+    # A chosen flow calibration that doesn't run (that toolhead already
+    # calibrated): layer 1 ends the wait
+    STATE["print_task_config"].update(auto_bed_leveling=False)
+    STATE["print_stats"] = ps("complete")
+    await server.handlers["job_state:state_changed"](
+        JobEvent.COMPLETE, {}, STATE["print_stats"])
+    await asyncio.sleep(0.2)
+    log.clear()
+    await start_job(server)
+    await asyncio.sleep(0.2)
+    log.clear()
+    STATE["print_stats"]["info"] = {"current_layer": 1}
+    await c._on_status_update({"print_stats": {"info": {"current_layer": 1}}}, 0)
+    await asyncio.sleep(0.3)
+    check("a skipped one: complete when layer 1 begins",
+          [e["title"] for e in log] == ["▶️ U1 pre-print calibrations complete"],
+          [e["title"] for e in log])
+    log.clear()
+    # None chosen: no line, no notification
+    STATE["print_task_config"].update(flow_calibrate=False)
+    STATE["print_stats"] = ps("complete")
+    await server.handlers["job_state:state_changed"](
+        JobEvent.COMPLETE, {}, STATE["print_stats"])
+    await asyncio.sleep(0.2)
+    log.clear()
+    await start_job(server)
+    await asyncio.sleep(0.3)
+    await c._on_status_update({"print_stats": {"info": {"current_layer": 1}}}, 0)
+    await asyncio.sleep(0.2)
+    check("none chosen: no line and no notification",
+          len(log) == 1 and "Pre-print" not in log[0]["body"],
+          [(e["title"], e["body"]) for e in log])
+
+
 async def test_old_names():
     """0.1's names keep working: the remote method, the low-spool memory."""
     data = os.path.join(WORK, "data")
@@ -2267,7 +2341,7 @@ async def run_component_tests():
               test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
               test_driver_hot,
               test_print_by_object,
-              test_no_secrets_in_logs, test_config_lines, test_old_names):
+              test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint):
         try:
             await t()
         except Exception as e:  # report and carry on

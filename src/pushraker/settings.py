@@ -118,6 +118,9 @@ OBJECT_ROW = "object_complete"
 # A pause the print job's file asks for is sent with the Paused row's
 # destinations at the highest priority: the file wants something from you
 FILE_PAUSE_ROW = "file_pause"
+# Pre-print calibrations done (printers that have them): sent with the
+# Print started row's settings, when its checkbox is on
+PREPRINT_ROW = "preprint_done"
 ERROR_ROWS = ("error", "warning", "shutdown")
 # Rows that read Spoolman (the first two need it; the switch works without)
 SPOOLMAN_ROWS = ("filament_short", "filament_low", "spool_switch")
@@ -168,7 +171,7 @@ SECRET_FIELDS = ("secret", "email_password", "webhook_url")
 INT_FIELDS = ("layers_complete", "email_port", "filament_low_percent",
               "filament_low_grams", "driver_temp", "report_interval")
 BOOL_FIELDS = ("enabled", "push_enabled", "email_enabled", "webhook_enabled",
-               "filament_unknown")
+               "filament_unknown", "preprint_done")
 # Settings the form fills in for common providers
 EMAIL_PRESETS = {
     "gmail": {"label": "Gmail", "host": "smtp.gmail.com", "port": 587,
@@ -201,14 +204,18 @@ class Env:
       name          the printer's default name
       rows_unavailable  rows the printer can't produce (off by default and
                     left off the page unless turned on in pushraker.conf)
+      preprint      the printer has pre-print calibrations (the Print
+                    started row's checkbox)
     """
 
     def __init__(self, cameras: Optional[Dict[str, Dict[str, str]]] = None,
                  spoolman_url: str = "", local_ip: str = "",
                  tailscale: Tuple[str, str] = ("", ""),
                  error_index_url: str = "", name: str = "Printer",
-                 rows_unavailable: Sequence[str] = ()) -> None:
+                 rows_unavailable: Sequence[str] = (),
+                 preprint: bool = False) -> None:
         self.cameras = cameras or {}
+        self.preprint = preprint
         self.rows_unavailable = set(rows_unavailable)
         self.spoolman_url = spoolman_url.rstrip("/")
         self.local_ip = local_ip
@@ -265,6 +272,9 @@ def _defaults(name: str) -> Dict[str, Any]:
         "filament_low_percent": 10,
         "filament_low_grams": 50,
         "filament_unknown": True,
+        # Under Print started: also notify when the pre-print calibrations
+        # chosen for the job are done
+        "preprint_done": True,
         "driver_temp": 105,     # °C, X or Y stepper driver (row: driver_hot)
         "report_interval": 30,  # minutes of print time between status reports
         "email_enabled": False,
@@ -1120,7 +1130,9 @@ def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
         # The object-complete notification follows the Print complete row
         for name in ([rid, OBJECT_ROW] if rid == "complete"
                      and s["complete_objects"] == "each" else
-                     [rid, FILE_PAUSE_ROW] if rid == "paused" else [rid]):
+                     [rid, FILE_PAUSE_ROW] if rid == "paused" else
+                     [rid, PREPRINT_ROW] if rid == "started"
+                     and s["preprint_done"] and env.preprint else [rid]):
             if rid in push:
                 url = row_url(s, rid, "max" if name == FILE_PAUSE_ROW
                               else s["rows"][rid]["priority"], env)
@@ -1257,6 +1269,7 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
                  for r in ROWS],
         "email_presets": EMAIL_PRESETS,
         "spoolman": bool(env.spoolman_url),
+        "preprint": env.preprint,
         "priorities": PRIORITIES,
         "providers": PROVIDERS,
         "cameras": {name: {"snapshot": bool(c.get("snapshot")),

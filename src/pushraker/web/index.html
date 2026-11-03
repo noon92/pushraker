@@ -547,6 +547,8 @@
                 : '';
             const calib = meta.id === 'calibration'
                 ? '<span class="nt-sub">Notifies when complete, failed or requires user intervention</span>'
+                : meta.id === 'started' && state.meta.preprint
+                ? `<span class="nt-sub"><label><input type="checkbox" id="nt-preprint"${state.preprint_done ? ' checked' : ''}> Notify when pre-print calibrations finish</label></span>`
                 : meta.id === 'filament_change'
                 ? `<span class="nt-sub"><label style="margin-right:12px"><input type="checkbox" id="nt-fc-loaded"${state.filament_change_events.includes('loaded') ? ' checked' : ''}> Loaded</label><label><input type="checkbox" id="nt-fc-unloaded"${state.filament_change_events.includes('unloaded') ? ' checked' : ''}> Unloaded</label></span>`
                 : meta.id === 'chamber_waiting'
@@ -978,6 +980,7 @@
             filament_low_percent: parseInt(el('nt-fl-percent').value, 10) || 0,
             filament_low_grams: parseInt(el('nt-fl-grams').value, 10) || 0,
             filament_unknown: el('nt-fl-unknown').checked,
+            preprint_done: el('nt-preprint') ? el('nt-preprint').checked : !!state.preprint_done,
             email_enabled: emailEnabled,
             email_host: el('nt-email-host').value.trim(),
             email_port: parseInt(el('nt-email-port').value, 10) || 0,

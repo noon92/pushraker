@@ -111,6 +111,14 @@ def run_settings_tests():
     check("options list the enabled notifications",
           opts["started"].startswith("render, ntfys://ntfy.example.com/u1"),
           opts.get("started"))
+    pp = st.Env(cameras=ENV.cameras, preprint=True)
+    check("pre-print calibrations complete: Print started's destination, "
+          "on printers that have them, while its checkbox is on",
+          "preprint_done" not in opts
+          and st.render_options(s, pp).get("preprint_done", "").startswith(
+              "render, ntfys://ntfy.example.com/u1")
+          and "preprint_done" not in st.render_options(
+              dict(s, preprint_done=False), pp))
     comp = open(os.path.join(HERE, "..", "src", "pushraker",
                              "component.py")).read()
     known = set(re.findall(r'(?:get|num)\(\s*"(\w+)"', comp))

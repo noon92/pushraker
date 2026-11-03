@@ -102,7 +102,7 @@ REMOTE_METHOD = "pushraker"
 OLD_REMOTE_METHOD = "push_notification"
 MILESTONES = (25, 50, 75)
 ROW_IDS = (
-    "started", "layer_started", "first_layer", "progress_25", "progress_50", "progress_75",
+    "started", "preprint_done", "layer_started", "first_layer", "progress_25", "progress_50", "progress_75",
     "status_report",
     "paused", "file_pause", "resumed", "object_complete", "complete", "cancelled",
     "calibration",
@@ -115,6 +115,7 @@ ROW_IDS = (
 SPOOLMAN_ROWS = ("filament_short", "filament_low", "spool_switch")
 TITLES = {
     "started": "▶️ {name} started",
+    "preprint_done": "▶️ {name} pre-print calibrations complete",
     "layer_started": "🎬 {name} first layer started",
     "first_layer": "🔍 {name} {ordinal} layer complete",
     "progress": "⏳ {name} {pct}%",
@@ -254,7 +255,7 @@ NOTIFY_TYPES = {"complete": "success", "object_complete": "success",
 FILE_CAP = 30
 # Emails about one print go in one thread (see _email_prepare). Faults
 # join it while printing and this long after the print ended.
-THREAD_ROWS = ("started", "layer_started", "first_layer",
+THREAD_ROWS = ("started", "preprint_done", "layer_started", "first_layer",
                "progress_25", "progress_50",
                "progress_75", "status_report", "paused", "file_pause", "resumed", "object_complete",
                "complete", "cancelled",
@@ -268,6 +269,10 @@ PTC_FIELDS = ["extruder_map_table", "filament_spool_id", "extruders_used",
               "filament_exist", "filament_vendor", "filament_type",
               "filament_sub_type", "filament_color_rgba",
               "filament_color_multi"]
+# The pre-print calibrations chosen for a job (printers that have them)
+PREPRINT_FIELDS = ["auto_bed_leveling", "flow_calibrate",
+                   "flow_calib_extruders", "shaper_calibrate",
+                   "extruders_used"]
 # The printer refills only from a toolhead with the same nozzle
 # (extruders: printers.py)
 NOZZLE_FIELDS = ["nozzle_diameter", "nozzle_volume_type"]
@@ -290,7 +295,8 @@ SEND_GAP = {"ntfy": 2.}   # seconds before each retry of a failed send
 # notification an hour late is noise. Faults and complete never expire.
 URGENT_ROWS = ("error", "warning", "shutdown", "power_loss",
                "chamber_fault")
-EXPIRING_ROWS = ("started", "layer_started", "first_layer", "progress_25",
+EXPIRING_ROWS = ("started", "preprint_done", "layer_started", "first_layer",
+                 "progress_25",
                  "progress_50", "progress_75", "object_complete",
                  "chamber_waiting", "chamber_reached", "filament_change")
 STATUS_EXPIRY = 300.
@@ -887,6 +893,12 @@ class PushNotifications:
         self._job_done_sent = False
         self._first_layer_sent = False
         self._layer_started_sent = False
+        # Pre-print calibrations of this job: their names (for the started
+        # notification), the ones still to run, the one running now
+        self._pp_names: List[str] = []
+        self._pp_pending: set = set()
+        self._pp_running: Optional[Tuple[str, Optional[int]]] = None
+        self._pp_sent = True
         self._milestones_sent: Set[int] = set()
         # Print time (which stops while paused) the next status report is
         # due at; None until the job's first status update sets it
@@ -1010,7 +1022,8 @@ class PushNotifications:
                           error_index_url=self.error_index_url,
                           name=self.store.default_name if self.store
                           else self.name,
-                          rows_unavailable=self.printer.rows_unavailable)
+                          rows_unavailable=self.printer.rows_unavailable,
+                          preprint=bool(self.printer.preprint_calibrations))
 
     async def _reload(self, why: str) -> None:
         """Read pushraker.conf and apply it. Settings that don't pass
@@ -1959,6 +1972,7 @@ class PushNotifications:
                     float(ps.get("print_duration") or 0.) > RECOVERY_MIN_TIME
                     or progress >= RECOVERY_SURE_PROGRESS)
             self._thread_start(filename, recovered)
+            self._preprint_seed(recovered)
             if recovered:
                 # Snapmaker resumes a power-loss print as a new job
                 self._spawn(self._send(
@@ -1970,7 +1984,8 @@ class PushNotifications:
                     self._lines(shown(filename),
                                 self._slicer_estimate(filename),
                                 self._queue_line(filename, starting=True),
-                                self._pauses_line()),
+                                self._pauses_line(),
+                                self._preprint_line()),
                     filename=filename))
             # After the started notification has taken its place in the
             # queues, so filament warnings always arrive after it
@@ -2047,7 +2062,9 @@ class PushNotifications:
         self._job_done_sent = False
         if query:
             state = await self._query(
-                {"print_stats": ["info"], "virtual_sdcard": ["file_position"]})
+                {"print_stats": ["info"], "virtual_sdcard": ["file_position"],
+                 **({"print_task_config": PREPRINT_FIELDS}
+                    if self.printer.preprint_calibrations else {})})
             for obj in self._status:
                 self._status[obj].update(state.get(obj) or {})
         self._gcode_bytes = self._get_gcode_bytes(filename)
@@ -2679,6 +2696,7 @@ class PushNotifications:
             self._idle_was = idle
         if "machine_state_manager" in data:
             self._track_calibration()
+            self._track_preprint()
         if "filament_exist" in (data.get("print_task_config") or {}):
             self._track_filament_change()
         if ACE_OBJECT in data:
@@ -2710,6 +2728,12 @@ class PushNotifications:
             self._by_object = False
             logging.info("[pushraker] no object markers in %s: "
                          "reported as one job", shown(filename))
+        if not self._pp_sent:
+            # Layer 1 began: the start routine is over, even if a chosen
+            # calibration was skipped (a toolhead already calibrated)
+            layer = (ps.get("info") or {}).get("current_layer")
+            if layer is not None and int(layer) >= 1:
+                self._preprint_done(filename)
         if "layer_started" in self.rows and not self._layer_started_sent:
             # Layer 1 begins once the start routine (homing, bed mesh,
             # flow calibration) is over: time to watch the first layer
@@ -2842,6 +2866,79 @@ class PushNotifications:
                          ", ".join(f"layer {p['layer']} @{p['offset']}"
                                    for p in out))
         return out
+
+    # ---- pre-print calibrations ----------------------------------------
+
+    def _preprint_seed(self, recovered: bool) -> None:
+        """At the job's start: which pre-print calibrations were chosen
+        (print_task_config), and so which runs to wait for."""
+        self._pp_names, self._pp_pending = [], set()
+        self._pp_running, self._pp_sent = None, True
+        cal = self.printer.preprint_calibrations
+        if not cal or recovered:
+            return
+        ptc = self._status["print_task_config"]
+        used = list(ptc.get("extruders_used") or [])
+        which = list(ptc.get("flow_calib_extruders") or [])
+        for flag, name in cal.items():
+            if not ptc.get(flag):
+                continue
+            self._pp_names.append(name)
+            per_tool = sorted({i for c, (f, i) in
+                               self.printer.preprint_codes.items()
+                               if f == flag and i is not None})
+            if not per_tool:
+                self._pp_pending.add((flag, None))
+                continue
+            for i in per_tool:
+                if (i >= len(which) or which[i]) and \
+                        (i >= len(used) or used[i]):
+                    self._pp_pending.add((flag, i))
+        self._pp_sent = not self._pp_names
+
+    def _preprint_line(self) -> str:
+        if not self._pp_names:
+            return ""
+        # A blank line before it unless the pauses line has one
+        return ("" if self._job_pauses else "\n") + \
+            "Pre-print calibrations selected: " + \
+            ", ".join(self._pp_names) + "."
+
+    def _track_preprint(self) -> None:
+        """During the job's start routine: each chosen calibration's
+        action_code while it runs, back to idle when done; when none is
+        left, they are complete (also when layer 1 begins first)."""
+        if self._pp_sent or not self._job_active:
+            return
+        try:
+            action = int(self._status["machine_state_manager"]
+                         .get("action_code") or 0)
+        except (TypeError, ValueError):
+            return
+        step = self.printer.preprint_codes.get(action)
+        if step is not None:
+            self._pp_running = step
+            return
+        if self._pp_running is None or action != 0:
+            return
+        self._pp_pending.discard(self._pp_running)
+        self._pp_running = None
+        if not self._pp_pending:
+            self._preprint_done(self._job_filename)
+
+    def _preprint_done(self, filename: str) -> None:
+        self._pp_sent = True
+        if cfgmod.PREPRINT_ROW not in self.rows:
+            return
+        names = self._pp_names
+        done = names[0] if len(names) == 1 else \
+            ", ".join(names[:-1]) + " and " + names[-1]
+        self._spawn(self._send(
+            cfgmod.PREPRINT_ROW, self._title("preprint_done"),
+            self._lines(shown(filename),
+                        f"{done} done. Starting the print job.",
+                        self._time_left()),
+            filename=filename))
 
     def _pauses_line(self) -> str:
         """For the started notification: how many pauses the file has."""

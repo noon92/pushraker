@@ -36,6 +36,24 @@ class SnapmakerU1(Printer):
         "/home/lava/printer_data/config/snapmaker/pl_print_file_env.json",
     )
     toolhead_map = True
+    # Chosen on the screen when a print job starts (print_task_config.py);
+    # while each runs, machine_state_manager's action_code is BED_PREHEATING
+    # (257), BED_PRESCANNING (258), BED_LEVELING (256),
+    # EXTRUDER<n>_FLOW_CALIBRATING (320 + toolhead) or SHAPER_CALIBRATING
+    # (384), back to IDLE (0) after each (seen on a U1: 257, 258, 256, 0;
+    # 323, 0)
+    preprint_calibrations = {
+        "auto_bed_leveling": "Bed levelling",
+        "flow_calibrate": "Flow calibration (pressure advance)",
+        "shaper_calibrate": "Input shaper calibration",
+    }
+    preprint_codes = {
+        256: ("auto_bed_leveling", None), 257: ("auto_bed_leveling", None),
+        258: ("auto_bed_leveling", None),
+        320: ("flow_calibrate", 0), 321: ("flow_calibrate", 1),
+        322: ("flow_calibrate", 2), 323: ("flow_calibrate", 3),
+        384: ("shaper_calibrate", None),
+    }
     rows_unavailable: Sequence[str] = ()
     # The stock PRINT_END / CANCEL_PRINT raise Z by 5 mm below 265 mm; the
     # lift stays inside that

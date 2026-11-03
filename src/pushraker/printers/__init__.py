@@ -50,6 +50,13 @@ class Printer:
     # The printer's own toolhead map and refill (print_task_config): with
     # it, runouts can be refilled from another toolhead
     toolhead_map = False
+    # Pre-print calibrations a print job can be started with (chosen on
+    # the printer when the job starts): the flag in print_task_config ->
+    # its name; and the action_code values (machine_state_manager) while
+    # each runs, -> (the flag, the toolhead index for per-toolhead ones,
+    # else None). Empty: the printer has none (no line, no checkbox)
+    preprint_calibrations: Dict[str, str] = {}
+    preprint_codes: Dict[int, Tuple[str, Optional[int]]] = {}
     # The print-end snapshot lift keeps Z at or below this; 0 means 5 mm
     # under the printer's axis maximum (the macro file reads it)
     lift_ceiling = 0
