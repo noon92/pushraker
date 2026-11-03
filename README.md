@@ -18,7 +18,8 @@ use on the Snapmaker U1 for a while; the page, the settings file and the
 installer are new. Other printers: the generic parts work (Klipper's
 standard objects: print_stats, exclude_object, heater_generic, tmc
 drivers, Moonraker's webcams and Spoolman); printer-specific parts are
-behind `printers.py`, where the Snapmaker U1 is the first entry.
+behind `printers/`, one module per printer; `snapmaker_u1.py` is the
+first.
 
 ## Install (any Moonraker printer)
 
@@ -70,8 +71,9 @@ it out again; `--purge` also removes the settings and secrets.
 - `src/pushraker/component.py` — the Moonraker component
 - `src/pushraker/settings.py` — the settings: validation, storage, the
   Apprise URLs built from them
-- `src/pushraker/printers.py` — what differs between printers (the harness
-  side); the Snapmaker U1 is the first entry
+- `src/pushraker/printers/` — what differs between printers (the harness
+  side of the package), one module per printer; `snapmaker_u1.py` is the
+  first
 - `src/pushraker/images.py` — spool pictures (Pillow)
 - `src/pushraker/email_html.py`, `src/pushraker/discord.py` — email card,
   Discord senders

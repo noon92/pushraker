@@ -12,8 +12,8 @@ U1's firmware adds objects of its own (print_task_config with the toolhead
 map and the refill rules, machine_state_manager with the touchscreen
 calibrations, its exception manager with coded faults, the purifier's
 chamber wait, power-loss recovery files, the chamber sensor's name).
-Another printer's specifics go in another class here, not in the
-component.
+Another printer's specifics go in another module of this package (one
+file per printer), listed in PRINTERS below, not in the component.
 """
 
 from __future__ import annotations
@@ -66,44 +66,23 @@ class Printer:
     def has(self, obj: str) -> bool:
         return obj in self.objects
 
+    @classmethod
+    def matches(cls, objects: Sequence[str]) -> bool:
+        """Whether this is the printer behind an object list."""
+        return False
 
-class SnapmakerU1(Printer):
-    name = "Snapmaker U1"
-    exception_event = "snapmaker:exception_notification"
-    exception_text_paths = ("/home/lava/resource/text/exception_en-GB.json",)
-    runout_exception_id = 523
-    # machine_state_manager.main_state values of the manual calibrations run
-    # from the touchscreen (klippy/extras/machine_state_manager.py); the
-    # calibration is complete when the state goes back to IDLE (0; PRINTING
-    # is 1, seen in the Moonraker log as "machine state: {...}")
-    calibrations = {2: "XYZ offset calibration", 3: "Bed levelling",
-                    4: "Flow calibration", 5: "Input shaper calibration"}
-    msm_idle = 0
-    msm_abnormal = 7
-    # action_code values (same file) of the steps that wait for a person:
-    # MANUAL_CLEAN_EXTRUDER..3 (brush the nozzle, then tap the screen)
-    manual_clean = {192: 1, 193: 2, 194: 3, 195: 4}
-    chamber_sensor = "temperature_sensor cavity"
-    action_preheat_chamber = 3
-    power_loss_env_paths = (
-        "/home/lava/printer_data/klippy/pl_print_file_env.json",
-        "/home/lava/printer_data/config/snapmaker/pl_print_file_env.json",
-    )
-    toolhead_map = True
 
-    def __init__(self, objects: Sequence[str]) -> None:
-        super().__init__(objects)
-        self.extruders = ["extruder", "extruder1", "extruder2", "extruder3"]
-
+from .snapmaker_u1 import SnapmakerU1  # noqa: E402
 
 PRINTERS: Tuple[type, ...] = (SnapmakerU1,)
 
 
 def detect(objects: Sequence[str]) -> Printer:
-    """The printer behind a Klipper object list."""
-    objs = set(objects)
-    if "print_task_config" in objs:
-        return SnapmakerU1(objects)
+    """The printer behind a Klipper object list: the first class that
+    recognises it, else the generic one."""
+    for cls in PRINTERS:
+        if cls.matches(objects):
+            return cls(objects)
     return Printer(objects)
 
 
