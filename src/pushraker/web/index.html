@@ -35,11 +35,16 @@
        (on a phone: one line, those two at the left, it at the right) */
     .btn-save { background: #2e7d32; color: #fff; font-size: 15px; min-height: 42px; padding: 10px 24px; margin-left: 40px; }
     @media (max-width: 600px) {
-        .btn-save { margin-left: auto; padding: 10px 16px; white-space: nowrap; }
+        .btn-save { padding: 10px 16px; white-space: nowrap; }
+        .pr-save-wrap { margin-left: auto; }
         .pr-actions .btn { white-space: nowrap; }
         .pr-status { flex-basis: 100%; }
     }
     .btn-save:hover:not(:disabled) { background: #388e3c; }
+    .pr-save-wrap { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; margin-left: 40px; }
+    .pr-save-wrap .btn-save { margin-left: 0; }
+    .pr-safe { display: none; font-size: 11px; color: var(--success); white-space: nowrap; }
+    .pr-safe.on { display: block; }
     .pr-console { background: #111; color: #ddd; font-family: monospace; font-size: 12px; padding: 12px; border-radius: 6px; white-space: pre-wrap; max-height: 320px; overflow: auto; margin-bottom: 16px; display: none; scroll-margin-bottom: 90px; }
     .pr-console .err { color: var(--error); font-weight: 600; }
     .pr-console .ok { color: var(--success); }
@@ -405,7 +410,10 @@
 <div class="pr-actions">
     <button type="button" class="btn btn-secondary" id="pr-close">Cancel</button>
     <button type="button" class="btn btn-secondary" id="pr-test">Send Test</button>
-    <button type="button" class="btn btn-save" id="pr-save">Save &amp; Apply</button>
+    <span class="pr-save-wrap">
+        <button type="button" class="btn btn-save" id="pr-save">Save &amp; Apply</button>
+        <span class="pr-safe" id="pr-safe">✓ Safe to save while printing</span>
+    </span>
     <span class="pr-status" id="pr-status"></span>
 </div>
 
@@ -885,6 +893,8 @@
             };
         });
         el('pr-status').textContent = data.meta.summary || '';
+        // During a print job: every setting applies live, nothing restarts
+        el('pr-safe').classList.toggle('on', !!data.meta.busy);
         el('pr-loading').classList.add('pr-hidden');
         el('nt-root').classList.remove('pr-hidden');
         saved = JSON.stringify(collect(false));
