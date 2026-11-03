@@ -9,7 +9,7 @@
 #  * Moonraker job events: started, paused, resumed, error (and complete /
 #    cancelled as a fallback when the print hooks did not report them).
 #  * The Klipper print hooks (`_PRINT_END_NTFY`, `_CANCEL_PRINT_NTFY`), via
-#    the `push_notification` remote method, so complete/cancelled snapshots
+#    the `pushraker` remote method (`push_notification` in 0.1), so complete/cancelled snapshots
 #    are taken before the printer parks.
 #  * Snapmaker's exception manager: coded faults and warnings, including
 #    those that never reach print_stats (Klipper shutdowns, idle faults).
@@ -97,7 +97,9 @@ if TYPE_CHECKING:
 # The printer's own fault event (see printers.py); listened for from the
 # start, it simply never fires on a printer without one
 EXCEPTION_EVENTS = printers.EXCEPTION_EVENTS
-REMOTE_METHOD = "push_notification"
+REMOTE_METHOD = "pushraker"
+# The 0.1 name, still answered (a Klipper macro file from 0.1 calls it)
+OLD_REMOTE_METHOD = "push_notification"
 MILESTONES = (25, 50, 75)
 ROW_IDS = (
     "started", "layer_started", "first_layer", "progress_25", "progress_50", "progress_75",
@@ -660,7 +662,9 @@ class PushNotifications:
             "~/printer_data")
         config_dir = os.path.dirname(app_args.get("config_file") or "") \
             or os.path.join(data_path, "config")
-        self._low_path = os.path.join(data_path, ".push_notifications.json")
+        self._low_path = os.path.join(data_path, ".pushraker.json")
+        # 0.1 kept it under this name; moved on first read
+        self._old_low_path = os.path.join(data_path, ".push_notifications.json")
         # Where the settings come from: pushraker.conf (the page edits it,
         # the component re-reads it), or, when the [pushraker]
         # section itself carries notification options, those (the old
@@ -699,6 +703,7 @@ class PushNotifications:
         self.server.register_event_handler(
             "server:klippy_ready", self._on_klippy_ready)
         self.server.register_remote_method(REMOTE_METHOD, self._on_remote)
+        self.server.register_remote_method(OLD_REMOTE_METHOD, self._on_remote)
         self.server.register_event_handler(
             "server:gcode_response", self._on_gcode_response)
         if self.store is not None:
@@ -1385,7 +1390,7 @@ class PushNotifications:
         if not data.startswith(b"\xff\xd8") or len(data) > SNAPSHOT_MAX:
             logging.warning("[pushraker] snapshot is not a JPEG")
             return None
-        tmpdir = tempfile.mkdtemp(prefix="push_notifications_")
+        tmpdir = tempfile.mkdtemp(prefix="pushraker_")
         path = os.path.join(tmpdir, "snapshot.jpg")
         try:
             with open(path, "wb") as f:
@@ -1525,7 +1530,7 @@ class PushNotifications:
         try:
             name = self._image_name(title, filename or self._job_filename,
                                     os.path.splitext(path)[1] or ".jpg")
-            tmpdir = tempfile.mkdtemp(prefix="push_notifications_")
+            tmpdir = tempfile.mkdtemp(prefix="pushraker_")
             dest = os.path.join(tmpdir, name)
             shutil.copyfile(path, dest)
             return dest
@@ -1581,7 +1586,7 @@ class PushNotifications:
         """Emails about one print go in one thread: the same subject
         (printer and file name; the notification's title moves into the
         email) and References to the same thread id. Others keep their
-        title as subject. Sent as an HTML card (push_notifications_email)
+        title as subject. Sent as an HTML card (email_html)
         with the image inline. The headers are set right before each attempt
         (the channel sends one at a time)."""
         thread = self._thread_for(rid)
@@ -3353,6 +3358,12 @@ class PushNotifications:
 
     def _low_load(self) -> Dict[str, float]:
         if self._low_sent is None:
+            if (not os.path.exists(self._low_path)
+                    and os.path.exists(self._old_low_path)):
+                try:
+                    os.replace(self._old_low_path, self._low_path)
+                except OSError:
+                    pass
             try:
                 with open(self._low_path) as f:
                     data = json.load(f)
@@ -4188,7 +4199,7 @@ class PushNotifications:
     def _render_rows(self, rows: List[Dict[str, Any]]) -> Optional[str]:
         if images is None:
             return None
-        tmpdir = tempfile.mkdtemp(prefix="push_notifications_")
+        tmpdir = tempfile.mkdtemp(prefix="pushraker_")
         try:
             return images.render(rows, os.path.join(tmpdir, "spools.jpg"))
         except Exception as e:

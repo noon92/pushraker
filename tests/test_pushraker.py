@@ -230,7 +230,7 @@ class Config:
         return self.server
 
     def get_name(self):
-        return "push_notifications"
+        return "pushraker"
 
     def get(self, key, default=None):
         return self.values.get(key, default)
@@ -305,9 +305,10 @@ def make(values, services):
     email)]}."""
     server = Server()
     os.makedirs(os.path.join(WORK, "data"), exist_ok=True)
-    state = os.path.join(WORK, "data", ".push_notifications.json")
-    if os.path.exists(state):
-        os.remove(state)
+    for state in (".pushraker.json", ".push_notifications.json"):
+        state = os.path.join(WORK, "data", state)
+        if os.path.exists(state):
+            os.remove(state)
     c = pn.PushNotifications(Config(server, dict(
         dict(name="U1", settle_time="0.1", settings="options"), **values)))
     c.rows = {rid: ("snapshot" if not rid.startswith(("filament", "spool", "slot"))
@@ -777,7 +778,7 @@ async def test_faults_over_a_job():
     STATE["print_stats"] = ps("printing", exception=ex)
     await events(JobEvent.RESUMED, {}, STATE["print_stats"])
     # ...nor a cancel from the print hook
-    await server.remote["push_notification"](event="cancelled")
+    await server.remote["pushraker"](event="cancelled")
     await asyncio.sleep(0.6)
     titles = [e["title"].split(" ", 1)[1] for e in log]
     check("a resumed fault doesn't colour a later pause or cancel",
@@ -808,7 +809,7 @@ async def test_faults_over_a_job():
     STATE["print_stats"] = ps("paused", exception=ex)
     c._faults_sent.clear()
     await events(JobEvent.PAUSED, {}, STATE["print_stats"])
-    await server.remote["push_notification"](event="cancelled")
+    await server.remote["pushraker"](event="cancelled")
     await asyncio.sleep(0.6)
     titles = [e["title"].split(" ", 1)[1] for e in log]
     check("cancel after a reported fault-pause: no second error",
@@ -2242,6 +2243,23 @@ async def test_config_lines():
     SECRETS.clear()
 
 
+async def test_old_names():
+    """0.1's names keep working: the remote method, the low-spool memory."""
+    data = os.path.join(WORK, "data")
+    server, c = make({}, {})
+    check("remote method answered under both names",
+          "pushraker" in server.remote and "push_notification" in server.remote,
+          sorted(server.remote))
+    old = os.path.join(data, ".push_notifications.json")
+    with open(old, "w") as f:
+        json.dump({"low_sent": {"7": 123.0}}, f)
+    c._low_sent = None
+    got = c._low_load()
+    check("0.1's low-spool memory is moved to .pushraker.json",
+          got == {"7": 123.0} and not os.path.exists(old)
+          and os.path.exists(os.path.join(data, ".pushraker.json")), got)
+
+
 async def run_component_tests():
     for t in (test_order_and_priority, test_expiry_and_independence,
               test_fault_dedup, test_same_preparation_everywhere,
@@ -2249,7 +2267,7 @@ async def run_component_tests():
               test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
               test_driver_hot,
               test_print_by_object,
-              test_no_secrets_in_logs, test_config_lines):
+              test_no_secrets_in_logs, test_config_lines, test_old_names):
         try:
             await t()
         except Exception as e:  # report and carry on

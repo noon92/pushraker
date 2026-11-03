@@ -2,7 +2,7 @@
 # SPDX-PackageHomePage: https://github.com/noon92/pushraker
 # SPDX-FileCopyrightText: Copyright (c) 2026 @noon92
 
-# HTML emails for push_notifications (and the Firmware Config test): a card
+# HTML emails for pushraker: a card
 # with a colour bar for the kind of notification, the title, the text, the
 # image inline, and the links as buttons. Inline styles and tables only, so
 # it looks the same in Gmail, Outlook and phone mail apps. Apprise adds a

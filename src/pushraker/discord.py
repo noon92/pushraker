@@ -2,7 +2,7 @@
 # SPDX-PackageHomePage: https://github.com/noon92/pushraker
 # SPDX-FileCopyrightText: Copyright (c) 2026 @noon92
 
-# Discord senders for push_notifications, registered as Apprise plugins so
+# Discord senders for pushraker, registered as Apprise plugins so
 # they get the same queues, retries and fallbacks as the other services:
 #
 #   discordhook://<webhook id>/<webhook token>?name=U1&ping=<mention>
@@ -30,7 +30,7 @@ from apprise.decorators import notify
 API = "https://discord.com/api/v10"
 USER_AGENT = ("DiscordBot (https://github.com/paxx12-snapmaker-u1/"
               "SnapmakerU1-Extended-Firmware, 1)")
-TIMEOUT = (10., 60.)      # connect, read: same as push_notifications
+TIMEOUT = (10., 60.)      # connect, read: same as the component
 # Embed bar colours, matching the spool pictures
 COLOURS = {"info": 0x5F6269, "success": 0x24743A, "warning": 0xC46800,
            "failure": 0xB02626}

@@ -2,7 +2,7 @@
 # SPDX-PackageHomePage: https://github.com/noon92/pushraker
 # SPDX-FileCopyrightText: Copyright (c) 2026 @noon92
 
-# Spool pictures for the Spoolman notifications of push_notifications.
+# Spool pictures for pushraker's Spoolman notifications.
 #
 # One row per toolhead: its spool, drawn in the filament's colour (or
 # colours: wedges and stripes for a multi-colour filament) and filled

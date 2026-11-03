@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <!-- SPDX-PackageHomePage: https://github.com/noon92/pushraker -->
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 @noon92 -->
-<!-- pushraker's settings page. Talks to Moonraker's push_notifications
+<!-- pushraker's settings page. Talks to Moonraker's pushraker
      component (GET/POST /server/pushraker/config, POST .../test),
      through the same origin (nginx proxies /server/ to Moonraker, as the
      Fluidd and Mainsail setups do) or Moonraker's own port. -->
@@ -1022,7 +1022,7 @@
                 };
                 return;
             }
-            el('pr-loading').textContent = `Could not load the settings from Moonraker: ${e.message}. Is the push_notifications component enabled?`;
+            el('pr-loading').textContent = `Could not load the settings from Moonraker: ${e.message}. Is the pushraker component enabled ([pushraker] in moonraker.conf)?`;
         }
     }
 
