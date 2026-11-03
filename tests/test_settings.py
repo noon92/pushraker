@@ -439,6 +439,27 @@ def run_installer_tests():
         except ValueError as e:
             check(f"a printer URL that urlparse chokes on ({url}) is refused", False,
                   f"ValueError {e}")
+    # 0.1.x installed [push_notifications] and push_notifications.py
+    import contextlib
+    import io as _io
+    root = tempfile.mkdtemp(prefix="pushraker_rename_")
+    comps = os.path.join(root, "moonraker", "moonraker", "components")
+    os.makedirs(comps)
+    cfgd = os.path.join(root, "printer_data", "config")
+    os.makedirs(cfgd)
+    open(os.path.join(comps, "push_notifications.py"), "w").write("# old\n")
+    with open(os.path.join(cfgd, "moonraker.conf"), "w") as f:
+        f.write("[server]\nhost: 0.0.0.0\n\n[push_notifications]\nname: Old\n")
+    open(os.path.join(cfgd, "printer.cfg"), "w").write("[printer]\n")
+    with contextlib.redirect_stdout(_io.StringIO()):
+        cli.main(["install", "--moonraker-dir", os.path.join(root, "moonraker"),
+                  "--data-dir", os.path.join(root, "printer_data"), "--name", "X"])
+    moon = open(os.path.join(cfgd, "moonraker.conf")).read()
+    check("install: [pushraker] and pushraker.py replace 0.1.x's names",
+          "[pushraker]" in moon and "[push_notifications]" not in moon
+          and os.path.exists(os.path.join(comps, "pushraker.py"))
+          and not os.path.exists(os.path.join(comps, "push_notifications.py")),
+          moon)
     return _failures
 
 

@@ -13,7 +13,7 @@ It grew out of the Push Notifications feature of the
 where it is installed with one setting; the user documentation lives there
 for now: [notifications](https://snapmakeru1-extended-firmware.pages.dev/notifications).
 
-**Status: 0.1.0, first release as a package.** The component has been in
+**Status: 0.2.** The component has been in
 use on the Snapmaker U1 for a while; the page, the settings file and the
 installer are new. Other printers: the generic parts work (Klipper's
 standard objects: print_stats, exclude_object, heater_generic, tmc
@@ -33,7 +33,7 @@ python -m pushraker install      # ~/moonraker and ~/printer_data by default
 ```
 
 `install` puts a one-file shim into Moonraker's `components/` folder, adds
-`[push_notifications]` to `moonraker.conf`, includes the Klipper macro
+`[pushraker]` to `moonraker.conf`, includes the Klipper macro
 file from `printer.cfg`, and creates `printer_data/config/pushraker.conf`.
 Restart Moonraker and Klipper. Then serve the settings page
 (`src/pushraker/web/index.html`, or `python -c "import pushraker, os;
@@ -69,9 +69,9 @@ it out again; `--purge` also removes the settings and secrets.
   (also editable by hand; the component re-reads it when it changes).
 - `printer_data/pushraker.secrets`: tokens and passwords, mode 0600,
   outside the config folder so Moonraker never serves it.
-- Moonraker endpoints: `GET/POST /server/push_notifications/config`,
-  `POST /server/push_notifications/test`,
-  `GET /server/push_notifications/status`.
+- Moonraker endpoints: `GET/POST /server/pushraker/config`,
+  `POST /server/pushraker/test`, `GET /server/pushraker/status` (also
+  under `/server/push_notifications/`, the 0.1 names).
 
 ## Layout
 

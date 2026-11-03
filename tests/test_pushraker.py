@@ -1244,16 +1244,16 @@ async def test_file_mode():
         name="U1", settle_time="0.1",
         error_index_url="https://wiki.example.com/errors")))
     check("file mode: endpoints registered, no rows yet",
-          set(server.endpoints) == {"/server/push_notifications/config",
-                                    "/server/push_notifications/test",
-                                    "/server/push_notifications/status"}
+          set(server.endpoints) == {f"/server/{b}/{p}" for b in (
+              "pushraker", "push_notifications")
+              for p in ("config", "test", "status")}
           and c.rows == {} and c.store is not None)
     STATE["print_stats"] = ps("standby")
     await server.handlers["server:klippy_ready"]()
     check("klippy ready without a settings file: defaults, nothing enabled",
           c.rows == {} and c.settings["name"] == "U1"
           and not c.settings["enabled"])
-    view = await server.endpoints["/server/push_notifications/config"](
+    view = await server.endpoints["/server/pushraker/config"](
         WebRequest("GET"))
     check("GET config: the view with the printer's webcams and defaults",
           view["name"] == "U1" and view["meta"]["cameras"] == {
@@ -1264,7 +1264,7 @@ async def test_file_mode():
     check("Spoolman's base URL from Moonraker's [spoolman] (its URL ends in /api)",
           c.env.spoolman_url == "http://spoolman:7912", c.env.spoolman_url)
     try:
-        await server.endpoints["/server/push_notifications/config"](
+        await server.endpoints["/server/pushraker/config"](
             WebRequest("POST", dict(enabled=True, provider="ntfy",
                                     server="ftp://x", topic="u1")))
         check("POST config: a bad setting is a 400 with the reason", False)
@@ -1273,7 +1273,7 @@ async def test_file_mode():
               e.status_code == 400 and "Server must look like" in str(e),
               str(e))
     GCODE.clear()
-    view = await server.endpoints["/server/push_notifications/config"](
+    view = await server.endpoints["/server/pushraker/config"](
         WebRequest("POST", dict(enabled=True, provider="ntfy",
                                 server="https://ntfy.example.com", topic="u1",
                                 camera="case", printer_url="http://u1",
@@ -1309,7 +1309,7 @@ async def test_file_mode():
         f.write("name: Edited2\n")
     os.utime(os.path.join(WORK, "data", "config", "pushraker.conf"), None)
     pn.SETTINGS_POLL = 20.
-    view = await server.endpoints["/server/push_notifications/config"](
+    view = await server.endpoints["/server/pushraker/config"](
         WebRequest("GET"))
     check("a hand edit the page reads is applied as well",
           view["name"] == "Edited2" and c.name == "Edited2", c.name)
@@ -1318,12 +1318,12 @@ async def test_file_mode():
     with open(os.path.join(WORK, "data", "config", "pushraker.conf"), "a") as f:
         f.write("server: ftp://nope\n")
     await asyncio.sleep(0.4)
-    view = await server.endpoints["/server/push_notifications/config"](
+    view = await server.endpoints["/server/pushraker/config"](
         WebRequest("GET"))
     check("a bad hand edit: last settings kept, the page says why",
           "started" in c.rows and "Server must look like"
           in view["meta"]["stored_error"], view["meta"]["stored_error"])
-    status = await server.endpoints["/server/push_notifications/status"](
+    status = await server.endpoints["/server/pushraker/status"](
         WebRequest("GET"))
     check("status endpoint", status["enabled"] and "started" in status["rows"]
           and status["cameras"] == ["case"], status)
@@ -1347,7 +1347,7 @@ async def test_file_mode():
     real = pn.apprise.Apprise
     pn.apprise.Apprise = FakeAp
     try:
-        res = await server.endpoints["/server/push_notifications/test"](
+        res = await server.endpoints["/server/pushraker/test"](
             WebRequest("POST", dict(provider="ntfy",
                                     server="https://ntfy.example.com",
                                     topic="u1", camera="")))
@@ -1359,7 +1359,7 @@ async def test_file_mode():
     finally:
         pn.apprise.Apprise = real
     try:
-        await server.endpoints["/server/push_notifications/test"](
+        await server.endpoints["/server/pushraker/test"](
             WebRequest("POST", dict(provider="ntfy", server="", topic="")))
         check("test endpoint: incomplete settings are a 400", False)
     except Server.error as e:
@@ -1390,7 +1390,7 @@ async def test_generic_printer():
     check("...with the rows it can't produce off",
           "\ncalibration: off," in text and "\nwarning: off," in text
           and "\nerror: on," in text, text[-500:])
-    view = await server.endpoints["/server/push_notifications/config"](
+    view = await server.endpoints["/server/pushraker/config"](
         WebRequest("GET"))
     meta = {m["id"]: m for m in view["meta"]["rows"]}
     check("...and hidden on the page", meta["calibration"]["hidden"]
@@ -1398,10 +1398,42 @@ async def test_generic_printer():
     with open(conf, "w") as f:
         f.write(text.replace("\nwarning: off,", "\nwarning: on,"))
     os.utime(conf, None)
-    view = await server.endpoints["/server/push_notifications/config"](
+    view = await server.endpoints["/server/pushraker/config"](
         WebRequest("GET"))
     meta = {m["id"]: m for m in view["meta"]["rows"]}
     check("turned on in pushraker.conf: shown", not meta["warning"]["hidden"])
+    for t in list(c._tasks):
+        t.cancel()
+
+    # A harness moving an older setup over: settings imported at first
+    # start, the older setup's generated files renamed out of the way
+    reset_world()
+    data = os.path.join(WORK, "data")
+    for name in ("config/pushraker.conf", "pushraker.secrets"):
+        try:
+            os.remove(os.path.join(data, name))
+        except OSError:
+            pass
+    ext = os.path.join(data, "ext2.cfg")
+    with open(ext, "w") as f:
+        f.write("[notifications]\nenabled: true\nprovider: ntfy\n"
+                "server: https://ntfy.example.com\ntopic: u1x\nname: Martha\n")
+    sec = os.path.join(data, "old.secrets")
+    open(sec, "w").write("[notifications]\nsecret = tk_x\n")
+    old = os.path.join(data, "old-notifications.cfg")
+    open(old, "w").write("[push_notifications]\n")
+    server = Server()
+    c = pn.PushNotifications(Config(server, dict(
+        name="U1", settle_time="0.1", import_settings=f"{ext} notifications",
+        import_secrets=f"{sec} notifications", retire_files=old)))
+    check("an older setup's generated file is renamed at start",
+          not os.path.exists(old) and os.path.exists(old + ".old"))
+    STATE["print_stats"] = ps("standby")
+    await server.handlers["server:klippy_ready"]()
+    check("older settings moved over at first start",
+          c.settings["name"] == "Martha" and c.settings["topic"] == "u1x"
+          and c.settings["secret"] == "tk_x" and "started" in c.rows,
+          (c.settings["name"], sorted(c.rows)[:3]))
     for t in list(c._tasks):
         t.cancel()
 

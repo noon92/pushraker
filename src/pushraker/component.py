@@ -667,6 +667,15 @@ class PushNotifications:
         self.settings: Dict[str, Any] = {}
         self.env = cfgmod.Env()
         self.error_index_url: str = config.get("error_index_url", "")
+        # A harness moving users over from an older setup: settings to read
+        # when there is no pushraker.conf yet ("<file> <section>", INI; the
+        # secrets likewise), and files that setup generated, renamed to
+        # <file>.old at start so they don't load next to pushraker
+        self.import_settings = config.get("import_settings", "").split()
+        self.import_secrets = config.get("import_secrets", "").split()
+        self.retire_files = [p.strip() for p in
+                             config.get("retire_files", "").split(",")
+                             if p.strip()]
         self.hook_values: Dict[str, int] = {}
         self._hooks_warned = False
         legacy = config.get("settings", "file") == "options" or any(
@@ -691,19 +700,21 @@ class PushNotifications:
         self.server.register_event_handler(
             "server:gcode_response", self._on_gcode_response)
         if self.store is not None:
-            for path, methods, handler in (
-                    ("/server/push_notifications/config", ["GET", "POST"],
-                     self._ep_config),
-                    ("/server/push_notifications/test", ["POST"],
-                     self._ep_test),
-                    ("/server/push_notifications/status", ["GET"],
-                     self._ep_status)):
-                try:
-                    self.server.register_endpoint(path, methods, handler)
-                except Exception as e:
-                    logging.error("[push_notifications] endpoint %s: %s",
-                                  path, e)
+            # /server/pushraker/...; /server/push_notifications/... is what
+            # 0.1.x answered on, kept so nothing that used it breaks
+            for base in ("/server/pushraker", "/server/push_notifications"):
+                for path, methods, handler in (
+                        ("config", ["GET", "POST"], self._ep_config),
+                        ("test", ["POST"], self._ep_test),
+                        ("status", ["GET"], self._ep_status)):
+                    try:
+                        self.server.register_endpoint(
+                            f"{base}/{path}", methods, handler)
+                    except Exception as e:
+                        logging.error("[push_notifications] endpoint "
+                                      "%s/%s: %s", base, path, e)
             self._spawn(self._watch_settings())
+            self._retire()
 
     async def close(self) -> None:
         """Moonraker shutting down or restarting (it reuses the process):
@@ -892,6 +903,7 @@ class PushNotifications:
             "exclude_object": {}, "machine_state_manager": {},
             "idle_timeout": {}, ACE_OBJECT: {}}
         self._cal_busy_at = 0.      # when Klipper was last seen busy
+        self._idle_was = ""         # idle_timeout.state last seen
         # Filament loaded / unloaded: last reported filament_exist per
         # toolhead (None until seeded at klippy_ready), the filament each
         # toolhead last had (to name what was unloaded), pending changes
@@ -919,6 +931,35 @@ class PushNotifications:
         self._cal_hold = 0                       # bumps on every action change
 
     # ---- settings: pushraker.conf, the page's endpoints ---------------------
+
+    def _first_settings(self) -> Dict[str, Any]:
+        assert self.store is not None
+        if len(self.import_settings) == 2:
+            sec = self.import_secrets if len(self.import_secrets) == 2 \
+                else ["", ""]
+            try:
+                s = cfgmod.import_ini(self.import_settings[0],
+                                      self.import_settings[1], sec[0], sec[1],
+                                      name=self.store.default_name)
+                if s["enabled"] or s["server"] or s["secret"]:
+                    logging.info("[push_notifications] settings moved over "
+                                 "from %s [%s]", *self.import_settings)
+                    return s
+            except Exception as e:
+                logging.warning("[push_notifications] older settings not "
+                                "read: %s", e)
+        return self.store.load()
+
+    def _retire(self) -> None:
+        for path in self.retire_files:
+            if os.path.isfile(path):
+                try:
+                    os.replace(path, path + ".old")
+                    logging.info("[push_notifications] %s renamed to %s.old "
+                                 "(an older setup's; pushraker replaces it)",
+                                 path, path)
+                except OSError as e:
+                    logging.warning("[push_notifications] %s: %s", path, e)
 
     async def _env(self) -> cfgmod.Env:
         """What the printer offers right now."""
@@ -2538,9 +2579,10 @@ class PushNotifications:
             self.store.unavailable = tuple(self.printer.rows_unavailable)
             try:
                 if not self.store.exists():
-                    # A settings file to edit by hand from the start, with
-                    # this printer's defaults
-                    self.store.save(self.store.load())
+                    # A settings file to edit by hand from the start: the
+                    # older setup's settings when the harness names them,
+                    # else this printer's defaults
+                    self.store.save(self._first_settings())
                     logging.info("[push_notifications] wrote %s",
                                  self.store.settings_path)
                 await self._reload("klippy ready")
@@ -2621,8 +2663,13 @@ class PushNotifications:
         ps = self._status["print_stats"]
         if "print_task_config" in data and self._job_active:
             self._check_spool_switch()
-        if (data.get("idle_timeout") or {}).get("state") == "Printing":
+        idle = (data.get("idle_timeout") or {}).get("state")
+        if idle == "Printing" or (idle == "Ready" and self._idle_was == "Printing"):
+            # Busy, or busy until just now: the intervention hold counts
+            # from the moment Klipper went idle
             self._cal_busy_at = time.monotonic()
+        if idle:
+            self._idle_was = idle
         if "machine_state_manager" in data:
             self._track_calibration()
         if "filament_exist" in (data.get("print_task_config") or {}):

@@ -6,7 +6,7 @@
 Moonraker + Klipper installation.
 
   install     put the component shim into Moonraker's components folder,
-              enable [push_notifications] in Moonraker's config, include
+              enable [pushraker] in Moonraker's config, include
               the Klipper macro file, and (once) move settings over from
               an INI section such as the Snapmaker U1 extended firmware's
               extended2.cfg [notifications]
@@ -29,7 +29,11 @@ from typing import List, Optional
 from . import __version__
 from . import settings as cfgmod
 
-SHIM_NAME = "push_notifications.py"
+SHIM_NAME = "pushraker.py"
+SECTION = "pushraker"
+# What 0.1.x installed under the old component name: replaced on install
+OLD_SHIM_NAME = "push_notifications.py"
+OLD_SECTION = "push_notifications"
 MOONRAKER_INCLUDE = "pushraker.cfg"
 KLIPPER_INCLUDE = "pushraker.cfg"
 SHIM = '''# pushraker: Moonraker loads components from this folder; this file hands
@@ -58,7 +62,7 @@ def parse(argv: List[str]) -> argparse.Namespace:
                    help="moonraker.conf (default: <data-dir>/config/moonraker.conf)")
     p.add_argument("--moonraker-include-dir", default=None,
                    help="a directory moonraker.conf already includes: the "
-                        "[push_notifications] section is written there as "
+                        "[pushraker] section is written there as "
                         "pushraker.cfg instead of into moonraker.conf")
     p.add_argument("--printer-cfg", default=None,
                    help="printer.cfg (default: <data-dir>/config/printer.cfg)")
@@ -208,6 +212,8 @@ def places(a: argparse.Namespace) -> dict:
     return dict(
         shim=os.path.join(a.moonraker_dir, "moonraker", "components",
                           SHIM_NAME),
+        old_shim=os.path.join(a.moonraker_dir, "moonraker", "components",
+                              OLD_SHIM_NAME),
         moonraker_conf=a.moonraker_conf
         or os.path.join(config_dir, "moonraker.conf"),
         moonraker_include=os.path.join(a.moonraker_include_dir,
@@ -221,7 +227,7 @@ def places(a: argparse.Namespace) -> dict:
 
 
 def section_text(a: argparse.Namespace) -> str:
-    lines = ["[push_notifications]",
+    lines = [f"[{SECTION}]",
              "# pushraker (python -m pushraker install); settings are in "
              "pushraker.conf",
              f"name: {a.name}"]
@@ -245,12 +251,19 @@ def cmd_install(a: argparse.Namespace) -> int:
     if write(p["shim"], SHIM.format(paths=list(a.site_packages)),
              owner=a.owner):
         changed.append(p["shim"])
+    # 0.1.x's names: the old shim and section would load the component a
+    # second time
+    if remove(p["old_shim"]):
+        changed.append(f"removed {p['old_shim']}")
     if p["moonraker_include"]:
         if write(p["moonraker_include"], section_text(a), owner=a.owner):
             changed.append(p["moonraker_include"])
-    elif ensure_section(p["moonraker_conf"], "push_notifications",
-                        section_text(a), a.owner):
-        changed.append(p["moonraker_conf"])
+    else:
+        if drop_section(p["moonraker_conf"], OLD_SECTION, a.owner):
+            changed.append(f"[{OLD_SECTION}] removed from {p['moonraker_conf']}")
+        if ensure_section(p["moonraker_conf"], SECTION, section_text(a),
+                          a.owner):
+            changed.append(p["moonraker_conf"])
     with open(macro_file()) as f:
         macros = f.read()
     if write(p["klipper_include"], macros, owner=a.owner):
@@ -281,7 +294,7 @@ def cmd_install(a: argparse.Namespace) -> int:
         # Otherwise the component writes it at its first start, with the
         # defaults for the printer it finds
     for path in changed:
-        print(f"Wrote {path}")
+        print(f"Updated: {path}")
     if not changed:
         print("Already installed; nothing changed.")
     print(f"pushraker {__version__} is set up. Restart Moonraker and "
@@ -292,12 +305,14 @@ def cmd_install(a: argparse.Namespace) -> int:
 def cmd_uninstall(a: argparse.Namespace) -> int:
     p = places(a)
     removed = []
-    for path in (p["shim"], p["moonraker_include"], p["klipper_include"]):
+    for path in (p["shim"], p["old_shim"], p["moonraker_include"],
+                 p["klipper_include"]):
         if path and remove(path):
             removed.append(path)
-    if not p["moonraker_include"] and drop_section(
-            p["moonraker_conf"], "push_notifications", a.owner):
-        removed.append(f"[push_notifications] in {p['moonraker_conf']}")
+    if not p["moonraker_include"]:
+        for section in (SECTION, OLD_SECTION):
+            if drop_section(p["moonraker_conf"], section, a.owner):
+                removed.append(f"[{section}] in {p['moonraker_conf']}")
     if not a.klipper_include_dir and drop_section(
             p["printer_cfg"], f"include {KLIPPER_INCLUDE}", a.owner):
         removed.append(f"[include {KLIPPER_INCLUDE}] in {p['printer_cfg']}")
