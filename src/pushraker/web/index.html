@@ -28,7 +28,9 @@
     .btn-secondary { background: #555; color: #fff; }
     .btn-secondary:hover:not(:disabled) { background: #666; }
     .pr-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; }
-    .pr-status { font-size: 13px; color: var(--muted); }
+    .pr-status { font-size: 13px; color: var(--muted); flex: 1; min-width: 0; }
+    .btn-save { background: #2e7d32; color: #fff; font-size: 15px; min-height: 42px; padding: 10px 28px; margin-left: auto; }
+    .btn-save:hover:not(:disabled) { background: #388e3c; }
     .pr-console { background: #111; color: #ddd; font-family: monospace; font-size: 12px; padding: 12px; border-radius: 6px; white-space: pre-wrap; max-height: 320px; overflow: auto; margin-bottom: 16px; display: none; }
     .pr-console .err { color: var(--error); font-weight: 600; }
     .pr-console .ok { color: var(--success); }
@@ -392,10 +394,10 @@
 <div class="pr-console" id="pr-console"></div>
 <div class="pr-error" id="pr-error" style="display:none"></div>
 <div class="pr-actions">
-    <button type="button" class="btn btn-primary" id="pr-save">Save &amp; Apply</button>
-    <button type="button" class="btn btn-secondary" id="pr-test">Send Test</button>
     <button type="button" class="btn btn-secondary" id="pr-close">Cancel</button>
+    <button type="button" class="btn btn-secondary" id="pr-test">Send Test</button>
     <span class="pr-status" id="pr-status"></span>
+    <button type="button" class="btn btn-save" id="pr-save">Save &amp; Apply</button>
 </div>
 
 <div class="pr-modal pr-discard" id="pr-discard" role="alertdialog" aria-labelledby="pr-discard-title">
