@@ -1370,6 +1370,68 @@ async def test_file_mode():
         t.cancel()
 
 
+async def test_status_report():
+    print("Status report every N minutes of print time")
+    reset_world()
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    server, c = make({"report_interval": "30"},
+                     {"status_report": [("ntfy", ntfy, False)],
+                      "paused": [("ntfy", ntfy, False)],
+                      "resumed": [("ntfy", ntfy, False)]})
+    await start_job(server)
+    META["gcode_start_byte"], META["gcode_end_byte"] = 0, 10000
+    c._gcode_bytes = (0, 10000)
+    check("the interval is read (minutes)", c.report_interval == 30.)
+
+    async def at(duration, position, layer=None):
+        STATE["print_stats"]["print_duration"] = duration
+        info = {"current_layer": layer, "total_layer": 285} if layer else {}
+        await c._on_status_update(
+            {"print_stats": {"print_duration": duration, "info": info},
+             "virtual_sdcard": {"file_position": position,
+                                "progress": position / 10000}}, 0)
+        await asyncio.sleep(0.3)
+    await at(10, 100)
+    await at(1500, 2000, 60)
+    titles = lambda: [e["title"].split(" ", 2)[2] for e in log]
+    check("nothing before the first interval of print time", not log, titles())
+    await at(1810, 4200, 120)
+    check("the first report one interval in, with progress, layer and time left",
+          titles() == ["status report"] and log[0]["body"].startswith(
+              "Benchy\n42% complete, layer 120 of 285.\n~") and "left" in
+          log[0]["body"], log and log[0]["body"])
+    check("...with the camera snapshot", log and log[0]["attach"])
+    # A pause: print_duration stops, so nothing comes while paused
+    log.clear()
+    STATE["print_stats"] = ps("paused", print_duration=1900)
+    c._status["print_stats"]["state"] = "paused"
+    await server.handlers["job_state:state_changed"](
+        JobEvent.PAUSED, {}, STATE["print_stats"])
+    await asyncio.sleep(0.4)
+    c._status["print_stats"]["state"] = "paused"
+    for _ in range(3):
+        await c._on_status_update({"print_stats": {"print_duration": 1900}}, 0)
+    await asyncio.sleep(0.3)
+    check("paused: the clock stops, no report",
+          titles() == ["paused"], titles())
+    STATE["print_stats"] = ps("printing", print_duration=1900)
+    c._status["print_stats"]["state"] = "printing"
+    await server.handlers["job_state:state_changed"](
+        JobEvent.RESUMED, {}, STATE["print_stats"])
+    await asyncio.sleep(0.4)
+    log.clear()
+    await at(3500, 6000, 200)
+    check("the second report an interval of print time after the first",
+          not log, titles())
+    await at(3620, 6500, 210)
+    check("...then it comes", titles() == ["status report"]
+          and "65% complete, layer 210 of 285." in log[0]["body"],
+          log and log[0]["body"])
+    await server.handlers["job_state:state_changed"](
+        JobEvent.COMPLETE, {}, ps("complete"))
+
+
 async def test_time_left():
     print("Time left: slicer estimate early, measured later")
     reset_world()
@@ -2116,7 +2178,7 @@ async def run_component_tests():
     for t in (test_order_and_priority, test_expiry_and_independence,
               test_fault_dedup, test_same_preparation_everywhere,
               test_email_threads, test_filament_measured, test_filament_alerts,
-              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
+              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
               test_driver_hot,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines):

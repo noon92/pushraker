@@ -64,6 +64,9 @@ ROWS = [
      False),
     ("progress_75", "75% complete", "⏳", False, "low", "snapshot", "print",
      False),
+    # Every report_interval minutes of print time (a pause stops the clock)
+    ("status_report", "Status report", "⏱️", False, "low", "snapshot",
+     "print", False),
     ("complete", "Print complete", "✅", True, "default", "snapshot", "print",
      False),
     ("cancelled", "Print cancelled", "🚫", True, "default", "snapshot",
@@ -163,7 +166,7 @@ STRING_FIELDS = ("provider", "server", "topic", "auth", "username",
                  "email_to")
 SECRET_FIELDS = ("secret", "email_password", "webhook_url")
 INT_FIELDS = ("layers_complete", "email_port", "filament_low_percent",
-              "filament_low_grams", "driver_temp")
+              "filament_low_grams", "driver_temp", "report_interval")
 BOOL_FIELDS = ("enabled", "push_enabled", "email_enabled", "webhook_enabled",
                "filament_unknown")
 # Settings the form fills in for common providers
@@ -249,6 +252,7 @@ def defaults(name: str = "Printer") -> Dict[str, Any]:
         "filament_low_grams": 50,
         "filament_unknown": True,
         "driver_temp": 105,     # °C, X or Y stepper driver (row: driver_hot)
+        "report_interval": 30,  # minutes of print time between status reports
         "email_enabled": False,
         "webhook_enabled": False,
         "webhook_url": "",
@@ -523,6 +527,13 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
             raise ConfigError("Driver temperature must be a number")
     if not 40 <= s["driver_temp"] <= 150:
         raise ConfigError("Driver temperature alert: 40 to 150 °C")
+    if "report_interval" in data:
+        try:
+            s["report_interval"] = int(data["report_interval"])
+        except (TypeError, ValueError):
+            raise ConfigError("Status report interval must be a number")
+    if not 5 <= s["report_interval"] <= 720:
+        raise ConfigError("Status report: every 5 to 720 minutes")
     rows = data.get("rows") or {}
     if not isinstance(rows, dict):
         raise ConfigError("Invalid request")
@@ -1053,6 +1064,8 @@ def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
         out["filament_change_events"] = s["filament_change_events"]
     if "driver_hot" in rows:
         out["driver_temp"] = str(s["driver_temp"])
+    if "status_report" in rows:
+        out["report_interval"] = str(s["report_interval"])
     if s["timezone"]:
         out["timezone"] = s["timezone"]
     if any(r in rows for r in SPOOLMAN_ROWS) and env.spoolman_url:

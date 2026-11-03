@@ -99,6 +99,7 @@ REMOTE_METHOD = "push_notification"
 MILESTONES = (25, 50, 75)
 ROW_IDS = (
     "started", "layer_started", "first_layer", "progress_25", "progress_50", "progress_75",
+    "status_report",
     "paused", "file_pause", "resumed", "object_complete", "complete", "cancelled",
     "calibration",
     "chamber_waiting", "chamber_reached", "chamber_fault",
@@ -113,6 +114,7 @@ TITLES = {
     "layer_started": "🎬 {name} first layer started",
     "first_layer": "🔍 {name} {ordinal} layer complete",
     "progress": "⏳ {name} {pct}%",
+    "status_report": "⏱️ {name} status report",
     "paused": "⏸️ {name} paused",
     "resumed": "▶️ {name} resumed",
     "recovered": "▶️ {name} resumed after power loss",
@@ -250,7 +252,7 @@ FILE_CAP = 30
 # join it while printing and this long after the print ended.
 THREAD_ROWS = ("started", "layer_started", "first_layer",
                "progress_25", "progress_50",
-               "progress_75", "paused", "file_pause", "resumed", "object_complete",
+               "progress_75", "status_report", "paused", "file_pause", "resumed", "object_complete",
                "complete", "cancelled",
                "chamber_waiting", "chamber_reached", "chamber_fault",
                "filament_change", "filament_short", "filament_low",
@@ -813,6 +815,8 @@ class PushNotifications:
         # The option is driver_temp: driver_hot is the row
         self.driver_hot: float = num(
             "driver_temp", DRIVER_HOT_DEFAULT, 40., 150.)
+        # Status report: every this many minutes of print time
+        self.report_interval: float = num("report_interval", 30., 1., 720.)
         self.web_ui_url: str = get("web_ui_url", "")
         self.camera_url: str = get("camera_url", "")
         if opts.get("error_index_url"):
@@ -866,6 +870,9 @@ class PushNotifications:
         self._first_layer_sent = False
         self._layer_started_sent = False
         self._milestones_sent: Set[int] = set()
+        # Print time (which stops while paused) the next status report is
+        # due at; None until the job's first status update sets it
+        self._report_next: Optional[float] = None
         self._gcode_bytes: Tuple[Any, Any] = (None, None)
         self._job_filename = ""
         # Print-by-object: the object being printed, the layer each began
@@ -2026,6 +2033,7 @@ class PushNotifications:
                          shown(filename))
         pct = self._progress() * 100.
         self._milestones_sent = {m for m in MILESTONES if m <= pct}
+        self._report_next = None
         if self._first_layer_sent or self._milestones_sent:
             self._skip("progress", f"job already at layer {layer}, {pct:.0f}%")
         self._job_active = True
@@ -2673,6 +2681,32 @@ class PushNotifications:
                         f"progress_{m}", self._title("progress", pct=m),
                         self._lines(shown(filename), self._time_left())))
                     break
+        if "status_report" in self.rows:
+            self._status_report(filename, pct)
+
+    def _status_report(self, filename: str, pct: float) -> None:
+        """Every report_interval minutes of print time (print_duration,
+        which Klipper stops while paused), the first one an interval after
+        the job started; none at the very end."""
+        pd = float(self._status["print_stats"].get("print_duration") or 0.)
+        if self._report_next is None:
+            self._report_next = pd + self.report_interval * 60.
+            return
+        if pd < self._report_next or pct >= 100.:
+            return
+        self._report_next = pd + self.report_interval * 60.
+        info = self._status["print_stats"].get("info") or {}
+        layer, total = info.get("current_layer"), info.get("total_layer")
+        parts = [f"{pct:.0f}% complete"]
+        if self._by_object and self._obj_cur:
+            parts.append(str(self._obj_cur))
+        if layer:
+            parts.append(f"layer {int(layer)}"
+                         + (f" of {int(total)}" if total else ""))
+        self._spawn(self._send(
+            "status_report", self._title("status_report"),
+            self._lines(shown(filename), ", ".join(parts) + ".",
+                        self._time_left())))
 
     def _is_by_object(self, filename: str) -> bool:
         """Whether the slicer's config block (at the end of the file) says

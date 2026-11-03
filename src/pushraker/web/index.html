@@ -501,6 +501,9 @@
             const driver = meta.id === 'driver_hot'
                 ? `<span class="nt-sub">X or Y driver over <input class="nt-input nt-layer nt-deg" id="nt-driver-hot" type="number" min="40" max="150" inputmode="numeric" value="${state.driver_temp}"> °C</span>`
                 : '';
+            const report = meta.id === 'status_report'
+                ? `<span class="nt-sub">Every <input class="nt-input nt-layer nt-deg" id="nt-report-interval" type="number" min="5" max="720" inputmode="numeric" value="${state.report_interval}"> minutes of print time (a pause stops the clock)</span>`
+                : '';
             const calib = meta.id === 'calibration'
                 ? '<span class="nt-sub">Notifies when complete, failed or requires user intervention</span>'
                 : meta.id === 'filament_change'
@@ -522,7 +525,7 @@
                 ? `<input type="checkbox" data-image="${meta.id}"${row.image ? ' checked' : ''}>`
                 : '<span class="nt-na">—</span>';
             return html + `<tr data-row="${meta.id}">
-                <td><span class="nt-icon">${meta.icon}</span>${layer ? `${layer} <span class="nt-name">layer complete</span>` : `<span class="nt-name">${esc(meta.label)}</span>`}${objects}${driver}${calib}</td>
+                <td><span class="nt-icon">${meta.icon}</span>${layer ? `${layer} <span class="nt-name">layer complete</span>` : `<span class="nt-name">${esc(meta.label)}</span>`}${objects}${driver}${report}${calib}</td>
                 <td class="nt-c nt-col-push"><input type="checkbox" data-enabled="${meta.id}"${row.enabled ? ' checked' : ''}></td>
                 <td class="nt-col-push">${meta.id === 'macro' ? '<span class="nt-sub" style="margin:0 0 2px">Default:</span>' : ''}<select class="nt-input nt-dim-push" data-priority="${meta.id}">${prio}</select></td>
                 <td class="nt-c nt-col-email"><input type="checkbox" data-email="${meta.id}"${row.email ? ' checked' : ''}></td>
@@ -918,6 +921,7 @@
             first_layer_objects: el('nt-layer-objects').value,
             filament_change_events: ['loaded', 'unloaded'].filter(e => el('nt-fc-' + e).checked).join(','),
             driver_temp: parseInt(el('nt-driver-hot').value, 10) || 105,
+            report_interval: parseInt(el('nt-report-interval').value, 10) || 30,
             complete_objects: el('nt-complete-objects').value,
             filament_low_percent: parseInt(el('nt-fl-percent').value, 10) || 0,
             filament_low_grams: parseInt(el('nt-fl-grams').value, 10) || 0,
