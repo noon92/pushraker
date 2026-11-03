@@ -27,3 +27,48 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Release notes from the commit messages since the previous release
+  # (subject as the bullet, the body under it), on the GitHub release
+  notes:
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Write the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          prev=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+          range="${prev:+$prev..}$TAG"
+          {
+            echo "## Changes${prev:+ since $prev}"
+            echo
+            git log --no-merges --reverse --format='%x1e%s%x1f%b' "$range" | python3 -c '
+          import sys
+          for entry in sys.stdin.read().split("\x1e"):
+              if not entry.strip():
+                  continue
+              subject, _, body = entry.partition("\x1f")
+              lines = [l for l in body.strip().splitlines()
+                       if not l.startswith(("Co-Authored-By:", "Claude-Session:", "Signed-off-by:"))]
+              print(f"- **{subject.strip()}**")
+              text = "\n".join(lines).strip()
+              if text:
+                  for l in text.splitlines():
+                      print(f"  {l}" if l.strip() else "")
+              print()
+          '
+            echo
+            echo "Install or upgrade: \`pip install --upgrade pushraker\`, then \`python -m pushraker install\`."
+          } > notes.md
+          cat notes.md
+          gh release view "$TAG" >/dev/null 2>&1 \
+            && gh release edit "$TAG" --notes-file notes.md \
+            || gh release create "$TAG" --title "$TAG" --notes-file notes.md
+
