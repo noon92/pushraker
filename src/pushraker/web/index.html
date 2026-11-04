@@ -55,10 +55,9 @@
     .pr-modal-box h3 { color: #fff; margin-bottom: 12px; font-size: 16px; }
     .pr-modal-box p { white-space: pre-wrap; margin-bottom: 20px; font-size: 14px; line-height: 1.5; }
     .pr-modal-box .pr-buttons { display: flex; gap: 10px; justify-content: flex-end; }
-    .pr-discard .pr-modal-box { border: 3px solid #d32f2f; }
-    .pr-discard h3 { color: #ff5252; font-size: 24px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }
-    .pr-discard p { color: #ff8a80; font-size: 18px; font-weight: 700; }
-    .pr-discard .btn { font-size: 15px; min-height: 42px; padding: 10px 18px; }
+    .pr-discard h3 { font-size: 18px; }
+    .pr-discard p { font-size: 15px; }
+    .pr-discard .btn { font-size: 14px; min-height: 38px; padding: 8px 16px; }
     .btn-keep { background: #2e7d32; color: #fff; }
     .btn-keep:hover { background: #388e3c; }
     .btn-discard { background: #c62828; color: #fff; }
@@ -419,8 +418,8 @@
 
 <div class="pr-modal pr-discard" id="pr-discard" role="alertdialog" aria-labelledby="pr-discard-title">
     <div class="pr-modal-box">
-        <h3 id="pr-discard-title">⚠ Warning: your changes will be lost</h3>
-        <p>You are leaving without saving. The changes you made on this page will NOT be kept.</p>
+        <h3 id="pr-discard-title">Leave without saving?</h3>
+        <p>The changes you made on this page will not be kept.</p>
         <div class="pr-buttons">
             <button type="button" class="btn btn-discard" id="pr-discard-yes" disabled>Discard changes</button>
             <button type="button" class="btn btn-keep" id="pr-discard-no">Keep editing</button>
