@@ -131,6 +131,11 @@
     .nt-fill-menu code { font-family: monospace; }
     .nt-fill-menu small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
     .nt-fill-menu .nt-fill-clear { color: var(--muted); }
+    /* Changed since the last save: a bar down the left edge of the field,
+       of the section switch, or of the notification row */
+    .nt-field.nt-chg { box-shadow: -9px 0 0 -6px var(--accent); }
+    label.nt-enable.nt-chg { box-shadow: inset 3px 0 0 var(--accent); }
+    tr.nt-chg td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
     .nt-field .nt-hint a { color: var(--accent); }
     .nt-disabled .nt-body { opacity: 0.55; }
     .nt-unit { align-items: center; }
@@ -978,8 +983,29 @@
         el('pr-loading').classList.add('pr-hidden');
         el('nt-root').classList.remove('pr-hidden');
         saved = JSON.stringify(collect(false));
-        // Just loaded or saved: nothing to discard
+        // Just loaded or saved: nothing to discard, nothing changed
         el('pr-close').disabled = true;
+        snapshotFields();
+    }
+
+    // Changed fields: each control's value as last loaded or saved; a
+    // control that differs marks its notification row, its field or its
+    // section switch
+    let fieldSnap = new Map();
+    const ctlValue = c => c.type === 'checkbox' ? c.checked : c.value;
+    function snapshotFields() {
+        fieldSnap = new Map();
+        el('nt-root').querySelectorAll('input, select, textarea').forEach(c => fieldSnap.set(c, ctlValue(c)));
+        markChanged();
+    }
+    function markChanged() {
+        el('nt-root').querySelectorAll('.nt-chg').forEach(e => e.classList.remove('nt-chg'));
+        for (const [c, v] of fieldSnap) {
+            if (!c.isConnected || ctlValue(c) === v) continue;
+            const box = (el('nt-rows').contains(c) && c.closest('tr')) ||
+                c.closest('label.nt-enable') || c.closest('.nt-field');
+            if (box) box.classList.add('nt-chg');
+        }
     }
 
     function collect(strict) {
@@ -1192,9 +1218,11 @@
     // Only with unsaved changes (the button is greyed out otherwise)
     let closing = false;
     const dirty = () => !!state && JSON.stringify(collect(false)) !== saved;
-    const markDirty = () => { el('pr-close').disabled = !dirty(); };
+    const markDirty = () => { el('pr-close').disabled = !dirty(); markChanged(); };
     document.addEventListener('input', markDirty);
     document.addEventListener('change', markDirty);
+    // Buttons that fill a field in (Fill in, Random, Use public server)
+    document.addEventListener('click', () => setTimeout(markDirty, 0));
     // With unsaved changes, a warning first: the discard button only
     // works after 5 seconds, so a misclick can't throw the changes away
     function confirmDiscard() {
