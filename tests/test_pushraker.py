@@ -1183,7 +1183,7 @@ async def test_file_pauses():
               (55, "", "filament change")],
           c._job_pauses)
     check("started says so", log and log[0]["body"].endswith(
-        "\n\nPrint job contains 3 pauses (layers 12, 40 and 55)."),
+        "\n\n⏸️ Print job contains 3 pauses (layers 12, 40 and 55)."),
         log and log[0]["body"])
     log.clear()
     # The file's pause: file position just past the pause line

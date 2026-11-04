@@ -2896,7 +2896,7 @@ class PushNotifications:
             return ""
         # A blank line before it unless the pauses line has one
         return ("" if self._job_pauses else "\n") + \
-            "Pre-print calibrations selected: " + \
+            "📐 Pre-print calibrations selected: " + \
             ", ".join(self._pp_names) + "."
 
     def _track_preprint(self) -> None:
@@ -2946,8 +2946,8 @@ class PushNotifications:
             where = (f" (layer {layers[0]})" if len(layers) == 1 else
                      " (layers " + ", ".join(str(n) for n in layers[:-1])
                      + f" and {layers[-1]})")
-        return ("\nPrint job contains a pause" if len(ps) == 1 else
-                f"\nPrint job contains {len(ps)} pauses") + where + "."
+        return ("\n⏸️ Print job contains a pause" if len(ps) == 1 else
+                f"\n⏸️ Print job contains {len(ps)} pauses") + where + "."
 
     def _file_pause(self, position: Any) -> Optional[int]:
         """Index of the file's pause the print job stopped at, if the file
