@@ -1013,12 +1013,7 @@ class PushNotifications:
             spoolman = re.sub(r"/api(/v\d+)?/?$", "", url.rstrip("/"))
         except Exception:
             spoolman = ""
-        try:
-            ts = await self.eventloop.run_in_thread(cfgmod.tailscale_info)
-        except Exception:
-            ts = ("", "")
         return cfgmod.Env(cameras=cams, spoolman_url=spoolman,
-                          local_ip=cfgmod.local_ip(), tailscale=ts,
                           error_index_url=self.error_index_url,
                           name=self.store.default_name if self.store
                           else self.name,

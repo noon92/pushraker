@@ -74,33 +74,18 @@ def run_settings_tests():
           gopts["error"].startswith("none, gotifys://g.example.com:8443/")
           and gopts["web_ui_url"] == "http://u1/"
           and gopts["camera_url"] == "http://u1/webcam/webrtc", gopts)
-    bad(dict(provider="telegram", secret="12345:" + "A" * 35,
-             telegram_chat="123", printer_url="http://u1"),
-        "rejects a dot-less printer host for Telegram (links are dropped)")
     st.validate(dict(provider="telegram", secret="12345:" + "A" * 35,
                      telegram_chat="123", printer_url="http://100.64.0.10"),
                 fresh(), ENV)
     st.validate(dict(provider="ntfy", server="https://ntfy.example.com",
                      topic="u1", printer_url="http://u1"), fresh(), ENV)
     check("a dot-less printer host is fine for the other services", True)
-    ts = st.Env(cameras=ENV.cameras, tailscale=("u1", "100.64.0.10"))
     tg = dict(enabled=True, provider="telegram", secret="12345:" + "A" * 35,
-              telegram_chat="123", printer_url="http://U1/", camera="case")
-    s = st.validate(tg, fresh(), ts)
-    check("Telegram: the Tailscale name is accepted and sent as the IP",
-          st.links(s, "test", ts)[:2] == [
-              ("Web UI", "http://100.64.0.10/"),
-              ("Live Camera", "http://100.64.0.10/webcam/webrtc")]
-          and st.render_options(s, ts)["web_ui_url"] == "http://100.64.0.10/"
-          and s["printer_url"] == "http://U1/", st.links(s, "test", ts))
-    bad(dict(provider="telegram", secret="12345:" + "A" * 35,
-             telegram_chat="123", printer_url="http://other"),
-        "Telegram: another dot-less name is still refused", ts)
-    s = st.validate(dict(enabled=True, provider="ntfy",
-                         server="https://ntfy.example.com", topic="u1",
-                         printer_url="http://u1"), fresh(), ts)
-    check("other services keep the Tailscale name",
-          st.links(s, "test", ts)[0] == ("Web UI", "http://u1/"))
+              telegram_chat="123", printer_url="http://u1/", camera="case")
+    s = st.validate(tg, fresh(), ENV)
+    check("Telegram: a dot-less printer URL is saved as entered (the page "
+          "warns)", st.links(s, "test", ENV)[0] == ("Web UI", "http://u1/"),
+          st.links(s, "test", ENV))
     bad(dict(provider="discord", secret="https://example.com/x"),
         "rejects a URL that isn't a Discord webhook")
 

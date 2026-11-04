@@ -19,8 +19,6 @@ import io
 import json
 import os
 import re
-import socket
-import subprocess
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -197,8 +195,6 @@ class Env:
                     the component fetches (absolute), "stream": the live
                     view's path or URL for the notification's link}
       spoolman_url  Spoolman's base URL when Moonraker has [spoolman], else ""
-      local_ip      the printer's LAN address, for the printer URL buttons
-      tailscale     (MagicDNS name, IPv4) when Tailscale runs, else ("", "")
       error_index_url  the printer maker's error-code index, linked from
                     fault notifications ("" for none)
       name          the printer's default name
@@ -209,8 +205,7 @@ class Env:
     """
 
     def __init__(self, cameras: Optional[Dict[str, Dict[str, str]]] = None,
-                 spoolman_url: str = "", local_ip: str = "",
-                 tailscale: Tuple[str, str] = ("", ""),
+                 spoolman_url: str = "",
                  error_index_url: str = "", name: str = "Printer",
                  rows_unavailable: Sequence[str] = (),
                  preprint: bool = False) -> None:
@@ -218,8 +213,6 @@ class Env:
         self.preprint = preprint
         self.rows_unavailable = set(rows_unavailable)
         self.spoolman_url = spoolman_url.rstrip("/")
-        self.local_ip = local_ip
-        self.tailscale = tailscale
         self.error_index_url = error_index_url
         self.name = name
 
@@ -627,15 +620,6 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
                 raise ValueError("host or port")
         except ValueError:
             raise ConfigError("Printer URL must look like http://100.64.0.1")
-    if s["printer_url"] and s["provider"] == "telegram" and s["push_enabled"]:
-        host = urlparse(printer_root(s, env)).hostname or ""
-        if "." not in host and ":" not in host:
-            # Telegram drops text links whose host has no dot; the Tailscale
-            # name was already replaced by the IP in printer_root
-            raise ConfigError("Telegram doesn't link to a name without a "
-                              "dot, such as http://u1. Use the Tailscale "
-                              "name (Use Tailscale) or an IP address.")
-
     validate_email(s)
     if s["webhook_enabled"]:
         try:
@@ -854,56 +838,9 @@ def camera_live_url(s: Dict[str, Any], env: Env) -> str:
 
 
 def printer_root(s: Dict[str, Any], env: Optional[Env]) -> str:
-    """The Printer URL without a trailing slash, as sent: for Telegram the
-    Tailscale name becomes the Tailscale IP, because Telegram drops text
-    links whose host has no dot (the text stays, the link is gone)."""
-    root = s["printer_url"].rstrip("/")
-    if env and s["provider"] == "telegram" and s["push_enabled"]:
-        host, ip = env.tailscale
-        try:
-            u = urlparse(root)
-            if host and ip and (u.hostname or "").lower() == host.lower():
-                port = f":{u.port}" if u.port else ""
-                root = u._replace(netloc=f"{ip}{port}").geturl()
-        except ValueError:
-            pass
-    return root
+    """The Printer URL without a trailing slash, as sent."""
+    return s["printer_url"].rstrip("/")
 
-
-def local_ip() -> str:
-    """The printer's LAN address (the source address of its default route)."""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.connect(("192.0.2.1", 9))  # no packet is sent
-            return sock.getsockname()[0]
-    except OSError:
-        return ""
-
-
-def tailscale_info(binary: str = "tailscale") -> Tuple[str, str]:
-    """(MagicDNS name, IPv4) of this machine, if Tailscale is installed
-    and running; ("", "") otherwise."""
-    for path in (binary, "/usr/local/bin/tailscale", "/usr/bin/tailscale"):
-        try:
-            out = subprocess.run([path, "status", "--json"],
-                                 capture_output=True, text=True, timeout=5)
-            st = json.loads(out.stdout)
-            break
-        except (OSError, ValueError, subprocess.SubprocessError):
-            continue
-    else:
-        return "", ""
-    if st.get("BackendState") != "Running":
-        return "", ""
-    me = st.get("Self") or {}
-    dns = (me.get("DNSName") or "").rstrip(".")
-    # The short MagicDNS name resolves on devices with MagicDNS enabled
-    host = dns.split(".")[0] if dns else (me.get("HostName") or "")
-    ip = next((a for a in me.get("TailscaleIPs") or [] if ":" not in a), "")
-    return host, ip
-
-
-# ---- Apprise URLs --------------------------------------------------------
 
 def links(s: Dict[str, Any], rid: str, env: Env) -> List[Tuple[str, str]]:
     """(title, url) buttons for a notification."""
@@ -1275,9 +1212,6 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
         "cameras": {name: {"snapshot": bool(c.get("snapshot")),
                            "stream": bool(c.get("stream"))}
                     for name, c in env.cameras.items()},
-        "local_ip": env.local_ip,
-        "tailscale_host": env.tailscale[0],
-        "tailscale_ip": env.tailscale[1],
         "busy": busy,
         "default_name": env.name,
         "stored_error": stored_error(s, env),

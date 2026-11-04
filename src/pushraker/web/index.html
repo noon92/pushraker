@@ -29,22 +29,26 @@
     .btn-primary:hover:not(:disabled) { background: #29b6f6; }
     .btn-secondary { background: #555; color: #fff; }
     .btn-secondary:hover:not(:disabled) { background: #666; }
-    .pr-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; }
+    .pr-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; position: sticky; bottom: 0; background: var(--bg); padding: 12px 10px; }
     .pr-status { font-size: 13px; color: var(--muted); }
     /* Save & Apply is a group of its own: a gap from Cancel and Send Test
        (on a phone: one line, those two at the left, it at the right) */
-    .btn-save { background: #2e7d32; color: #fff; font-size: 15px; min-height: 42px; padding: 10px 24px; margin-left: 40px; }
+    .btn-save { background: #2e7d32; color: #fff; margin-left: 40px; }
     @media (max-width: 600px) {
-        .btn-save { padding: 10px 16px; white-space: nowrap; }
-        .pr-save-wrap { margin-left: auto; }
+        .btn-save { white-space: nowrap; }
+        .pr-actions .pr-save-wrap { margin-left: auto; }
+        .pr-actions { gap: 8px; padding: 12px 8px; }
         .pr-actions .btn { white-space: nowrap; }
         .pr-status { flex-basis: 100%; }
     }
     .btn-save:hover:not(:disabled) { background: #388e3c; }
-    .pr-save-wrap { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; margin-left: 40px; }
+    /* The note hangs under Save & Apply without moving it: the buttons
+       stay on one line, tops level */
+    .pr-save-wrap { position: relative; display: inline-flex; margin-left: 40px; }
     .pr-save-wrap .btn-save { margin-left: 0; }
-    .pr-safe { display: none; font-size: 11px; color: var(--success); white-space: nowrap; }
+    .pr-safe { display: none; position: absolute; top: 100%; right: 0; margin-top: 3px; font-size: 11px; color: var(--success); white-space: nowrap; }
     .pr-safe.on { display: block; }
+    .pr-actions:has(.pr-safe.on) { padding-bottom: 28px; }
     /* Save and Send Test progress: a popup like Firmware Config's */
     .pr-run .pr-modal-box { max-width: 720px; border-radius: 12px; padding: 24px; max-height: 80vh; display: flex; flex-direction: column; }
     .pr-run h3 { font-size: 18px; margin-bottom: 16px; }
@@ -98,7 +102,7 @@
     .nt-name { color: #fff; }
     .nt-icon { display: inline-block; width: 24px; }
     .nt-table select.nt-input.nt-layer { width: auto; padding: 4px 6px; display: inline-block; font-family: inherit; }
-    .nt-sub { display: block; margin-top: 4px; padding-left: 26px; font-size: 12px; color: #8a8f98; white-space: nowrap; }
+    .nt-sub { display: block; margin-top: 4px; padding-left: 26px; font-size: 12px; color: #8a8f98; white-space: normal; }
     .nt-sub select.nt-input.nt-layer { font-size: 12px; padding: 2px 4px; max-width: 140px; }
     .nt-sub input.nt-input.nt-deg { width: 56px; font-size: 12px; padding: 2px 4px; display: inline-block; }
     .nt-foot { font-size: 12px; color: #8a8f98; margin: 0 0 16px; }
@@ -109,6 +113,17 @@
     .nt-inline { display: flex; gap: 6px; }
     .nt-inline .btn { min-height: 0; padding: 0 12px; white-space: nowrap; }
     .nt-inline .btn.nt-active { border-color: var(--accent); color: var(--accent); }
+    /* Printer URL: Fill in lists this page's address and the printer's
+       network addresses; the list is as wide as the field and button */
+    .nt-fill-wrap { position: relative; }
+    .nt-fill-menu { display: none; position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 5; background: #1e1e1e; border: 1px solid #555; border-radius: 8px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,0.5); }
+    .nt-fill-menu.open { display: block; }
+    .nt-fill-menu button { display: block; width: 100%; text-align: left; background: none; border: none; border-top: 1px solid #333; color: var(--text); font: inherit; font-size: 14px; padding: 12px; cursor: pointer; }
+    .nt-fill-menu button:first-child { border-top: none; }
+    .nt-fill-menu button:hover, .nt-fill-menu button:focus { background: #3a3a3a; outline: none; }
+    .nt-fill-menu code { font-family: monospace; }
+    .nt-fill-menu small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .nt-fill-menu .nt-fill-clear { color: var(--muted); }
     .nt-field .nt-hint a { color: var(--accent); }
     .nt-disabled .nt-body { opacity: 0.55; }
     .nt-unit { align-items: center; }
@@ -361,10 +376,12 @@
             </div>
             <div class="nt-field" style="grid-column: 1 / -1">
                 <label for="nt-printer-url">Printer URL for buttons (optional)</label>
-                <div class="nt-inline">
-                    <input class="nt-input" id="nt-printer-url" placeholder="http://u1" autocomplete="off" spellcheck="false">
-                    <button type="button" class="btn btn-secondary" id="nt-use-local">Use local IP</button>
-                    <button type="button" class="btn btn-secondary" id="nt-use-tailscale">Use Tailscale</button>
+                <div class="nt-fill-wrap">
+                    <div class="nt-inline">
+                        <input class="nt-input" id="nt-printer-url" placeholder="http://u1.home" autocomplete="off" spellcheck="false">
+                        <button type="button" class="btn btn-secondary" id="nt-fill" aria-haspopup="true" aria-expanded="false">Fill in ▾</button>
+                    </div>
+                    <div class="nt-fill-menu" id="nt-fill-menu" role="menu"></div>
                 </div>
                 <div class="nt-hint" id="nt-printer-url-hint"></div>
                 <div class="nt-public" id="nt-local-warn" style="display:none">
@@ -465,7 +482,6 @@
     const el = id => document.getElementById(id);
     const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
     let state = null;
-    let localWarned = false;    // the local IP popup shows once per opening
     let saved = '';             // the payload as last loaded or saved
 
     // ---- Moonraker ------------------------------------------------------
@@ -674,9 +690,9 @@
         'notifications, including camera images, model previews and file names.\n\n' +
         'It is fine for testing. For everyday use, setting up your own ntfy server is a good idea. ' +
         'On the public server, use a long random topic (the Random button creates one).';
-    const LOCAL_WARNING = 'With the local IP, the Web UI and Live Camera buttons only work when your phone ' +
-        'is on the same network as the printer.\n\nUse Tailscale (or another address your phone can reach) ' +
-        'for buttons that work from anywhere.';
+    const TG_WARNING = 'Telegram does not support clickable URLs without a <code>.</code> (period character), ' +
+        'so the Web UI and Live Camera buttons won\'t work in Telegram. Pick an IP address from <b>Fill in</b>, ' +
+        'or use a full name such as <code>u1.home</code>.';
     const isPublic = server => /^https?:\/\/(www\.)?ntfy\.sh\/?$/i.test(server.trim());
 
     function randomTopic() {
@@ -702,22 +718,73 @@
         try { return new URL(url).hostname.toLowerCase(); } catch (e) { return ''; }
     }
 
+    // The warnings follow the field once it's left (or filled in), not
+    // while typing
     function updatePrinterUrl() {
         const url = el('nt-printer-url').value.trim();
         el('nt-local-warn').style.display = url && isLanOnly(url) ? '' : 'none';
-        const same = (host) => !!host && url.replace(/\/+$/, '').toLowerCase() === ('http://' + host).toLowerCase();
-        el('nt-use-local').classList.toggle('nt-active', same(state.meta.local_ip));
-        el('nt-use-tailscale').classList.toggle('nt-active', same(state.meta.tailscale_host));
         const prov = el('nt-provider').value;
         el('nt-printer-url-hint').innerHTML = prov === 'pushover'
             ? 'Adds a <b>Web UI</b> link. Without it, fault notifications link to the Error Index.'
             : ['gotify', 'telegram', 'discord', 'discord_dm'].includes(prov)
                 ? 'Adds <b>Web UI</b> and <b>Live Camera</b> links. Leave empty for no links.'
                 : 'Adds <b>Web UI</b> and <b>Live Camera</b> buttons. Leave empty for no buttons.';
-        const tg = prov === 'telegram' && state.meta.tailscale_ip && hostOf(url) === (state.meta.tailscale_host || '').toLowerCase();
+        const host = hostOf(url);
+        const tg = prov === 'telegram' && el('nt-push-enabled').checked && !!host && !host.includes('.') && !host.includes(':');
         el('nt-tg-warn').style.display = tg ? '' : 'none';
-        if (tg) el('nt-tg-warn').textContent = `Telegram can't link to a Tailscale name, so the Tailscale IP (${state.meta.tailscale_ip}) is used for Telegram links.`;
+        if (tg) el('nt-tg-warn').innerHTML = TG_WARNING;
     }
+
+    // Fill in: this page's own address (how you reach the printer now),
+    // and the IPv4 address of each network interface Moonraker reports
+    // (/machine/system_info), by interface name; nothing is detected by
+    // name. Then Clear.
+    let fillChoices = null;
+    async function fillOptions() {
+        if (fillChoices) return fillChoices;
+        const out = [];
+        if (/^https?:$/.test(location.protocol) && location.hostname) {
+            out.push({ url: location.protocol + '//' + location.host, html:
+                `This browser's address: <code>${esc(location.host)}</code><small>Works wherever this address works for you</small>` });
+        }
+        try {
+            const info = await api('/machine/system_info');
+            const net = (info && info.system_info && info.system_info.network) || {};
+            for (const [name, iface] of Object.entries(net)) {
+                if (name === 'lo') continue;
+                for (const a of iface.ip_addresses || []) {
+                    if (a.family !== 'ipv4' || a.is_link_local || !a.address || a.address.startsWith('127.')) continue;
+                    out.push({ url: 'http://' + a.address, html: `${esc(name)}: <code>${esc(a.address)}</code>` });
+                }
+            }
+        } catch (e) { /* the browser's address is still offered */ }
+        fillChoices = out;
+        return out;
+    }
+    function closeFill() {
+        el('nt-fill-menu').classList.remove('open');
+        el('nt-fill').setAttribute('aria-expanded', 'false');
+    }
+    async function openFill() {
+        const menu = el('nt-fill-menu');
+        const choices = await fillOptions();
+        menu.innerHTML = choices.map((c, i) =>
+            `<button type="button" role="menuitem" data-i="${i}">${c.html}</button>`).join('') +
+            '<button type="button" role="menuitem" class="nt-fill-clear" data-i="clear">Clear (no buttons)</button>';
+        menu.querySelectorAll('button').forEach(b => b.onclick = () => {
+            el('nt-printer-url').value = b.dataset.i === 'clear' ? '' : choices[+b.dataset.i].url;
+            closeFill();
+            updatePrinterUrl();
+        });
+        menu.classList.add('open');
+        el('nt-fill').setAttribute('aria-expanded', 'true');
+        const first = menu.querySelector('button');
+        if (first) first.focus();
+    }
+    document.addEventListener('click', e => {
+        if (!e.target.closest('.nt-fill-wrap')) closeFill();
+    });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFill(); });
 
     function updatePublicWarning() {
         const pub = el('nt-provider').value === 'ntfy' && isPublic(el('nt-server').value);
@@ -792,7 +859,6 @@
     // ---- load / collect ----------------------------------------------------
     function render(data) {
         state = data;
-        localWarned = false;
         el('pr-version').textContent = data.meta.version ? `pushraker ${data.meta.version}` : '';
         el('nt-enabled').checked = data.enabled;
         el('nt-push-enabled').checked = data.push_enabled !== false;
@@ -867,28 +933,17 @@
         el('nt-auth').onchange = updateAuth;
         el('nt-provider').onchange = updateProvider;
         el('nt-use-public').onclick = usePublicServer;
-        el('nt-printer-url').oninput = updatePrinterUrl;
-        el('nt-use-local').disabled = !data.meta.local_ip;
-        el('nt-use-local').onclick = async () => {
-            if (!localWarned && !await confirmModal('Use the local IP?', LOCAL_WARNING, 'Use local IP')) return;
-            localWarned = true;
-            el('nt-printer-url').value = 'http://' + data.meta.local_ip;
-            updatePrinterUrl();
+        el('nt-printer-url').onchange = updatePrinterUrl;
+        el('nt-fill').onclick = e => {
+            e.stopPropagation();
+            if (el('nt-fill-menu').classList.contains('open')) closeFill(); else openFill();
         };
-        const ts = data.meta.tailscale_host;
-        // First setup only: suggest the best printer address. Once saved,
-        // an empty field means "no buttons" and is left alone.
+        // First setup only: the address this page was opened with. Once
+        // saved, an empty field means "no buttons" and is left alone.
         const firstSetup = !data.enabled && !data.server && !data.pushover_user && !data.has_secret;
-        if (firstSetup && !data.printer_url) {
-            if (ts) el('nt-printer-url').value = 'http://' + ts;
-            else if (data.meta.local_ip) el('nt-printer-url').value = 'http://' + data.meta.local_ip;
+        if (firstSetup && !data.printer_url && /^https?:$/.test(location.protocol) && location.hostname) {
+            el('nt-printer-url').value = location.protocol + '//' + location.host;
         }
-        el('nt-use-tailscale').disabled = !ts;
-        el('nt-use-tailscale').title = ts ? `http://${ts}` : 'Tailscale is not running on the printer';
-        el('nt-use-tailscale').onclick = () => {
-            el('nt-printer-url').value = 'http://' + ts;
-            updatePrinterUrl();
-        };
         updatePrinterUrl();
         el('nt-server').oninput = updatePublicWarning;
         el('nt-topic').oninput = () => {
