@@ -45,9 +45,16 @@
     .pr-save-wrap .btn-save { margin-left: 0; }
     .pr-safe { display: none; font-size: 11px; color: var(--success); white-space: nowrap; }
     .pr-safe.on { display: block; }
-    .pr-console { background: #111; color: #ddd; font-family: monospace; font-size: 12px; padding: 12px; border-radius: 6px; white-space: pre-wrap; max-height: 320px; overflow: auto; margin-bottom: 16px; display: none; scroll-margin-bottom: 90px; }
+    /* Save and Send Test progress: a popup like Firmware Config's */
+    .pr-run .pr-modal-box { max-width: 720px; border-radius: 12px; padding: 24px; max-height: 80vh; display: flex; flex-direction: column; }
+    .pr-run h3 { font-size: 18px; margin-bottom: 16px; }
+    .pr-run-msg { color: var(--text); margin-bottom: 16px; font-size: 14px; }
+    .pr-run-msg.ok { color: var(--success); }
+    .pr-run-msg.err { color: var(--error); }
+    .pr-console { background: #0d0d0d; color: #ddd; font-family: monospace; font-size: 12px; padding: 12px; border-radius: 6px; white-space: pre-wrap; word-wrap: break-word; height: 300px; max-height: 50vh; overflow-y: auto; margin-bottom: 16px; }
     .pr-console .err { color: var(--error); font-weight: 600; }
     .pr-console .ok { color: var(--success); }
+    .pr-run .btn { padding: 10px 20px; font-size: 14px; }
     .pr-error { color: var(--error); font-size: 13px; margin: 8px 0; font-weight: 500; scroll-margin-bottom: 90px; }
     .pr-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 10; padding: 20px; }
     .pr-modal.open { display: flex; }
@@ -404,7 +411,6 @@
     </div>
 </div>
 
-<div class="pr-console" id="pr-console"></div>
 <div class="pr-error" id="pr-error" style="display:none"></div>
 <div class="pr-actions">
     <button type="button" class="btn btn-secondary" id="pr-close">Cancel</button>
@@ -414,6 +420,17 @@
         <span class="pr-safe" id="pr-safe">✓ Safe to save while printing</span>
     </span>
     <span class="pr-status" id="pr-status"></span>
+</div>
+
+<div class="pr-modal pr-run" id="pr-run" role="dialog" aria-labelledby="pr-run-title">
+    <div class="pr-modal-box">
+        <h3 id="pr-run-title"></h3>
+        <div class="pr-run-msg" id="pr-run-msg"></div>
+        <div class="pr-console" id="pr-console"></div>
+        <div class="pr-buttons">
+            <button type="button" class="btn btn-secondary" id="pr-run-close" disabled>Close</button>
+        </div>
+    </div>
 </div>
 
 <div class="pr-modal pr-discard" id="pr-discard" role="alertdialog" aria-labelledby="pr-discard-title">
@@ -1005,17 +1022,33 @@
         if (msg) el('pr-error').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
-    function showConsole(lines, ok) {
+    // Save and Send Test run in a popup (as Firmware Config's actions
+    // do): a message, the log, and Close once it's finished
+    function runStart(title, message) {
+        el('pr-run-title').textContent = title;
+        runMessage(message, '');
+        el('pr-console').innerHTML = '';
+        el('pr-run-close').disabled = true;
+        el('pr-run').classList.add('open');
+    }
+    function runMessage(html, kind) {
+        el('pr-run-msg').innerHTML = html;
+        el('pr-run-msg').className = 'pr-run-msg' + (kind ? ' ' + kind : '');
+    }
+    function runEnd(html, ok) {
+        runMessage(html, ok ? 'ok' : 'err');
+        el('pr-run-close').disabled = false;
+        el('pr-run-close').focus();
+    }
+    el('pr-run-close').onclick = () => el('pr-run').classList.remove('open');
+
+    function showConsole(lines) {
         const box = el('pr-console');
         box.innerHTML = lines.map(l => {
             const c = l.startsWith('!! ') ? 'err' : (/^(Sent to|Test notification sent|Settings saved)/.test(l) ? 'ok' : '');
             return `<div class="${c}">${esc(l.replace(/^!! /, ''))}</div>`;
         }).join('');
-        box.style.display = lines.length ? 'block' : 'none';
         box.scrollTop = box.scrollHeight;
-        // The console is at the end of the page: bring it into view, or
-        // on a long page it is never seen
-        if (lines.length) box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
     function busy(on, what) {
@@ -1029,15 +1062,18 @@
         let payload;
         try { payload = collect(true); } catch (e) { showError(e.message); return; }
         busy(true, 'Saving…');
+        runStart('Save & Apply', 'Saving and applying settings…');
         try {
             const data = await api('/server/pushraker/config', 'POST', payload);
             const notes = (data.notes || []).slice();
             render(data);
-            showConsole(['Settings saved and applied. Nothing restarts: they are in effect now, during a print job too.'].concat(notes), true);
+            showConsole(['Settings saved and applied. Nothing restarts: they are in effect now, during a print job too.'].concat(notes));
             el('pr-status').textContent = 'Saved and applied';
+            runEnd('Done', true);
         } catch (e) {
-            showError(e.message);
+            showConsole(['!! ' + e.message]);
             el('pr-status').textContent = '';
+            runEnd('Not saved', false);
         } finally {
             busy(false);
         }
@@ -1048,15 +1084,18 @@
         let payload;
         try { payload = collect(true); } catch (e) { showError(e.message); return; }
         busy(true, 'Sending a test notification…');
-        showConsole(['Sending a test notification (this can take up to a minute per destination)…']);
+        runStart('Send Test', 'Sending a test notification (this can take up to a minute per destination)…');
+        const failed = 'Test failed.' + guideLink('troubleshooting', 'Troubleshooting');
         try {
             const data = await api('/server/pushraker/test', 'POST', payload);
-            showConsole(data.lines || [], data.ok);
+            showConsole(data.lines || []);
             if (data.ok) el('pr-status').textContent = 'Test sent';
-            else el('pr-status').innerHTML = 'Test failed.' + guideLink('troubleshooting', 'Troubleshooting');
+            else el('pr-status').innerHTML = failed;
+            runEnd(data.ok ? 'Test sent' : failed, data.ok);
         } catch (e) {
-            showConsole(['!! ' + e.message], false);
-            el('pr-status').innerHTML = 'Test failed.' + guideLink('troubleshooting', 'Troubleshooting');
+            showConsole(['!! ' + e.message]);
+            el('pr-status').innerHTML = failed;
+            runEnd(failed, false);
         } finally {
             busy(false);
         }
