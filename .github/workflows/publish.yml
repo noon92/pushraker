@@ -10,6 +10,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # The version is the tag's (v0.2.4 -> 0.2.4), so a release can't
+      # publish the version of the one before it
+      - name: Set the version from the tag
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version = .*/version = \"$v\"/" pyproject.toml
+          sed -i "s/^__version__ = .*/__version__ = \"$v\"/" src/pushraker/__init__.py
+          grep -n "^version" pyproject.toml
       - run: pip install build && python -m build
       - uses: actions/upload-artifact@v4
         with:
