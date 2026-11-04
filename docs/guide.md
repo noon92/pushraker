@@ -322,9 +322,7 @@ built with. Nothing is sent until you set it up:
 
 1. Open **Push Notifications** from the Links list at the top of
    [Firmware Config](https://snapmakeru1-extended-firmware.pages.dev/firmware_config) (`http://<printer>/notifications/`).
-   Settings from an earlier firmware's *Push Notifications* form are moved
-   over the first time. Check **Enable
-   notifications**. Push, email and the webhook each have
+   Check **Enable notifications**. Push, email and the webhook each have
    their own checkbox; at least one must be on. For push, choose the
    **Push service**:
    - **ntfy**: enter your **Server URL** (e.g. `http://192.168.1.10:8080`), or

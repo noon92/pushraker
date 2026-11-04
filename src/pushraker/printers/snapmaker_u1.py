@@ -5,7 +5,7 @@
 """The Snapmaker U1 (with the extended firmware): what its Klipper adds
 beyond the standard objects. The firmware-side harness (the install step,
 the nginx alias, the Firmware Config entry) lives in the firmware's own
-repository, overlay 42-feature-notifications."""
+repository, overlay 42-feature-pushraker."""
 
 from __future__ import annotations
 from typing import Sequence
