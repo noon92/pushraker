@@ -1169,7 +1169,7 @@ def summary(s: Dict[str, Any], env: Optional[Env] = None) -> str:
     if stored_error(s, env):
         return "Needs attention"
     if not s["enabled"]:
-        return "Disabled"
+        return "Notifications disabled"
     on = []
     if push_configured(s):
         on.append({"discord_dm": "Discord"}.get(

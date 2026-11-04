@@ -1261,7 +1261,7 @@ async def test_file_mode():
               "case": {"snapshot": True, "stream": True}}
           and view["meta"]["default_name"] == "U1"
           and view["meta"]["spoolman"] and view["meta"]["summary"]
-          == "Disabled", view["meta"])
+          == "Notifications disabled", view["meta"])
     check("Spoolman's base URL from Moonraker's [spoolman] (its URL ends in /api)",
           c.env.spoolman_url == "http://spoolman:7912", c.env.spoolman_url)
     try:

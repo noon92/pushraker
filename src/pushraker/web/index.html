@@ -36,7 +36,10 @@
     .btn-save { background: #2e7d32; color: #fff; margin-left: 40px; }
     @media (max-width: 600px) {
         .btn-save { white-space: nowrap; }
-        .pr-actions .pr-save-wrap { margin-left: auto; }
+        .pr-actions .pr-save-wrap { margin-right: auto; }
+        .pr-actions .btn { padding: 8px 9px; font-size: 12px; }
+        .pr-actions:has(.pr-safe.on) { padding-bottom: 12px; }
+        .pr-actions:has(.pr-safe.on) .pr-status { margin-top: 16px; }
         .pr-actions { gap: 8px; padding: 12px 8px; }
         .pr-actions .btn { white-space: nowrap; }
         .pr-status { flex-basis: 100%; }
@@ -44,11 +47,15 @@
     .btn-save:hover:not(:disabled) { background: #388e3c; }
     /* The note hangs under Save & Apply without moving it: the buttons
        stay on one line, tops level */
-    .pr-save-wrap { position: relative; display: inline-flex; margin-left: 40px; }
+    .pr-save-wrap { position: relative; display: inline-flex; margin-right: 30px; }
     .pr-save-wrap .btn-save { margin-left: 0; }
-    .pr-safe { display: none; position: absolute; top: 100%; right: 0; margin-top: 3px; font-size: 11px; color: var(--success); white-space: nowrap; }
+    .pr-safe { display: none; position: absolute; top: 100%; left: 0; margin-top: 3px; font-size: 11px; color: var(--success); white-space: nowrap; }
     .pr-safe.on { display: block; }
     .pr-actions:has(.pr-safe.on) { padding-bottom: 28px; }
+    @media (max-width: 380px) {
+        .pr-actions { gap: 6px; padding-left: 6px; padding-right: 6px; }
+        .pr-actions .btn { padding: 8px 6px; font-size: 11px; }
+    }
     /* Save and Send Test progress: a popup like Firmware Config's */
     .pr-run .pr-modal-box { max-width: 720px; border-radius: 12px; padding: 24px; max-height: 80vh; display: flex; flex-direction: column; }
     .pr-run h3 { font-size: 18px; margin-bottom: 16px; }
@@ -385,7 +392,7 @@
                 </div>
                 <div class="nt-hint" id="nt-printer-url-hint"></div>
                 <div class="nt-public" id="nt-local-warn" style="display:none">
-                    Local IP: the buttons only work when your phone is on the same network as the printer.
+                    Local IP detected - may not work when not on same network as printer.
                 </div>
                 <div class="nt-public" id="nt-tg-warn" style="display:none"></div>
             </div>
@@ -430,12 +437,12 @@
 
 <div class="pr-error" id="pr-error" style="display:none"></div>
 <div class="pr-actions">
-    <button type="button" class="btn btn-secondary" id="pr-close">Cancel</button>
-    <button type="button" class="btn btn-secondary" id="pr-test">Send Test</button>
     <span class="pr-save-wrap">
         <button type="button" class="btn btn-save" id="pr-save">Save &amp; Apply</button>
         <span class="pr-safe" id="pr-safe">✓ Safe to save while printing</span>
     </span>
+    <button type="button" class="btn btn-secondary" id="pr-test">Send Test</button>
+    <button type="button" class="btn btn-secondary" id="pr-close" disabled>Discard changes</button>
     <span class="pr-status" id="pr-status"></span>
 </div>
 
@@ -452,8 +459,8 @@
 
 <div class="pr-modal pr-discard" id="pr-discard" role="alertdialog" aria-labelledby="pr-discard-title">
     <div class="pr-modal-box">
-        <h3 id="pr-discard-title">Leave without saving?</h3>
-        <p>The changes you made on this page will not be kept.</p>
+        <h3 id="pr-discard-title">Discard changes?</h3>
+        <p>The settings go back to the last saved ones. The changes you made on this page will not be kept.</p>
         <div class="pr-buttons">
             <button type="button" class="btn btn-discard" id="pr-discard-yes" disabled>Discard changes</button>
             <button type="button" class="btn btn-keep" id="pr-discard-no">Keep editing</button>
@@ -602,7 +609,7 @@
             return html + `<tr data-row="${meta.id}">
                 <td><span class="nt-icon">${meta.icon}</span>${layer ? `${layer} <span class="nt-name">layer complete</span>` : `<span class="nt-name">${esc(meta.label)}</span>`}${objects}${driver}${report}${calib}</td>
                 <td class="nt-c nt-col-push"><input type="checkbox" data-enabled="${meta.id}"${row.enabled ? ' checked' : ''}></td>
-                <td class="nt-col-push">${meta.id === 'macro' ? '<span class="nt-sub" style="margin:0 0 2px">Default:</span>' : ''}<select class="nt-input nt-dim-push" data-priority="${meta.id}">${prio}</select></td>
+                <td class="nt-col-push"><select class="nt-input nt-dim-push" data-priority="${meta.id}">${prio}</select></td>
                 <td class="nt-c nt-col-email"><input type="checkbox" data-email="${meta.id}"${row.email ? ' checked' : ''}></td>
                 <td class="nt-c nt-img"><span class="nt-dim">${image}</span></td>
             </tr>`;
@@ -1179,11 +1186,13 @@
 
     el('pr-save').onclick = save;
     el('pr-test').onclick = test;
-    // Close without saving: embedded (an iframe in a host page's modal),
-    // tell the host, which closes it; on its own, go back to the page it
-    // was opened from, or close the tab, or go to the printer's start page
+    // Discard changes: back to the last saved settings, on this page.
+    // Only with unsaved changes (the button is greyed out otherwise)
     let closing = false;
     const dirty = () => !!state && JSON.stringify(collect(false)) !== saved;
+    const markDirty = () => { el('pr-close').disabled = !dirty(); };
+    document.addEventListener('input', markDirty);
+    document.addEventListener('change', markDirty);
     // With unsaved changes, a warning first: the discard button only
     // works after 5 seconds, so a misclick can't throw the changes away
     function confirmDiscard() {
@@ -1212,15 +1221,10 @@
         });
     }
     el('pr-close').onclick = async () => {
-        if (dirty() && !(await confirmDiscard())) return;
-        closing = true;
-        if (window.parent !== window) {
-            window.parent.postMessage({ type: 'pushraker:close' }, '*');
-            return;
-        }
-        if (history.length > 1) { history.back(); return; }
-        window.close();
-        setTimeout(() => { location.href = '/'; }, 300);
+        if (!dirty() || !(await confirmDiscard())) return;
+        render(state);
+        el('pr-close').disabled = true;
+        el('pr-status').textContent = 'Changes discarded';
     };
     window.addEventListener('beforeunload', e => {
         if (closing) return;
