@@ -978,6 +978,8 @@
         el('pr-loading').classList.add('pr-hidden');
         el('nt-root').classList.remove('pr-hidden');
         saved = JSON.stringify(collect(false));
+        // Just loaded or saved: nothing to discard
+        el('pr-close').disabled = true;
     }
 
     function collect(strict) {
