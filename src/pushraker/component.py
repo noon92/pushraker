@@ -115,7 +115,7 @@ ROW_IDS = (
 SPOOLMAN_ROWS = ("filament_short", "filament_low", "spool_switch")
 TITLES = {
     "started": "▶️ {name} started",
-    "preprint_done": "▶️ {name} pre-print calibrations complete",
+    "preprint_done": "📐 {name} pre-print calibrations complete",
     "layer_started": "🎬 {name} first layer started",
     "first_layer": "🔍 {name} {ordinal} layer complete",
     "progress": "⏳ {name} {pct}%",
