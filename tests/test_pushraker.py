@@ -698,6 +698,11 @@ async def test_filament_alerts():
           [e["title"] for e in log] == ["🧵 U1 spool running low"]
           and "90 of 1000 g left" in log[0]["body"],
           [(e["title"], e["body"]) for e in log])
+    it = dict(rem=66., need=11.)
+    check("running low says whether this print still fits",
+          c._low_need_line(it) == "This print needs ~11 g: enough is left "
+          "for it." and c._low_need_line(dict(rem=8., need=11.)) ==
+          "This print needs ~11 g: more than is left.")
     log.clear()
     spool(30, 80.0)
     await c._poll_spools("Benchy.gcode", track)

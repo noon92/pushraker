@@ -3519,13 +3519,22 @@ class PushNotifications:
         return await self._issue(ptc, ch, sid, spool, remaining,
                                  needs.get(ch) or 0., needs)
 
+    @staticmethod
+    def _enough(it: Dict[str, Any]) -> bool:
+        return it["rem"] >= it["need"]
+
+    def _low_need_line(self, it: Dict[str, Any]) -> str:
+        """Running low isn't running out: say whether this print fits."""
+        return (f"This print needs ~{it['need']:.0f} g: "
+                + ("enough is left for it." if self._enough(it)
+                   else "more than is left."))
+
     def _low_text(self, it: Dict[str, Any], cap: Optional[int]) -> str:
         left = (f"{it['rem']:.0f} of {it['full']:.0f} g left" if it["full"]
                 else f"{it['rem']:.0f} g left")
         lines = [f"{self._desc(it['ch'], it['name'], it['sid'], cap)}: "
                  f"{left}.",
-                 f"This print needs ~{it['need']:.0f} g more."
-                 if it["need"] else ""]
+                 self._low_need_line(it) if it["need"] else ""]
         if it["refill_on"] and it["backups"]:
             for b in it["backups"]:
                 lines.append(
@@ -3556,8 +3565,10 @@ class PushNotifications:
         that there is none), worded as running low."""
         row = self._issue_row(dict(it, status="orange"))
         row.update(word="Running low.",
-                   needs=(f"Needs ~{it['need']:.0f} g more." if it["need"]
-                          else ""))
+                   needs=((f"Needs ~{it['need']:.0f} g, "
+                           + ("enough left." if self._enough(it)
+                              else "more than left."))
+                          if it["need"] else ""))
         for r in row.get("refills") or []:
             r["status"] = "ink" if not it["need"] else r["status"]
         return row
