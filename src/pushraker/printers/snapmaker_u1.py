@@ -8,7 +8,7 @@ the nginx alias, the Firmware Config entry) lives in the firmware's own
 repository, overlay 42-feature-pushraker."""
 
 from __future__ import annotations
-from typing import Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from . import Printer
 
@@ -58,6 +58,20 @@ class SnapmakerU1(Printer):
     # The stock PRINT_END / CANCEL_PRINT raise Z by 5 mm below 265 mm; the
     # lift stays inside that
     lift_ceiling = 265
+    # Snapmaker's own objects the picker leaves out: state machines and
+    # readers nobody wants in a notification; the purifier and multiACE
+    # are offered with friendly names instead (catalogue below)
+    hidden_objects: Sequence[str] = (
+        "print_task_config", "machine_state_manager", "homing_xyz_override",
+        "inductance_coil", "fm175xx_reader", "purifier", "ace",
+        "filament_detect", "extruder_calibration", "flow_calibrator",
+        "defect_detection", "filament_parameters", "filament_protocol",
+        "filament_entangle_detect", "filament_feed", "auto_screws_tilt_adjust",
+        "error_mcu", "garbage_collection", "extruder_config_bak",
+    )
+    LABELS = {"heater_bed": "Heated bed", "temperature_sensor cavity": "Cavity",
+              "extruder": "Toolhead 1 nozzle", "extruder1": "Toolhead 2 nozzle",
+              "extruder2": "Toolhead 3 nozzle", "extruder3": "Toolhead 4 nozzle"}
 
     @classmethod
     def matches(cls, objects: Sequence[str]) -> bool:
@@ -67,3 +81,64 @@ class SnapmakerU1(Printer):
     def __init__(self, objects: Sequence[str]) -> None:
         super().__init__(objects)
         self.extruders = ["extruder", "extruder1", "extruder2", "extruder3"]
+
+    def label(self, obj: str) -> Optional[str]:
+        return self.LABELS.get(obj)
+
+    def job_values(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """job.toolheads: the toolheads the job uses, with their filaments
+        ("Toolhead 1 (PLA Basic White), Toolhead 3 (PLA Matte Black)");
+        with multiACE, each filament's slot (job.filamentN.slot) and
+        job.slots."""
+        fils: List[Dict[str, Any]] = ctx.get("filaments") or []
+        emap = ctx.get("map") or []
+        if ctx.get("sample"):
+            for f in fils:
+                f.setdefault("toolhead", 1)
+            return {"toolheads": ", ".join(
+                f"Toolhead {f['toolhead']} ({f.get('name') or 'n/a'})"
+                for f in fils)}
+        heads = []
+        sources = {}
+        for h, src in ((ctx.get("ace") or {}).get("head_source") or {}).items():
+            if isinstance(src, dict) and src.get("ace_index") is not None \
+                    and src.get("slot") is not None:
+                sources[str(h)] = (int(src["ace_index"]), int(src["slot"]))
+        for f in fils:
+            t = f.get("index")
+            if not f.get("used", True):
+                continue
+            ch = emap[t] if isinstance(t, int) and t < len(emap) \
+                and isinstance(emap[t], int) else t
+            if not isinstance(ch, int):
+                continue
+            f["toolhead"] = ch + 1
+            heads.append(f"Toolhead {ch + 1} ({f.get('name') or 'n/a'})")
+            if str(ch) in sources:
+                a, s = sources[str(ch)]
+                f["slot"] = f"ACE {a + 1} slot {s + 1}"
+        out: Dict[str, Any] = {"toolheads": ", ".join(heads) or None}
+        if sources:
+            out["slots"] = ", ".join(
+                f["slot"] for f in fils if f.get("slot")) or None
+        return out
+
+    def catalogue(self, ctx: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        if "purifier" in self.objects:
+            out["fans"] = [
+                {"label": "Exhaust fan", "object": "purifier", "values": [
+                    {"label": "Speed", "token": "{purifier.exhaust_fan.speed|pct}"}]},
+                {"label": "Inner fan", "object": "purifier", "values": [
+                    {"label": "Speed", "token": "{purifier.inner_fan.speed|pct}"},
+                    {"label": "RPM", "token": "{purifier.inner_fan_rpm|0}"}]},
+            ]
+        job = [{"label": "Toolheads used", "object": "job", "values": [
+            {"label": "Toolheads", "token": "{job.toolheads}"},
+            {"label": "Filament 1 toolhead", "token": "{job.filament1.toolhead}"}]}]
+        if "ace" in self.objects:
+            job.append({"label": "multiACE", "object": "job", "values": [
+                {"label": "Slots used", "token": "{job.slots}"},
+                {"label": "Filament 1 slot", "token": "{job.filament1.slot}"}]})
+        out["job"] = job
+        return out

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pushraker"
-version = "0.2.7"
+version = "0.3.0"
 description = "Push notifications for Klipper printers: a Moonraker component with pictures, sent through Apprise (ntfy, Pushover, Telegram, Discord, webhooks, email)"
 readme = "README.md"
 license = "GPL-3.0-or-later"

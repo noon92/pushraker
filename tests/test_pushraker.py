@@ -1252,7 +1252,7 @@ async def test_file_mode():
     check("file mode: endpoints registered, no rows yet",
           set(server.endpoints) == {f"/server/{b}/{p}" for b in (
               "pushraker", "push_notifications")
-              for p in ("config", "test", "status")}
+              for p in ("config", "test", "objects", "preview", "status")}
           and c.rows == {} and c.store is not None)
     STATE["print_stats"] = ps("standby")
     await server.handlers["server:klippy_ready"]()
@@ -1283,9 +1283,11 @@ async def test_file_mode():
         WebRequest("POST", dict(enabled=True, provider="ntfy",
                                 server="https://ntfy.example.com", topic="u1",
                                 camera="case", printer_url="http://u1",
-                                rows={"progress_25": {"enabled": True}})))
+                                progress_marks="25,75",
+                                rows={"progress": {"enabled": True}})))
     check("POST config: saved, applied live (rows, snapshot, links)",
           "started" in c.rows and "progress_25" in c.rows
+          and "progress_75" in c.rows and "progress_50" not in c.rows
           and c.snapshot_url == "http://127.0.0.1/webcam/snapshot.jpg"
           and c.name == "U1" and c.error_index_url.endswith("/errors")
           and view["meta"]["summary"] == "Enabled: ntfy", (sorted(c.rows),
@@ -1296,7 +1298,8 @@ async def test_file_mode():
     conf = open(os.path.join(WORK, "data", "config", "pushraker.conf")).read()
     check("...pushraker.conf written as INI",
           "[pushraker]" in conf and "server: https://ntfy.example.com" in conf
-          and "progress_25: on, low, image, no_email" in conf, conf[:200])
+          and "progress: on, low, image, no_email" in conf
+          and "progress_marks: 25,75" in conf, conf[:200])
     # Klipper restarts: its macro variables are back at their defaults
     GCODE.clear()
     await server.handlers["server:klippy_ready"]()
@@ -2339,6 +2342,126 @@ async def test_old_names():
           and os.path.exists(os.path.join(data, ".pushraker.json")), got)
 
 
+async def test_data():
+    """Notification data: {object.field|fmt} tokens from Klipper, job.*
+    from pushraker, per-filament slicer settings, n/a for what's missing,
+    the preview's sample job, the service's length limit."""
+    print("Notification data (templating)")
+    reset_world()
+    log = []
+    ntfy, pover = FakeService(log, "ntfy"), FakeService(log, "pushover")
+    STATE["heater_bed"] = {"temperature": 59.6, "target": 60.0, "power": 0.3}
+    STATE["temperature_sensor cavity"] = {"temperature": 31.0}
+    STATE["print_task_config"] = {"extruder_map_table": [2, 0, 1, 3],
+                                  "filament_type": ["PETG", "PLA", "PLA", "NONE"],
+                                  "filament_vendor": ["Elegoo", "Bambu", "", ""]}
+    META["filament_weight"] = [14.3, 0, 3.2]
+    with open(os.path.join(GCODES, "Benchy.gcode"), "wb") as f:
+        f.write(b"G28\n" * 50 + b"; CONFIG_BLOCK_START\n"
+                b"; filament_type = PLA;PETG;PLA\n"
+                b"; filament_settings_id = \"PLA Basic @U1\";\"PETG HF\";\"PLA Matte\"\n"
+                b"; filament_colour = #FFFFFF;#00FF00;#000000\n"
+                b"; nozzle_temperature = 220,250,215\n"
+                b"; curr_bed_type = High Temp Plate\n"
+                b"; hot_plate_temp = 60,80,55\n"
+                b"; cool_plate_temp = 35,35,35\n"
+                b"; nozzle_diameter = 0.4\n"
+                b"; CONFIG_BLOCK_END\n")
+    text = ("Bed {heater_bed.temperature|0}/{heater_bed.target|0}°C · "
+            "Cavity {temperature_sensor cavity.temperature|0}°C\n"
+            "Filaments: {job.filaments} · {job.filaments.materials} · "
+            "{job.filaments.count} · {job.tools} · {job.filament_g|0} g\n"
+            "F1: {job.filament1.name}, {job.filament1.nozzle.temperature|0}°C, "
+            "bed {job.filament1.bed.temperature|0}°C, Ø{job.filament1.nozzle.diameter}, "
+            "{job.filament1.tool}\n"
+            "F3 bed: {job.filament3.bed.temperature|0} · F2 colour: {job.filament2.color}\n"
+            "Missing: {nope.x} {heater_bed.nope} {job.filament7.name} · "
+            "Power {heater_bed.power|pct} · {broken")
+    server, c = make({"data_started": text, "data_default": "Layer {job.layer}",
+                      "data_progress": "Progress {job.progress|0}% · {job.time_left}"},
+                     {"started": [("ntfy", ntfy, False)],
+                      "paused": [("pushover", pover, False)],
+                      "progress_50": [("ntfy", ntfy, False)]})
+    await start_job(server)
+    await asyncio.sleep(0.5)
+    body = log[0]["body"] if log else ""
+    check("Klipper values, formatted",
+          "Bed 60/60°C · Cavity 31°C" in body, body)
+    check("job.filaments: the filaments the job uses, slicer order, names "
+          "from the slicer",
+          "Filaments: PLA Basic @U1, PLA Matte · PLA, PLA · 2 · T0, T2 · 18 g"
+          in body, body)
+    check("per-filament slicer settings (slicer numbering, plate-type bed)",
+          "F1: PLA Basic @U1, 220°C, bed 60°C, Ø0.4, T0" in body, body)
+    check("a filament the job doesn't use still has its slicer values",
+          "F3 bed: 55 · F2 colour: #00FF00" in body, body)
+    check("unavailable values read n/a; an unparsable token is left alone",
+          "Missing: n/a n/a n/a · Power 30% · {broken" in body, body)
+    check("a print_stats layer from the default data isn't on a custom row",
+          "Layer" not in body, body)
+    # Progress rows share the Progress row's data
+    log.clear()
+    META["gcode_start_byte"], META["gcode_end_byte"] = 0, 10000
+    c._gcode_bytes = (0, 10000)
+    await c._on_status_update({"print_stats": {"print_duration": 1800},
+                               "virtual_sdcard": {"file_position": 5200,
+                                                  "progress": .52}}, 0)
+    await asyncio.sleep(0.4)
+    body = log[0]["body"] if log else ""
+    check("progress_50 gets the Progress row's data, with job.progress "
+          "and job.time_left",
+          body.startswith("Benchy\n~") and "\nProgress 52% · " in body
+          and body.endswith("m"), body)
+    # The preview: the sample job when none is running, live values
+    log.clear()
+    await server.handlers["job_state:state_changed"](
+        JobEvent.COMPLETE, {}, ps("complete"))
+    c._job_active = False
+    c._status["print_stats"]["state"] = "complete"
+    out = await c._ep_preview(WebRequest("POST", {"row": "started", "text":
+        "{job.file} {job.filaments} {job.filament1.material} "
+        "{heater_bed.temperature|0} {job.toolheads}"}))
+    check("preview: the sample Benchy for job values, the printer's live "
+          "values for Klipper objects",
+          out["text"] == "3DBenchy_PLA_1h12m PLA Basic White PLA 60 "
+          "Toolhead 1 (PLA Basic White)" and not out["live_job"], out)
+    cat = await c._ep_objects(WebRequest("GET"))
+    cats = {x["id"]: x for x in cat["categories"]}
+    thermals = {i["label"]: i for i in cats["thermals"]["items"]}
+    check("catalogue: friendly labels from the harness, fields with formats",
+          "Heated bed" in thermals and "Cavity" in thermals
+          and thermals["Heated bed"]["values"][0]["token"]
+          == "{heater_bed.temperature|0}"
+          and "print_task_config" not in str(cat), sorted(thermals))
+    check("catalogue: pushraker's job values and the U1's toolheads",
+          any(v["token"] == "{job.filaments}" for i in cats["job"]["items"]
+              for v in i["values"])
+          and any(v["token"] == "{job.toolheads}" for i in cats["job"]["items"]
+                  for v in i["values"]), cats["job"])
+    # Pushover's 1024-character limit: the body is cut, the data last
+    c.data = {"paused": "x" * 2000}
+    STATE["print_stats"] = ps("paused")
+    await server.handlers["job_state:state_changed"](
+        JobEvent.PAUSED, {}, STATE["print_stats"])
+    await asyncio.sleep(0.5)
+    body = log[-1]["body"] if log else ""
+    check("a body over the service's limit is cut (pushover 1024)",
+          log and log[-1]["channel"] == "pushover" and len(body) <= 1024
+          and body.endswith("…"), len(body))
+    # Rendering never blocks a notification: a query that fails
+    log.clear()
+    c.data = {"paused": "{heater_bed.temperature}"}
+
+    async def boom(*_a, **_k):
+        raise RuntimeError("klippy gone")
+    c._query = boom
+    await server.handlers["job_state:state_changed"](
+        JobEvent.PAUSED, {}, STATE["print_stats"])
+    await asyncio.sleep(0.5)
+    check("a failed query: n/a, the notification still goes",
+          log and log[-1]["body"].endswith("\nn/a"), log and log[-1]["body"])
+
+
 async def run_component_tests():
     for t in (test_order_and_priority, test_expiry_and_independence,
               test_fault_dedup, test_same_preparation_everywhere,
@@ -2346,7 +2469,8 @@ async def run_component_tests():
               test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
               test_driver_hot,
               test_print_by_object,
-              test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint):
+              test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
+              test_data):
         try:
             await t()
         except Exception as e:  # report and carry on

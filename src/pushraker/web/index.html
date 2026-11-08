@@ -99,7 +99,8 @@
     .nt-table-wrap { overflow-x: auto; margin-bottom: 12px; }
     .nt-table { width: 100%; border-collapse: separate; border-spacing: 0 4px; min-width: 460px; }
     .nt-table th { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; text-align: left; padding: 0 10px 2px; }
-    .nt-table th.nt-c, .nt-table td.nt-c { text-align: center; width: 64px; white-space: nowrap; }
+    .nt-table th.nt-c, .nt-table td.nt-c, .nt-table th.nt-ch { text-align: center; width: 64px; white-space: nowrap; }
+    .nt-table th.nt-ch { width: auto; }
     .nt-table th.nt-img, .nt-table td.nt-img { width: 96px; }
     .nt-table td { background: var(--item); padding: 8px 10px; vertical-align: middle; }
     .nt-table td:first-child { border-radius: 6px 0 0 6px; }
@@ -145,6 +146,60 @@
     .nt-hint a { color: var(--accent); }
     .nt-table tr.nt-nopush .nt-dim-push { opacity: 0.4; }
     .nt-no-push .nt-col-push, .nt-no-email .nt-col-email { display: none; }
+    /* Notification data: the Default data bar, the DATA column's badges,
+       and the editor (a popup) */
+    .nt-def { display: flex; gap: 10px; align-items: center; background: var(--item); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    .nt-def b { color: #fff; font-size: 13px; white-space: nowrap; }
+    .nt-def code { font-family: monospace; color: var(--muted); font-size: 12px; flex: 1; min-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nt-def code.nt-empty { font-family: inherit; font-style: italic; }
+    .nt-def .btn { min-height: 0; padding: 6px 12px; white-space: nowrap; }
+    .nt-def.nt-chg { box-shadow: inset 3px 0 0 var(--accent); }
+    .nt-table th.nt-data, .nt-table td.nt-data { text-align: center; width: 84px; white-space: nowrap; }
+    .nt-badge { display: inline-block; font-size: 12px; font-weight: 600; border-radius: 12px; padding: 3px 10px; border: 1px solid #555; background: #2a2a2a; color: var(--muted); cursor: pointer; font-family: inherit; }
+    .nt-badge.custom { border-color: var(--accent); color: var(--accent); }
+    .nt-badge.none { color: #666; }
+    .nt-badge:hover { background: #333; }
+    .nt-data-foot { font-size: 12px; color: #8a8f98; margin: -6px 0 16px; }
+    /* On a phone the badge is the row's last line instead of a column */
+    .nt-data-inline { display: none; }
+    .pr-data .pr-modal-box { max-width: 900px; border-radius: 12px; padding: 20px 24px; max-height: 92vh; overflow-y: auto; }
+    .pr-data h3 { font-size: 18px; margin-bottom: 8px; }
+    .pr-modes { display: flex; gap: 6px; margin: 6px 0 14px; flex-wrap: wrap; }
+    .pr-mode { border: 1px solid #555; border-radius: 16px; padding: 6px 12px; font-size: 13px; color: var(--muted); background: none; cursor: pointer; font-family: inherit; }
+    .pr-mode.on { border-color: var(--accent); color: var(--accent); background: rgba(79,195,247,.08); }
+    .pr-data-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; align-items: start; }
+    .pr-data-grid .pr-lbl { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
+    .pr-data-grid .pr-lbl a { margin-left: 6px; }
+    .pr-tap { display: none; } @media (hover: none), (pointer: coarse) { .pr-tap { display: inline; } .pr-click { display: none; } }
+    .pr-data textarea.nt-input { height: 130px; resize: vertical; font-size: 13px; line-height: 1.4; }
+    .pr-pick { background: #1e1e1e; border: 1px solid #444; border-radius: 6px; font-size: 13px; max-height: 320px; overflow-y: auto; }
+    .pr-cat { width: 100%; text-align: left; background: none; border: none; border-top: 1px solid #333; color: #fff; font: inherit; font-size: 13px; padding: 8px 10px; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+    .pr-cat:first-child { border-top: none; }
+    .pr-cat small { color: var(--muted); font-size: 12px; font-weight: normal; }
+    .pr-cat .pr-arrow { color: var(--muted); font-size: 11px; }
+    .pr-cat a { font-size: 12px; margin-left: auto; }
+    .pr-item { padding: 6px 10px 6px 18px; color: #ddd; border-top: 1px solid #2a2a2a; display: none; line-height: 1.9; }
+    .pr-item .pr-v { display: inline-block; margin: 0 4px 0 0; border: 1px solid #555; border-radius: 12px; padding: 1px 8px; font-size: 12px; color: var(--accent); background: none; cursor: pointer; font-family: inherit; line-height: 1.6; }
+    .pr-item .pr-v:hover { background: rgba(79,195,247,.12); }
+    .pr-any { padding: 8px 10px; border-top: 1px solid #333; color: var(--muted); font-size: 12px; }
+    .pr-any code { color: var(--text); }
+    .pr-prev { background: #111; border-radius: 8px; padding: 12px; font-size: 13px; line-height: 1.45; margin-top: 4px; white-space: pre-wrap; word-wrap: break-word; min-height: 60px; }
+    .pr-prev .pr-pt { font-weight: 700; color: #fff; }
+    .pr-prev .pr-px { color: var(--accent); }
+    .pr-prev .pr-pn { color: var(--muted); font-style: italic; }
+    .pr-data .pr-buttons { margin-top: 14px; justify-content: flex-start; }
+    .pr-data .pr-buttons .btn { font-size: 14px; min-height: 38px; }
+    .pr-data .pr-buttons .btn-keep { margin-right: auto; }
+    .pr-data-off { opacity: 0.45; pointer-events: none; }
+    @media (max-width: 600px) {
+        .pr-data-grid { grid-template-columns: 1fr; }
+        .pr-data-grid .pr-pickwrap { order: -1; }
+        .pr-pick { max-height: 200px; }
+        .pr-data .pr-modal-box { padding: 16px; }
+        .nt-table th.nt-data, .nt-table td.nt-data { display: none; }
+        .nt-data-inline { display: block; margin-top: 6px; }
+        .nt-data-inline .nt-badge { padding: 2px 8px; font-size: 11px; vertical-align: 1px; }
+    }
     @media (max-width: 600px) {
         .nt-grid { grid-template-columns: 1fr; }
         .nt-table { min-width: 0; font-size: 13px; }
@@ -403,15 +458,17 @@
             </div>
         </div>
 
+        <div class="nt-def" id="nt-def"><b>Default data</b><code id="nt-def-text"></code><button type="button" class="btn btn-secondary" id="nt-def-edit">Edit default data</button></div>
         <div class="nt-table-wrap">
             <table class="nt-table" id="nt-table">
                 <thead>
-                    <tr><th>Notification</th><th class="nt-c nt-col-push">Push</th><th class="nt-col-push">Priority</th><th class="nt-c nt-col-email">Email</th><th class="nt-c nt-img">Image</th></tr>
+                    <tr><th>Notification</th><th class="nt-c nt-col-push">Push</th><th class="nt-col-push nt-ch">Priority</th><th class="nt-c nt-col-email">Email</th><th class="nt-c nt-img">Image</th><th class="nt-data">Data</th></tr>
                 </thead>
                 <tbody id="nt-rows"></tbody>
             </table>
         </div>
         <div class="nt-foot">* Needs <b>Exclude objects</b> enabled in the slicer.</div>
+        <div class="nt-data-foot">Data: <b>Default</b> adds the default data to the end of the notification, <b>Custom</b> adds this notification's own data instead, <b>None</b> adds nothing. <span class="pr-click">Click</span><span class="pr-tap">Tap</span> to change.<a class="nt-guide" href="https://github.com/noon92/pushraker/blob/main/docs/guide.md#adding-data" target="_blank">Guide</a></div>
         <div class="nt-grid" id="nt-filament">
             <div class="nt-field">
                 <label for="nt-fl-percent">🧵 Spool running low: alert when a spool is down to</label>
@@ -469,6 +526,29 @@
         <div class="pr-buttons">
             <button type="button" class="btn btn-discard" id="pr-discard-yes" disabled>Discard changes</button>
             <button type="button" class="btn btn-keep" id="pr-discard-no">Keep editing</button>
+        </div>
+    </div>
+</div>
+
+<div class="pr-modal pr-data" id="pr-data" role="dialog" aria-labelledby="pr-data-title">
+    <div class="pr-modal-box">
+        <h3 id="pr-data-title"></h3>
+        <div class="pr-modes" id="pr-modes"></div>
+        <div class="pr-data-grid" id="pr-data-grid">
+            <div>
+                <div class="pr-lbl">Added to end of notification. <span class="pr-click">Click</span><span class="pr-tap">Tap</span> a value to insert it at the cursor.</div>
+                <textarea class="nt-input" id="pr-data-text" spellcheck="false" autocomplete="off"></textarea>
+                <div class="pr-lbl" style="margin-top:10px">Preview</div>
+                <div class="pr-prev" id="pr-prev"></div>
+            </div>
+            <div class="pr-pickwrap">
+                <div class="pr-lbl">Values</div>
+                <div class="pr-pick" id="pr-pick"><div class="pr-any">Loading the printer's objects…</div></div>
+            </div>
+        </div>
+        <div class="pr-buttons">
+            <button type="button" class="btn btn-keep" id="pr-data-ok">Done</button>
+            <button type="button" class="btn btn-secondary" id="pr-data-cancel">Cancel</button>
         </div>
     </div>
 </div>
@@ -566,7 +646,7 @@
             if (meta.group !== group) {
                 group = meta.group;
                 if (GROUP_LABELS[group]) {
-                    html += `<tr class="nt-group"><td colspan="5">${GROUP_LABELS[group]}</td></tr>`;
+                    html += `<tr class="nt-group"><td colspan="6">${GROUP_LABELS[group]}</td></tr>`;
                 }
             }
             const prio = state.meta.priorities.map(p =>
@@ -585,6 +665,10 @@
                 : '';
             const driver = meta.id === 'driver_hot'
                 ? `<span class="nt-sub">X or Y driver over <input class="nt-input nt-layer nt-deg" id="nt-driver-hot" type="number" min="40" max="150" inputmode="numeric" value="${state.driver_temp}"> °C</span>`
+                : '';
+            const marks = meta.id === 'progress'
+                ? `<span class="nt-sub">${(state.meta.progress_marks || [25, 50, 75]).map(m =>
+                    `<label style="margin-right:12px; white-space:nowrap"><input type="checkbox" id="nt-pm-${m}"${progressMarks().includes(m) ? ' checked' : ''}> ${m}%</label>`).join('')}</span>`
                 : '';
             const report = meta.id === 'status_report'
                 ? `<span class="nt-sub">Every <input class="nt-input nt-layer nt-deg" id="nt-report-interval" type="number" min="5" max="720" inputmode="numeric" value="${state.report_interval}"> minutes of print time (a pause stops the clock)</span>`
@@ -612,18 +696,195 @@
                 ? `<input type="checkbox" data-image="${meta.id}"${row.image ? ' checked' : ''}>`
                 : '<span class="nt-na">—</span>';
             return html + `<tr data-row="${meta.id}">
-                <td><span class="nt-icon">${meta.icon}</span>${layer ? `${layer} <span class="nt-name">layer complete</span>` : `<span class="nt-name">${esc(meta.label)}</span>`}${objects}${driver}${report}${calib}</td>
+                <td><span class="nt-icon">${meta.icon}</span>${layer ? `${layer} <span class="nt-name">layer complete</span>` : `<span class="nt-name">${esc(meta.label)}</span>`}${objects}${marks}${driver}${report}${calib}<span class="nt-sub nt-data-inline">Data: <span class="nt-dim">${dataBadge(meta.id)}</span></span></td>
                 <td class="nt-c nt-col-push"><input type="checkbox" data-enabled="${meta.id}"${row.enabled ? ' checked' : ''}></td>
                 <td class="nt-col-push"><select class="nt-input nt-dim-push" data-priority="${meta.id}">${prio}</select></td>
                 <td class="nt-c nt-col-email"><input type="checkbox" data-email="${meta.id}"${row.email ? ' checked' : ''}></td>
                 <td class="nt-c nt-img"><span class="nt-dim">${image}</span></td>
+                <td class="nt-data"><span class="nt-dim">${dataBadge(meta.id)}</span></td>
             </tr>`;
         }).join('');
         el('nt-rows').querySelectorAll('[data-enabled], [data-email]').forEach(cb => {
             cb.onchange = updateRowDimming;
         });
+        el('nt-rows').querySelectorAll('[data-data]').forEach(b => {
+            b.onclick = () => openData(b.dataset.data);
+        });
         updateRowDimming();
     }
+
+    // ---- notification data ------------------------------------------------
+    // What each row adds to the end of its notifications: the default
+    // data, its own text, or nothing (templating.py). Kept apart from the
+    // form's controls; edited in a popup.
+    const DATA_LABELS = { default: 'Default', custom: 'Custom', none: 'None' };
+    let dataState = { default: '', rows: {} };
+    let savedData = '';
+    const progressMarks = () => String(state.progress_marks || '').split(',').map(Number).filter(Boolean);
+    function dataBadge(rid) {
+        const d = dataState.rows[rid] || { mode: 'default', text: '' };
+        return `<button type="button" class="nt-badge ${d.mode}" data-data="${rid}" title="${esc(d.mode === 'custom' ? d.text : d.mode === 'none' ? 'Adds nothing' : 'Adds the default data')}">${DATA_LABELS[d.mode]}</button>`;
+    }
+    function renderDataBar() {
+        const t = el('nt-def-text');
+        t.textContent = dataState.default || 'Nothing added yet. Edit to add printer or print job data to every notification.';
+        t.classList.toggle('nt-empty', !dataState.default);
+        t.title = dataState.default;
+    }
+    function refreshBadges() {
+        el('nt-rows').querySelectorAll('[data-data]').forEach(b => {
+            const rid = b.dataset.data;
+            b.outerHTML = dataBadge(rid);
+        });
+        el('nt-rows').querySelectorAll('[data-data]').forEach(b => {
+            b.onclick = () => openData(b.dataset.data);
+        });
+    }
+
+    let catalogue = null;
+    async function loadCatalogue() {
+        if (catalogue) return catalogue;
+        try {
+            const r = await api('/server/pushraker/objects');
+            catalogue = (r && r.categories) || [];
+        } catch (e) {
+            catalogue = [];
+        }
+        return catalogue;
+    }
+    function renderPicker(cats) {
+        const pick = el('pr-pick');
+        if (!cats.length) {
+            pick.innerHTML = '<div class="pr-any">The printer\'s objects could not be listed (is Klipper running?). Type any <code>{object.field}</code>.</div>';
+            return;
+        }
+        pick.innerHTML = cats.map((c, i) => {
+            const guide = c.id === 'job' ? `<a href="${GUIDE}#print-job-values" target="_blank">Guide</a>` : '';
+            const hint = c.id === 'job' ? '<small>pushraker\'s own values</small>' : c.id === 'other' ? '<small>raw names</small>' : '';
+            return `<button type="button" class="pr-cat${i === 0 ? ' open' : ''}" data-cat="${c.id}"><span class="pr-arrow">${i === 0 ? '▾' : '▸'}</span>${esc(c.label)}${hint}${guide}</button>` +
+                c.items.map(it => `<div class="pr-item of-cat" data-cat="${c.id}">${esc(it.label)} ${it.values.map(v =>
+                    `<button type="button" class="pr-v" data-token="${esc(v.token)}" title="${esc(v.token)}">${esc(v.label)}</button>`).join('')}</div>`).join('');
+        }).join('') + '<div class="pr-any">Or type any <code>{object.field}</code> (<a href="https://www.klipper3d.org/Status_Reference.html" target="_blank">Klipper status reference</a>), with <code>|0</code> <code>|1</code> for decimals, <code>|pct</code> for a percentage. Missing values read <code>n/a</code>. <a href="${GUIDE}#adding-data" target="_blank">Guide</a></div>';
+        pick.querySelectorAll('.pr-cat').forEach(b => {
+            b.onclick = () => {
+                const open = !b.classList.contains('open');
+                b.classList.toggle('open', open);
+                b.querySelector('.pr-arrow').textContent = open ? '▾' : '▸';
+            };
+        });
+        // Items follow their own category, not the previous sibling chain
+        const sync = () => pick.querySelectorAll('.pr-item').forEach(it => {
+            const cat = pick.querySelector(`.pr-cat[data-cat="${it.dataset.cat}"]`);
+            it.style.display = cat && cat.classList.contains('open') ? 'block' : 'none';
+        });
+        pick.querySelectorAll('.pr-cat').forEach(b => b.addEventListener('click', sync));
+        sync();
+        pick.querySelectorAll('.pr-v').forEach(b => {
+            b.onclick = () => insertToken(b.dataset.token);
+        });
+    }
+    function insertToken(token) {
+        const ta = el('pr-data-text');
+        if (ta.disabled) return;
+        const a = ta.selectionStart || 0, z = ta.selectionEnd || 0;
+        const before = ta.value.slice(0, a), after = ta.value.slice(z);
+        const pad = before && !/\s$/.test(before) ? ' ' : '';
+        ta.value = before + pad + token + after;
+        const at = (before + pad + token).length;
+        ta.focus();
+        ta.setSelectionRange(at, at);
+        previewSoon();
+    }
+
+    let editing = null;      // { rid: string|null (null: the default data), mode }
+    let previewTimer = null;
+    const ROW_TITLES = { started: 'started', paused: 'paused', resumed: 'resumed', layer_started: 'first layer started',
+        first_layer: '2nd layer complete', progress: '50%', status_report: 'status report', complete: 'complete',
+        cancelled: 'cancelled', error: 'error', warning: 'warning', shutdown: 'shutdown' };
+    function previewSoon() {
+        clearTimeout(previewTimer);
+        previewTimer = setTimeout(preview, 350);
+    }
+    async function preview() {
+        const box = el('pr-prev');
+        const rid = editing.rid || 'started';
+        const meta = state.meta.rows.find(r => r.id === rid) || { icon: '🔔', label: rid };
+        const name = el('nt-name').value.trim() || state.meta.default_name || 'Printer';
+        const title = `${meta.icon} ${name} ${ROW_TITLES[rid] || meta.label.toLowerCase()}`;
+        const text = editing.mode === 'none' ? '' : el('pr-data-text').value;
+        let rendered = '', note = '';
+        if (text.trim()) {
+            try {
+                const r = await api('/server/pushraker/preview', 'POST', { row: rid, text });
+                rendered = (r && r.text) || '';
+                note = r && r.live_job ? 'Preview with the current print job' : 'Preview with a sample print job (a Benchy in PLA) and the printer\'s current values';
+            } catch (e) {
+                rendered = '';
+                note = 'Preview unavailable: ' + e.message;
+            }
+        }
+        box.innerHTML = `<div class="pr-pt">${esc(title)}</div>3DBenchy_PLA_1h12m\n` +
+            (rid === 'started' ? 'Estimated print time 1h 12m, ETA 21:52\n' : rid === 'complete' ? 'Print time: 1h 09m\n' : '') +
+            (rendered ? `<span class="pr-px">${esc(rendered)}</span>` : '<span class="pr-pn">(nothing added)</span>') +
+            (note ? `\n<span class="pr-pn" style="font-size:11px">${esc(note)}</span>` : '');
+    }
+    function setMode(mode) {
+        editing.mode = mode;
+        el('pr-modes').querySelectorAll('.pr-mode').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+        const ta = el('pr-data-text');
+        if (editing.rid !== null) {
+            if (mode === 'custom') {
+                ta.disabled = false;
+                ta.value = editing.text;
+            } else {
+                editing.text = ta.disabled ? editing.text : ta.value;
+                ta.disabled = true;
+                ta.value = mode === 'default' ? dataState.default : '';
+            }
+        }
+        el('pr-data-grid').classList.toggle('pr-data-off', editing.rid !== null && mode !== 'custom');
+        previewSoon();
+    }
+    async function openData(rid) {
+        const meta = rid ? state.meta.rows.find(r => r.id === rid) : null;
+        const d = rid ? (dataState.rows[rid] || { mode: 'default', text: '' }) : null;
+        editing = { rid: rid || null, mode: rid ? d.mode : 'custom', text: rid ? d.text : dataState.default };
+        el('pr-data-title').textContent = rid ? `Data for: ${meta.icon} ${meta.label}` : 'Default data';
+        el('pr-modes').innerHTML = rid ? [['default', 'Default data'], ['custom', 'Custom for this notification'], ['none', 'None']].map(([m, l]) =>
+            `<button type="button" class="pr-mode" data-mode="${m}">${l}</button>`).join('') :
+            '<span class="pr-lbl">Added to the end of every notification whose Data is Default.</span>';
+        el('pr-modes').querySelectorAll('.pr-mode').forEach(b => { b.onclick = () => setMode(b.dataset.mode); });
+        const ta = el('pr-data-text');
+        ta.disabled = false;
+        ta.value = editing.text;
+        ta.maxLength = state.meta.data_max || 1500;
+        ta.oninput = previewSoon;
+        el('pr-data-grid').classList.remove('pr-data-off');
+        el('pr-prev').innerHTML = '';
+        if (rid) setMode(d.mode); else previewSoon();
+        el('pr-data').classList.add('open');
+        renderPicker(await loadCatalogue());
+    }
+    function closeData(keep) {
+        el('pr-data').classList.remove('open');
+        clearTimeout(previewTimer);
+        if (keep && editing) {
+            const text = el('pr-data-text').value.trim();
+            if (editing.rid === null) {
+                dataState.default = text;
+            } else {
+                dataState.rows[editing.rid] = { mode: editing.mode, text: editing.mode === 'custom' ? text : '' };
+            }
+            renderDataBar();
+            refreshBadges();
+            setTimeout(markDirty, 0);
+        }
+        editing = null;
+    }
+    el('pr-data-ok').onclick = () => closeData(true);
+    el('pr-data-cancel').onclick = () => closeData(false);
+    el('pr-data').onclick = e => { if (e.target === el('pr-data')) closeData(false); };
+    el('nt-def-edit').onclick = () => openData(null);
 
     // A row is dimmed where it sends nothing: priority without push, image
     // without push or email
@@ -796,7 +1057,11 @@
     document.addEventListener('click', e => {
         if (!e.target.closest('.nt-fill-wrap')) closeFill();
     });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFill(); });
+    document.addEventListener('keydown', e => {
+        if (e.key !== 'Escape') return;
+        closeFill();
+        if (el('pr-data').classList.contains('open')) closeData(false);
+    });
 
     function updatePublicWarning() {
         const pub = el('nt-provider').value === 'ntfy' && isPublic(el('nt-server').value);
@@ -924,6 +1189,11 @@
             el('nt-email-port').value = p.port;
             el('nt-email-security').value = p.security;
         }
+        dataState = { default: data.data_default || '', rows: {} };
+        Object.keys(data.rows || {}).forEach(rid => {
+            dataState.rows[rid] = { mode: data.rows[rid].data_mode || 'default', text: data.rows[rid].data || '' };
+        });
+        renderDataBar();
         renderCameras();
         renderRows();
         updateProvider();
@@ -983,6 +1253,7 @@
         el('pr-loading').classList.add('pr-hidden');
         el('nt-root').classList.remove('pr-hidden');
         saved = JSON.stringify(collect(false));
+        savedData = JSON.stringify(dataState);
         // Just loaded or saved: nothing to discard, nothing changed
         el('pr-close').disabled = true;
         snapshotFields();
@@ -1006,6 +1277,15 @@
                 c.closest('label.nt-enable') || c.closest('.nt-field');
             if (box) box.classList.add('nt-chg');
         }
+        // The data: the bar and the rows whose choice or text changed
+        let was = { default: '', rows: {} };
+        try { was = JSON.parse(savedData || '{}'); } catch (e) { /* first render */ }
+        el('nt-def').classList.toggle('nt-chg', (was.default || '') !== dataState.default);
+        el('nt-rows').querySelectorAll('tr[data-row]').forEach(tr => {
+            const a = JSON.stringify(dataState.rows[tr.dataset.row] || null);
+            const b = JSON.stringify((was.rows || {})[tr.dataset.row] || null);
+            if (a !== b) tr.classList.add('nt-chg');
+        });
     }
 
     function collect(strict) {
@@ -1058,11 +1338,13 @@
         state.meta.rows.forEach(meta => {
             if (!document.querySelector(`[data-enabled="${meta.id}"]`)) return;
             const imageEl = document.querySelector(`[data-image="${meta.id}"]`);
+            const d = dataState.rows[meta.id] || { mode: 'default', text: '' };
             rows[meta.id] = {
                 enabled: document.querySelector(`[data-enabled="${meta.id}"]`).checked,
                 priority: document.querySelector(`[data-priority="${meta.id}"]`).value,
                 image: imageEl ? imageEl.checked : false,
-                email: document.querySelector(`[data-email="${meta.id}"]`).checked
+                email: document.querySelector(`[data-email="${meta.id}"]`).checked,
+                data_mode: d.mode, data: d.mode === 'custom' ? d.text : ''
             };
         });
         const payload = {
@@ -1087,6 +1369,8 @@
             filament_low_grams: parseInt(el('nt-fl-grams').value, 10) || 0,
             filament_unknown: el('nt-fl-unknown').checked,
             preprint_done: el('nt-preprint') ? el('nt-preprint').checked : !!state.preprint_done,
+            progress_marks: (state.meta.progress_marks || [25, 50, 75]).filter(m => el('nt-pm-' + m) && el('nt-pm-' + m).checked).join(','),
+            data_default: dataState.default,
             email_enabled: emailEnabled,
             email_host: el('nt-email-host').value.trim(),
             email_port: parseInt(el('nt-email-port').value, 10) || 0,

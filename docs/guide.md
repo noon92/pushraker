@@ -25,7 +25,7 @@ server), and/or to a webhook for home automation.
 | ⏸️ Print paused / ▶️ Print resumed | Camera | Resumed includes time left and ETA. A pause the file itself asks for comes as "👋 … paused by the print job" instead, with its number, layer and any message the slicer put with it ("Pause 2 of 3 at layer 40, as planned in the print job. \"Insert magnet now\"") — the file wants something from you, like a normal pause doesn't, so it goes out at the highest priority whatever the row is set to. Told apart by where in the file the print job stopped |
 | 🎬 First layer started | Camera | Off by default. When the first layer begins, after the start routine (homing, bed mesh, flow calibration can take a while): time to watch it go down. With time left and ETA |
 | 🔍 1st / 2nd / 3rd layer complete | Camera | Choose after which layer (default: 2nd). With time left and ETA. When printing by object (Orca's *print sequence: by object*), once per object, counted from the object's own first layer, or once per print job |
-| ⏳ 25% / 50% / 75% complete | Camera | Same percentage as Fluidd and the Snapmaker app, with time left and ETA |
+| ⏳ Progress | Camera | Off by default. At 25, 50 and/or 75 % (checkboxes under the row), the same percentage as Fluidd and the Snapmaker app, with time left and ETA |
 | ⏱️ Status report | Camera | Off by default. Every N minutes of print time (5 to 720, default 30; a pause stops the clock), the first one an interval after the start: progress, layer ("42% complete, layer 120 of 285."), time left and ETA, with the picture |
 | ✅ Print complete | Camera | Includes print time, and the prints still in the job queue with their total time. When printing by object: once per object as each one finishes and the next begins ("📦 object complete", with which object, e.g. "Object 2 of 3: Assembly", and time left; the last object's is the Print complete notification itself), or once per print job |
 | 🚫 Print cancelled | Camera | |
@@ -273,6 +273,74 @@ itself is the heading of the email. Faults join the print's conversation
 while it prints and up to 2 minutes after it ends, and a power loss joins
 the print it interrupted; other emails (e.g. an idle warning) have the
 notification as their subject.
+
+## Adding data
+
+Every notification can end with data of your own: temperatures, fan
+speeds, what the print job uses. It is set on the page, in the **Data**
+column: **Default** adds the default data (the bar above the table),
+**Custom** adds that notification's own text instead, **None** adds
+nothing. The editor has a picker of the printer's values and a preview.
+
+The text is plain text with `{object.field}` tokens, filled in when the
+notification is sent:
+
+```
+Bed {heater_bed.temperature|0}/{heater_bed.target|0}°C · Cavity {temperature_sensor cavity.temperature|0}°C
+Filaments: {job.filaments} · {job.filament_g|0} g
+```
+
+- `object.field` is a Klipper object and one of its status fields, as
+  Moonraker reports them (Klipper's
+  [status reference](https://www.klipper3d.org/Status_Reference.html)):
+  `heater_bed.temperature`, `temperature_sensor cavity.temperature`,
+  `fan.speed`, `print_stats.info.current_layer`. Any object works, listed
+  in the picker or not.
+- After `|`, a format: `|0` `|1` `|2` decimals, `|pct` for a 0–1 fraction as
+  a percentage (fan speed, heater power), `|time` for seconds as `1h 12m`.
+- A value that isn't available reads `n/a`; a token that can't be read is
+  left as typed. Data never delays or blocks a notification: everything is
+  read in one query (5 seconds at most), and an error just reads `n/a`.
+- Long texts are cut to the service's limit (Pushover: 1024 characters).
+
+### Print job values
+
+`job.*` tokens are pushraker's own, not Klipper's: what pushraker knows
+about the print job.
+
+| Token | Value |
+|---|---|
+| `{job.file}` | the file name, without folder and extension |
+| `{job.progress\|0}` | file progress, 0–100 |
+| `{job.layer}` `{job.layers}` | current layer, total layers |
+| `{job.time_left}` `{job.eta}` | as in the notifications ("41m", "21:52") |
+| `{job.print_time}` `{job.estimated_time}` | print time so far; the slicer's estimate |
+| `{job.queue}` | print jobs waiting in Moonraker's job queue |
+| `{job.filament_g\|0}` | filament the job needs, grams (slicer) |
+| `{job.filaments}` | names of the filaments the job uses, slicer order |
+| `{job.filaments.materials}` `{job.filaments.count}` | their materials; how many |
+| `{job.tools}` | the tools the job uses, Klipper numbering: `T0, T2` |
+| `{job.filament2.name}` | one filament, numbered as in the slicer (1 is the slicer's first) |
+| `{job.filament2.material}` `.vendor` `.color` `.grams` `.tool` | its slicer settings, and the tool it is printed with |
+| `{job.filament2.nozzle.temperature\|0}` `.nozzle.diameter` `.bed.temperature\|0}` | its slicer settings for nozzle and heated bed |
+
+Per-filament values come from the slicer's settings at the end of the
+G-code file (OrcaSlicer, Snapmaker Orca, Bambu Studio, PrusaSlicer).
+They are what the file was sliced with, not necessarily what the printer
+does: in a multi-material print one filament's heated bed temperature
+wins, and the nozzle temperature in effect is whatever the G-code sets.
+A file without them (another slicer, hand-written G-code) reads `n/a`.
+
+Printers add values of their own. On the Snapmaker U1: `{job.toolheads}`
+(the toolheads used, with their filaments: "Toolhead 1 (PLA Basic White),
+Toolhead 3 (PLA Matte Black)"), `{job.filament2.toolhead}`, and with
+multiACE `{job.slots}` and `{job.filament2.slot}`; the picker also names
+the purifier's fans (`{purifier.exhaust_fan.speed|pct}`,
+`{purifier.inner_fan_rpm|0}`) and the cavity sensor.
+
+In `pushraker.conf` the default data is `data_default:` and a
+notification's own is `<notification>_data: custom, <text>` (or `none`),
+with `\n` for a line break.
 
 ## Notifications from macros and G-code
 
@@ -544,10 +612,16 @@ email_username: you@gmail.com
 email_from: you@gmail.com
 email_to: you@gmail.com
 webhook_enabled: false
+progress_marks: 25,50,75     # the Progress row's percentages
+# Data added to notifications: {object.field|format} tokens, \n for a line break
+data_default: Bed {heater_bed.temperature|0}/{heater_bed.target|0}°C
 # <notification>: on|off (push), <priority>, image|no_image, email|no_email
+# <notification>_data: default | none | custom, <text>
 started: on, default, image, no_email
+started_data: custom, Toolheads: {job.toolheads}\nFilament: {job.filament_g|0} g
 paused: on, default, image, no_email
 error: on, max, image, email
+complete_data: none
 ...
 ```
 

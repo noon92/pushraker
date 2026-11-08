@@ -17,7 +17,7 @@ file per printer), listed in PRINTERS below, not in the component.
 """
 
 from __future__ import annotations
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 class Printer:
@@ -67,6 +67,10 @@ class Printer:
     rows_unavailable: Sequence[str] = ("calibration", "filament_change",
                                        "spool_switch", "slot_empty",
                                        "power_loss", "warning")
+    # Notification data (templating.py): objects of this printer's own
+    # that the picker shouldn't list (typed tokens still work), beyond
+    # Klipper's internals
+    hidden_objects: Sequence[str] = ()
 
     def __init__(self, objects: Sequence[str]) -> None:
         self.objects = list(objects)
@@ -87,6 +91,27 @@ class Printer:
     def matches(cls, objects: Sequence[str]) -> bool:
         """Whether this is the printer behind an object list."""
         return False
+
+    # -- notification data (templating.py) --
+
+    def label(self, obj: str) -> Optional[str]:
+        """The picker's name for one of this printer's objects (None: the
+        generic one, from the object's type and name)."""
+        return None
+
+    def job_values(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """This printer's own job.* values, added to pushraker's. `ctx`
+        has the job's filaments (each a dict the method may add keys to,
+        e.g. the slot feeding it), the printer status, the toolhead map
+        (`map`: slicer filament -> toolhead), the tools used, and whether
+        this is the preview's sample job."""
+        return {}
+
+    def catalogue(self, ctx: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+        """Picker items of this printer's own, by category id (see
+        templating.CATEGORIES; a new id makes a new category): {category:
+        [{"label", "object", "values": [{"label", "token"}]}]}."""
+        return {}
 
 
 from .snapmaker_u1 import SnapmakerU1  # noqa: E402

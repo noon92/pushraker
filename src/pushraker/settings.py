@@ -56,12 +56,9 @@ ROWS = [
      "snapshot", "print", False),
     ("first_layer", "Layer complete", "🔍", False, "default",
      "snapshot", "print", False),
-    ("progress_25", "25% complete", "⏳", False, "low", "snapshot", "print",
-     False),
-    ("progress_50", "50% complete", "⏳", False, "low", "snapshot", "print",
-     False),
-    ("progress_75", "75% complete", "⏳", False, "low", "snapshot", "print",
-     False),
+    # At the progress marks chosen under it (progress_marks); sent to the
+    # component as its progress_25/50/75 rows
+    ("progress", "Progress", "⏳", False, "low", "snapshot", "print", False),
     # Every report_interval minutes of print time (a pause stops the clock)
     ("status_report", "Status report", "⏱️", False, "low", "snapshot",
      "print", False),
@@ -119,6 +116,13 @@ FILE_PAUSE_ROW = "file_pause"
 # Pre-print calibrations done (printers that have them): sent with the
 # Print started row's settings, when its checkbox is on
 PREPRINT_ROW = "preprint_done"
+# The Progress row's marks, and the component's row for each
+PROGRESS_MARKS = (25, 50, 75)
+PROGRESS_ROWS = {m: f"progress_{m}" for m in PROGRESS_MARKS}
+# Notification data (templating.py): a row adds the default data, its own
+# text, or nothing
+DATA_MODES = ("default", "custom", "none")
+DATA_MAX = 1500
 ERROR_ROWS = ("error", "warning", "shutdown")
 # Rows that read Spoolman (the first two need it; the switch works without)
 SPOOLMAN_ROWS = ("filament_short", "filament_low", "spool_switch")
@@ -164,7 +168,9 @@ STRING_FIELDS = ("provider", "server", "topic", "auth", "username",
                  "complete_objects",
                  "email_host",
                  "email_security", "email_username", "email_from",
-                 "email_to")
+                 "email_to", "progress_marks")
+# Free text with line breaks (stored with \n escaped)
+TEXT_FIELDS = ("data_default",)
 SECRET_FIELDS = ("secret", "email_password", "webhook_url")
 INT_FIELDS = ("layers_complete", "email_port", "filament_low_percent",
               "filament_low_grams", "driver_temp", "report_interval")
@@ -268,6 +274,11 @@ def _defaults(name: str) -> Dict[str, Any]:
         # Under Print started: also notify when the pre-print calibrations
         # chosen for the job are done
         "preprint_done": True,
+        # The Progress row: which of 25, 50, 75 % it reports
+        "progress_marks": "25,50,75",
+        # Data added to the end of every notification whose DATA is
+        # Default ({object.field} tokens, see templating.py); "" for none
+        "data_default": "",
         "driver_temp": 105,     # °C, X or Y stepper driver (row: driver_hot)
         "report_interval": 30,  # minutes of print time between status reports
         "email_enabled": False,
@@ -281,9 +292,20 @@ def _defaults(name: str) -> Dict[str, Any]:
         "email_from": "",
         "email_to": "",
         "rows": {r[0]: {"enabled": r[3], "priority": r[4],
-                        "image": r[5] is not None, "email": r[7]}
+                        "image": r[5] is not None, "email": r[7],
+                        "data_mode": "default", "data": ""}
                  for r in ROWS},
     }
+
+
+def escape_text(text: str) -> str:
+    """Line breaks on one INI line."""
+    return text.replace("\\", "\\\\").replace("\n", "\\n")
+
+
+def unescape_text(text: str) -> str:
+    return re.sub(r"\\(.)", lambda m: "\n" if m.group(1) == "n"
+                  else m.group(1), text)
 
 
 SECTION = "pushraker"
@@ -308,14 +330,23 @@ def section_lines(s: Dict[str, Any]) -> List[str]:
         lines.append(f"{key}: {s[key]}")
     for key in INT_FIELDS:
         lines.append(f"{key}: {s[key]}")
+    lines.append("# Data added to notifications: {object.field|format} tokens, "
+                 "\\n for a line break")
+    for key in TEXT_FIELDS:
+        lines.append(f"{key}: {escape_text(s[key])}")
     lines.append("# <notification>: on|off (push), <priority>, image|no_image, "
                  "email|no_email")
+    lines.append("# <notification>_data: default | none | custom, <text>")
     for rid in ROW_IDS:
         r = s["rows"][rid]
         lines.append(f"{rid}: {'on' if r['enabled'] else 'off'}, "
                      f"{r['priority']}, "
                      f"{'image' if r['image'] else 'no_image'}, "
                      f"{'email' if r['email'] else 'no_email'}")
+        mode = r.get("data_mode", "default")
+        if mode != "default" or r.get("data"):
+            lines.append(f"{rid}_data: {mode}" + (
+                f", {escape_text(r['data'])}" if mode == "custom" else ""))
     return [ln + "\n" for ln in lines]
 
 
@@ -335,21 +366,48 @@ def parse_section(sec: Any, s: Dict[str, Any]) -> Dict[str, Any]:
             s[key] = int(sec.get(key, str(s[key])))
         except ValueError:
             pass
+    for key in TEXT_FIELDS:
+        if key in sec:
+            s[key] = unescape_text(sec.get(key, "").strip())
     for rid in ROW_IDS:
         raw = sec.get(rid)
-        if not raw:
-            continue
-        parts = [p.strip().lower() for p in raw.split(",")]
-        row = s["rows"][rid]
-        row["enabled"] = parts[0] == "on"
-        if len(parts) > 1 and parts[1] in PRIORITIES:
-            row["priority"] = parts[1]
-        if len(parts) > 2:
-            row["image"] = parts[2] == "image"
-        if len(parts) > 3:
-            row["email"] = parts[3] == "email"
+        if raw:
+            _parse_row(s["rows"][rid], raw)
+        raw = sec.get(f"{rid}_data")
+        if raw:
+            mode, _, text = raw.partition(",")
+            mode = mode.strip().lower()
+            if mode in DATA_MODES:
+                s["rows"][rid]["data_mode"] = mode
+                s["rows"][rid]["data"] = unescape_text(text.strip()) \
+                    if mode == "custom" else ""
+    # Settings from before the Progress row: 25% / 50% / 75% complete were
+    # rows of their own; the first one on gives the row its settings
+    old = [(m, sec.get(PROGRESS_ROWS[m])) for m in PROGRESS_MARKS]
+    if any(raw for _, raw in old) and not sec.get("progress"):
+        rows = {m: _parse_row(dict(s["rows"]["progress"]), raw)
+                for m, raw in old if raw}
+        on = [m for m, r in rows.items() if r["enabled"] or r["email"]]
+        s["progress_marks"] = ",".join(str(m) for m in on) \
+            if on else s["progress_marks"]
+        first = rows[on[0]] if on else rows[min(rows)]
+        s["rows"]["progress"].update(
+            enabled=first["enabled"], priority=first["priority"],
+            image=first["image"], email=first["email"])
     s["camera"] = LEGACY_CAMERAS.get(s["camera"], s["camera"])
     return s
+
+
+def _parse_row(row: Dict[str, Any], raw: str) -> Dict[str, Any]:
+    parts = [p.strip().lower() for p in raw.split(",")]
+    row["enabled"] = parts[0] == "on"
+    if len(parts) > 1 and parts[1] in PRIORITIES:
+        row["priority"] = parts[1]
+    if len(parts) > 2:
+        row["image"] = parts[2] == "image"
+    if len(parts) > 3:
+        row["email"] = parts[3] == "email"
+    return row
 
 
 def read_ini(path: str) -> configparser.RawConfigParser:
@@ -518,6 +576,9 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     for key in STRING_FIELDS:
         if key in data:
             s[key] = str(data[key] or "").strip()
+    for key in TEXT_FIELDS:
+        if key in data:
+            s[key] = clean_text(data[key])
     for key in SECRET_FIELDS:
         if data.get(key):
             s[key] = str(data[key])
@@ -566,9 +627,20 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
             r["priority"] = row["priority"]
         r["image"] = bool(row.get("image", r["image"]))
         r["email"] = bool(row.get("email", r["email"]))
+        if row.get("data_mode") in DATA_MODES:
+            r["data_mode"] = row["data_mode"]
+        if "data" in row:
+            r["data"] = clean_text(row["data"])
+        if r.get("data_mode", "default") != "custom":
+            r["data"] = ""
     for rid in ROW_IDS:
         if ROW[rid][5] is None:
             s["rows"][rid]["image"] = False
+    marks = [m.strip() for m in s["progress_marks"].split(",") if m.strip()]
+    if any(m not in ("25", "50", "75") for m in marks):
+        raise ConfigError("Progress: 25, 50 and/or 75 %")
+    s["progress_marks"] = ",".join(
+        str(m) for m in PROGRESS_MARKS if str(m) in marks)
 
     for key in STRING_FIELDS + SECRET_FIELDS:
         if RX_CONTROL.search(s[key]):
@@ -710,6 +782,32 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
             raise ConfigError("Pushover device: up to 25 letters, digits, "
                               "- or _")
     return s
+
+
+def clean_text(value: Any) -> str:
+    """Notification data as typed: line breaks kept, other control
+    characters dropped, capped."""
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[^\S\n]*\n", "\n", text)
+    text = "".join(c for c in text if c == "\n" or not RX_CONTROL.match(c))
+    if len(text) > DATA_MAX:
+        raise ConfigError(f"Notification data: up to {DATA_MAX} characters")
+    return text.strip()
+
+
+def progress_marks(s: Dict[str, Any]) -> List[int]:
+    return [m for m in PROGRESS_MARKS if str(m) in s["progress_marks"].split(",")]
+
+
+def row_data(s: Dict[str, Any], rid: str) -> str:
+    """The data text a row adds: the default, its own, or none."""
+    r = s["rows"].get(rid) or {}
+    mode = r.get("data_mode", "default")
+    if mode == "custom":
+        return r.get("data", "")
+    if mode == "none":
+        return ""
+    return s.get("data_default", "")
 
 
 def recipients(s: Dict[str, Any]) -> List[str]:
@@ -1048,7 +1146,24 @@ def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
     if env.error_index_url:
         out["error_index_url"] = env.error_index_url
     for rid in rows:
+        text = row_data(s, rid)
+        if text:
+            out[f"data_{rid}"] = text
         kind = image_kind(s, rid, env)
+        if rid == "progress":
+            # The component has a row per mark
+            for m in progress_marks(s):
+                name = PROGRESS_ROWS[m]
+                if rid in push:
+                    pkind = "none" if s["provider"] == "gotify" else kind
+                    out[name] = f"{pkind}, " \
+                        f"{row_url(s, rid, s['rows'][rid]['priority'], env)}"
+                if rid in email:
+                    out[f"{name}_email"] = f"{kind}, {email_url(s)}"
+                if rid in hook:
+                    out[f"{name}_webhook"] = \
+                        f"{kind}, {webhook_url(s, name, env)}"
+            continue
         if rid == "macro":
             # One set of destinations per priority: a RESPOND PREFIX=notify
             # line may name its own; the row's priority is the default
@@ -1207,6 +1322,9 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
         "email_presets": EMAIL_PRESETS,
         "spoolman": bool(env.spoolman_url),
         "preprint": env.preprint,
+        "progress_marks": list(PROGRESS_MARKS),
+        "data_modes": list(DATA_MODES),
+        "data_max": DATA_MAX,
         "priorities": PRIORITIES,
         "providers": PROVIDERS,
         "cameras": {name: {"snapshot": bool(c.get("snapshot")),

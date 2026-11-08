@@ -88,6 +88,7 @@ except Exception as e:
 from moonraker.common import JobEvent, KlippyState
 from . import settings as cfgmod
 from . import printers
+from . import templating as tp
 from . import __version__
 
 if TYPE_CHECKING:
@@ -113,6 +114,25 @@ ROW_IDS = (
     "filament_short", "filament_low", "spool_switch", "slot_empty",
 )
 SPOOLMAN_ROWS = ("filament_short", "filament_low", "spool_switch")
+# Notification data (templating.py) is set per settings row; the
+# component's rows that share one
+DATA_ALIAS = {"preprint_done": "started", "file_pause": "paused",
+              "object_complete": "complete",
+              **{f"progress_{m}": "progress" for m in MILESTONES},
+              **{f"macro_{p}": "macro" for p in
+                 ("min", "low", "default", "high", "max")}}
+DATA_QUERY_TIMEOUT = 5.
+# The preview's sample print job (the page's Preview): a Benchy in PLA
+SAMPLE_JOB = {
+    "file": "3DBenchy_PLA_1h12m", "progress": 42., "layer": 120,
+    "layers": 285, "time_left": "41m", "eta": "21:52", "print_time": "31m",
+    "estimated_time": "1h 12m", "queue": 0, "filament_g": 14.3,
+    "object": "Benchy", "tools": "T0", "filaments": [
+        {"index": 0, "name": "PLA Basic White", "material": "PLA",
+         "color": "#FFFFFF", "vendor": "Generic", "grams": 14.3, "tool": "T0",
+         "nozzle": {"temperature": 220, "diameter": 0.4},
+         "bed": {"temperature": 60}}],
+}
 TITLES = {
     "started": "▶️ {name} started",
     "preprint_done": "📐 {name} pre-print calibrations complete",
@@ -719,6 +739,8 @@ class PushNotifications:
                 for path, methods, handler in (
                         ("config", ["GET", "POST"], self._ep_config),
                         ("test", ["POST"], self._ep_test),
+                        ("objects", ["GET"], self._ep_objects),
+                        ("preview", ["POST"], self._ep_preview),
                         ("status", ["GET"], self._ep_status)):
                     try:
                         self.server.register_endpoint(
@@ -755,6 +777,10 @@ class PushNotifications:
                 v = self._option(config, key)
                 if v:
                     out[key] = v
+        for rid in set(ROW_IDS) | set(DATA_ALIAS.values()) | {"default"}:
+            v = config.get(f"data_{rid}", None)
+            if v is not None:
+                out[f"data_{rid}"] = str(v)
         return out
 
     def _apply_options(self, opts: Dict[str, str]) -> None:
@@ -847,6 +873,11 @@ class PushNotifications:
             self.error_index_url = opts["error_index_url"]
         # RESPOND PREFIX=notify MSG="title || message || priority"
         self.macro_priority: str = get("macro_priority", "default")
+        # Data added to the end of each row's notifications (templating.py),
+        # by the settings' row id
+        self.data: Dict[str, str] = {
+            k[5:]: v for k, v in opts.items()
+            if k.startswith("data_") and v}
         logging.info("[pushraker] enabled: %s", ", ".join(
             f"{rid} ({'+'.join(d.channel for d in dests)})"
             for rid, (_, dests) in self.rows.items()) or "none")
@@ -917,6 +948,9 @@ class PushNotifications:
         self._obj_first_sent: Set[str] = set()
         # The printer behind the object list, known at Klipper's ready
         self.printer: printers.Printer = printers.Printer([])
+        # The slicer's settings from the job's file (per-filament
+        # temperatures, materials, names; templating.slicer_settings)
+        self._job_slicer: Dict[str, str] = {}
         self._status: Dict[str, Dict[str, Any]] = {
             "print_stats": {}, "virtual_sdcard": {}, "print_task_config": {},
             "exclude_object": {}, "machine_state_manager": {},
@@ -1304,6 +1338,260 @@ class PushNotifications:
             lines.append("Test notification sent.")
         return {"ok": failed == 0, "lines": lines}
 
+
+    # ---- notification data (templating.py) ----------------------------------
+
+    def _data_for(self, rid: str) -> str:
+        return self.data.get(DATA_ALIAS.get(rid, rid), "")
+
+    async def _data_text(self, rid: str, text: Optional[str] = None,
+                         sample: bool = False) -> str:
+        """The row's data, rendered: one Moonraker query for every object
+        the tokens read, pushraker's own job values for job.*. Never
+        raises; what can't be read is "n/a"."""
+        text = self._data_for(rid) if text is None else text
+        if not text.strip():
+            return ""
+        try:
+            tokens = tp.parse(text)
+            need = tp.objects_needed(tokens)
+            state: Dict[str, Any] = {}
+            if need:
+                try:
+                    state = await asyncio.wait_for(self._query(need),
+                                                   DATA_QUERY_TIMEOUT)
+                except Exception as e:
+                    logging.warning("[pushraker] data query: %s", e)
+            job = self._job_values(sample)
+
+            def resolve(t: tp.Token) -> Any:
+                if t.obj == tp.JOB:
+                    return job(t.path)
+                return tp.dig(state.get(t.obj) or {}, t.path)
+            return tp.render(text, resolve)
+        except Exception as e:
+            logging.warning("[pushraker] notification data: %s", e)
+            return ""
+
+    def _job_values(self, sample: bool = False) -> Any:
+        """A resolver for job.* paths: pushraker's own values about the
+        print job (not Klipper's). `sample`: the preview's Benchy for the
+        values that need a print job."""
+        active = self._job_active or self._busy()
+        info = self._status["print_stats"].get("info") or {}
+        pd = float(self._status["print_stats"].get("print_duration") or 0.)
+        filename = self._job_filename
+        fils = self._filaments()
+        live: Dict[str, Any] = {}
+        if active:
+            left = self._time_left()           # "~41m left, ETA 21:52"
+            m = re.match(r"~(.+?) left(?:, ETA (.+))?$", left)
+            est = self._estimated_time(filename)
+            live = {
+                "file": shown(filename), "progress": self._progress() * 100.,
+                "layer": info.get("current_layer"),
+                "layers": info.get("total_layer"),
+                "time_left": m.group(1) if m else None,
+                "eta": m.group(2) if m else None,
+                "print_time": format_duration(pd) if pd else None,
+                "estimated_time": format_duration(est) if est else None,
+                "queue": self._queue_count(filename),
+                "filament_g": sum(self._job_weights.values()) or None,
+                "object": self._obj_cur if self._by_object else None,
+                "tools": ", ".join(f"T{t}" for t in sorted(self._job_tools))
+                or None,
+                "filaments": fils,
+            }
+        base = json.loads(json.dumps(SAMPLE_JOB)) if sample and not active \
+            else live
+        extra = {}
+        try:
+            extra = self.printer.job_values(self._job_context(
+                base.get("filaments") or [], sample and not active))
+        except Exception as e:
+            logging.warning("[pushraker] harness job values: %s", e)
+        base.update(extra)
+
+        def value(path: Sequence[str]) -> Any:
+            head, rest = path[0], list(path[1:])
+            mf = re.fullmatch(r"filament(\d+)", head)
+            if head == "filaments":
+                fl = [f for f in base.get("filaments") or []
+                      if f.get("used", True)]
+                if not rest:
+                    return [f.get("name") for f in fl]
+                if rest[0] == "count":
+                    return len(fl)
+                if rest[0] in ("materials", "names", "colors", "grams",
+                               "vendors", "tools", "slots"):
+                    key = rest[0].rstrip("s")
+                    key = {"materials": "material", "names": "name",
+                           "colors": "color", "grams": "grams",
+                           "vendors": "vendor", "tools": "tool",
+                           "slots": "slot"}[rest[0]]
+                    return [f.get(key) for f in fl]
+                return None
+            if mf:
+                n = int(mf.group(1))
+                fl = base.get("filaments") or []
+                # Slicer numbering: filament 1 is the slicer's first, found
+                # by its 0-based slicer index
+                for f in fl:
+                    if f.get("index") == n - 1:
+                        return tp.dig(f, rest) if rest else f.get("name")
+                return None
+            return tp.dig(base, path)
+        return value
+
+    def _job_context(self, filaments: List[Dict[str, Any]],
+                     sample: bool) -> Dict[str, Any]:
+        """What the harness sees when it adds its own job values."""
+        return {"filaments": filaments, "sample": sample,
+                "status": self._status, "ptc": self._job_ptc,
+                "map": self._job_map, "tools": sorted(self._job_tools),
+                "ace": self._ace() if self._ace_on else {},
+                "toolhead": self._toolhead}
+
+    def _queue_count(self, filename: str) -> Optional[int]:
+        try:
+            jq = self.server.lookup_component("job_queue", None)
+            files = [str(j) for j in list(getattr(jq, "queued_jobs", {})
+                                          .values())] if jq else []
+            return len([f for f in files if f != filename])
+        except Exception:
+            return None
+
+    def _filaments(self) -> List[Dict[str, Any]]:
+        """The job's filaments, in slicer order, each as the slicer
+        reported it (name, material, colour, temperatures) with what the
+        printer knows (the tool, Spoolman's spool name when it has one).
+        A slicer value is what was sliced with, not necessarily what runs:
+        in a multi-material job one filament's bed temperature wins."""
+        st = self._job_slicer
+        emap = self._job_map or []
+        ptc = self._job_ptc or {}
+        used = set(self._job_tools)
+        count = max([len(tp.split_values(st.get("filament_type", ""))),
+                     len(self._job_weights)] + [t + 1 for t in used])
+        out = []
+        for t in range(count):
+            ch = emap[t] if t < len(emap) and isinstance(emap[t], int) else t
+            name = tp.per_filament(st, ("filament_settings_id",), t)
+            material = tp.per_filament(st, ("filament_type",), t) or \
+                self._ptc_value(ptc, "filament_type", ch)
+            vendor = tp.per_filament(st, ("filament_vendor",), t) or \
+                self._ptc_value(ptc, "filament_vendor", ch)
+            colour = tp.per_filament(st, ("filament_colour",
+                                          "filament_color"), t)
+            if not name:
+                name = " ".join(x for x in (vendor, material) if x) or None
+            spool = self._tool_spools.get(t)
+            info: Dict[str, Any] = {
+                "index": t, "used": t in used or not used,
+                "name": name, "material": material,
+                "vendor": vendor, "color": colour,
+                "grams": self._job_weights.get(t),
+                "tool": f"T{t}", "spool": sorted(spool)[0] if spool else None,
+                "nozzle": {
+                    "temperature": tp.number(tp.per_filament(
+                        st, ("nozzle_temperature", "temperature"), t)),
+                    "diameter": tp.number(tp.per_filament(
+                        st, ("nozzle_diameter",), t)),
+                },
+                "bed": {"temperature": tp.number(tp.per_filament(
+                    st, tp.bed_temp_keys(st), t))},
+            }
+            out.append(info)
+        return out
+
+    @staticmethod
+    def _ptc_value(ptc: Dict[str, Any], key: str, ch: int) -> Optional[str]:
+        v = list(ptc.get(key) or [])
+        val = str(v[ch]).strip() if 0 <= ch < len(v) else ""
+        return val if val and val.upper() != "NONE" else None
+
+    async def _ep_objects(self, web_request: Any) -> Dict[str, Any]:
+        """The picker's catalogue: the printer's objects by category, with
+        pushraker's job values and the harness's additions."""
+        kapis: APIComp = self.server.lookup_component("klippy_apis")
+        try:
+            objs = list(await kapis.get_object_list(default=[]))
+        except Exception:
+            objs = []
+        hidden = set(self.printer.hidden_objects)
+        unknown = [o for o in objs if o not in tp.HIDDEN and o not in hidden
+                   and not o.startswith(tp.HIDDEN_PREFIXES)
+                   and o.partition(" ")[0] not in tp.KNOWN
+                   and not re.fullmatch(r"extruder\d*", o)]
+        state: Dict[str, Any] = {}
+        if unknown:
+            try:
+                state = await asyncio.wait_for(
+                    self._query({o: None for o in unknown}),
+                    DATA_QUERY_TIMEOUT)
+            except Exception:
+                state = {}
+        extra: Dict[str, List[Dict[str, Any]]] = {
+            tp.THERMAL: [], tp.PRINT_JOB: self._job_items()}
+        # Drivers that report a temperature, by axis
+        for obj, axis in self.printer.drivers.items():
+            extra[tp.THERMAL].append({
+                "label": f"{axis} driver", "object": obj,
+                "values": [{"label": "Temperature",
+                            "token": f"{{{obj}.temperature|0}}"}]})
+        try:
+            for cat, items in self.printer.catalogue(
+                    self._job_context(self._filaments(), False)).items():
+                extra.setdefault(cat, []).extend(items)
+        except Exception as e:
+            logging.warning("[pushraker] harness catalogue: %s", e)
+        return {"categories": tp.catalogue(
+            objs, state, self.printer.label, self.printer.hidden_objects,
+            extra)}
+
+    def _job_items(self) -> List[Dict[str, Any]]:
+        """pushraker's own job values, for the picker."""
+        def item(label: str, values: List[Tuple[str, str]]) -> Dict[str, Any]:
+            return {"label": label, "object": "job", "values": [
+                {"label": l, "token": t} for l, t in values]}
+        n = max(1, len(self._job_tools)) if self._job_active else 2
+        return [
+            item("Print job", [("File", "{job.file}"),
+                               ("Progress %", "{job.progress|0}"),
+                               ("Layer", "{job.layer}"),
+                               ("Layers", "{job.layers}"),
+                               ("Time left", "{job.time_left}"),
+                               ("ETA", "{job.eta}"),
+                               ("Print time", "{job.print_time}"),
+                               ("Estimated time", "{job.estimated_time}"),
+                               ("In queue", "{job.queue}")]),
+            item("Filaments used", [("Names", "{job.filaments}"),
+                                    ("Materials", "{job.filaments.materials}"),
+                                    ("Count", "{job.filaments.count}"),
+                                    ("Total grams", "{job.filament_g|0}"),
+                                    ("Tools", "{job.tools}")]),
+            item("Per filament (slicer numbering)", [
+                ("Name", "{job.filament1.name}"),
+                ("Material", "{job.filament1.material}"),
+                ("Colour", "{job.filament1.color}"),
+                ("Grams", "{job.filament1.grams|0}"),
+                ("Nozzle temperature", "{job.filament1.nozzle.temperature|0}"),
+                ("Nozzle diameter", "{job.filament1.nozzle.diameter}"),
+                ("Bed temperature", "{job.filament1.bed.temperature|0}"),
+                ("Tool", "{job.filament1.tool}")]
+                + ([("Filament 2 name", "{job.filament2.name}")] if n > 1
+                   else [])),
+        ]
+
+    async def _ep_preview(self, web_request: Any) -> Dict[str, Any]:
+        """The page's Preview: the text rendered with the printer's live
+        values, and a sample print job when none is running."""
+        args = dict(web_request.get_args())
+        text = cfgmod.clean_text(args.get("text", ""))
+        rid = str(args.get("row") or "started")
+        rendered = await self._data_text(rid, text, sample=True)
+        return {"text": rendered, "live_job": self._job_active or self._busy()}
+
     @staticmethod
     def _email_hint(why: str) -> List[str]:
         text = why or ""
@@ -1468,6 +1756,7 @@ class PushNotifications:
         try:
             if delay:
                 await asyncio.sleep(delay)
+            body = self._lines(body, await self._data_text(rid))
             if camera_wait and image == "snapshot" and not snapshot_ready:
                 path = await self._wait_for_snapshot(camera_wait)
             else:
@@ -1562,6 +1851,7 @@ class PushNotifications:
         links."""
         if dest.email:
             return self._email_prepare(rid, title, body, path)
+        body = self._fit_body(dest.channel, body)
         if dest.channel == "telegram":
             title, body = self._telegram_prepare(rid, title, body)
         elif dest.channel == "gotify":
@@ -1576,6 +1866,18 @@ class PushNotifications:
             if links:
                 body += "\n\n" + links
         return title, body, {}
+
+    def _fit_body(self, channel: str, body: str) -> str:
+        """Cut a body (with its data) to the service's limit, leaving room
+        for the links some services get in the text."""
+        limit = BODY_LIMITS.get(channel)
+        if limit is None or self._fits(channel, body):
+            return body
+        chars, n = limit
+        room = max(64, n - 200)
+        if chars:
+            return body[:room - 1].rstrip() + "…"
+        return body.encode()[:room - 3].decode("utf-8", "ignore").rstrip() + "…"
 
     @staticmethod
     def _md_escape(text: str) -> str:
@@ -2077,6 +2379,8 @@ class PushNotifications:
                     "wait_start": 0., "announced": False, "gen": 0}
         self._by_object = await self.eventloop.run_in_thread(
             self._is_by_object, filename)
+        self._job_slicer = await self.eventloop.run_in_thread(
+            self._slicer_settings, filename)
         self._job_pauses = await self.eventloop.run_in_thread(
             self._scan_pauses, filename)
         self._pauses_seen = set()
@@ -2803,6 +3107,22 @@ class PushNotifications:
             logging.warning("[pushraker] could not read %s: %s",
                             shown(filename), e)
             return False
+
+    def _slicer_settings(self, filename: str) -> Dict[str, str]:
+        """The slicer's "; key = value" settings at the end of the file.
+        Runs in a thread: it reads the file."""
+        if not filename:
+            return {}
+        try:
+            fm = self.server.lookup_component("file_manager")
+            path = os.path.join(fm.get_directory("gcodes"), filename)
+            with open(path, "rb") as f:
+                f.seek(max(0, os.path.getsize(path) - CONFIG_TAIL))
+                return tp.slicer_settings(f.read())
+        except Exception as e:
+            logging.warning("[pushraker] could not read %s: %s",
+                            shown(filename), e)
+            return {}
 
     def _scan_pauses(self, filename: str) -> List[Dict[str, Any]]:
         """The pauses the print job's file asks for: [{offset, layer,
@@ -4326,10 +4646,12 @@ class PushNotifications:
         tickets = [self._reserve(d.channel, rid) for d in dests]
         paths: Dict[Tuple[int, ...], Optional[str]] = {}
         try:
+            extra = await self._data_text(rid)
             per_dest: List[List[Tuple[str, str, Optional[str]]]] = []
             for d in dests:
                 if packer is None:
-                    msgs = [(t, b, rows) for t, b, rows in messages or []]
+                    msgs = [(t, self._lines(b, extra), rows)
+                            for t, b, rows in messages or []]
                     keyed = [((k,), m) for k, m in enumerate(msgs)]
                 else:
                     title, header, issues, text_fn, row_fn = packer
@@ -4339,7 +4661,8 @@ class PushNotifications:
                         t = title if len(parts) == 1 \
                             else f"{title} ({n}/{len(parts)})"
                         keyed.append((tuple(idx), (
-                            t, body, [row_fn(issues[i]) for i in idx])))
+                            t, self._lines(body, extra),
+                            [row_fn(issues[i]) for i in idx])))
                 out = []
                 for key, (t, b, rows) in keyed:
                     path = None

@@ -177,7 +177,7 @@ def run_settings_tests():
                          webhook_enabled=True,
                          webhook_url="https://u:p@hooks.example.com/x/abc?k=1",
                          printer_url="http://u1", camera="case"), fresh(), ENV)
-    w["rows"]["progress_25"]["enabled"] = False
+    w["rows"]["progress"]["enabled"] = False
     wopts = st.render_options(w, ENV)
     wurl = st.webhook_url(w, "complete", ENV)
     check("webhook: JSON sender, own query kept, event, printer, links",
@@ -317,7 +317,8 @@ def run_settings_tests():
           moved["enabled"] and moved["name"] == "Martha"
           and moved["secret"] == "tk_old" and moved["camera"] == "case"
           and moved["rows"]["started"] == {"enabled": False, "priority": "low",
-                                           "image": False, "email": True}
+                                           "image": False, "email": True,
+                                           "data_mode": "default", "data": ""}
           and moved["rows"]["complete"]["priority"] == "high", moved)
     check("...and pass validation as they are",
           not st.stored_error(moved, ENV), st.stored_error(moved, ENV))
