@@ -69,6 +69,15 @@ class SnapmakerU1(Printer):
         "filament_entangle_detect", "filament_feed", "auto_screws_tilt_adjust",
         "error_mcu", "garbage_collection", "extruder_config_bak",
     )
+    # The touchscreen's "Remaining": the slicer's estimate scaled by the
+    # share of the file still to print (confirmed against screen snapshots)
+    time_methods = {"snapmaker": (
+        "Snapmaker", "What the printer's touchscreen shows: the slicer's "
+        "estimated print time multiplied by the share of the file still to "
+        "print. Ignores how fast the print actually runs, so it drifts on "
+        "prints that run slower than sliced; Blend was more accurate on "
+        "tested prints.")}
+    time_default = "snapmaker"
     LABELS = {"heater_bed": "Heated bed", "temperature_sensor cavity": "Cavity",
               "extruder": "Toolhead 1 nozzle", "extruder1": "Toolhead 2 nozzle",
               "extruder2": "Toolhead 3 nozzle", "extruder3": "Toolhead 4 nozzle"}
@@ -84,6 +93,11 @@ class SnapmakerU1(Printer):
 
     def label(self, obj: str) -> Optional[str]:
         return self.LABELS.get(obj)
+
+    def left_seconds(self, method: str, ctx: Dict[str, Any]) -> Optional[float]:
+        if method == "snapmaker" and ctx.get("estimated", 0) > 0:
+            return ctx["estimated"] * (1. - ctx.get("sd_progress", 0.))
+        return None
 
     def job_values(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         """job.toolheads: the toolheads the job uses, with their filaments

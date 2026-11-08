@@ -122,11 +122,45 @@ DATA_ALIAS = {"preprint_done": "started", "file_pause": "paused",
               **{f"macro_{p}": "macro" for p in
                  ("min", "low", "default", "high", "max")}}
 DATA_QUERY_TIMEOUT = 5.
+# Time-left methods, id -> (label, help); see _left_seconds
+TIME_METHODS = {
+    "blend": ("Blend", "The slicer's estimate until 30 % of the file, then "
+              "a weighted mix of the slicer's estimate, filament used and "
+              "the pace so far, leaning on the pace as the print goes on "
+              "(KlipperScreen's method). The most accurate on tested prints."),
+    "slicer": ("Slicer", "The slicer's estimated print time minus the time "
+               "printed so far (Fluidd's and Mainsail's \"slicer\" "
+               "estimate). Early by the length of the printer's start "
+               "routine, which the slicer doesn't know about."),
+    "first_layer": ("Slicer from first layer", "The slicer's estimate "
+                    "counted from when layer 1 began, so the start routine "
+                    "(heating, bed scan, calibrations) doesn't count "
+                    "against it."),
+    "file": ("File", "Time printed so far divided by file progress, minus "
+             "the time printed: the pace so far, extrapolated (Fluidd's "
+             "and Mainsail's \"file\" estimate). Wild early in a print, "
+             "good near the end."),
+    "filament": ("Filament", "The same extrapolation by filament used "
+                 "against the file's filament total."),
+    "m73": ("M73", "The slicer's own time-left markers in the file (M73 R, "
+            "written by PrusaSlicer, OrcaSlicer and their forks), at the "
+            "current position. A file without them uses Blend."),
+}
+# (see _left_seconds); the printer harness may add its
+# own and picks the default. KlipperScreen's blend hands over from the
+# slicer's estimate to the measured pace from this far into the file
+BLEND_ABOVE = 0.3
+RX_M73 = re.compile(rb"^M73\s+(?:[^;\r\n]*?\s)?R(\d+(?:\.\d+)?)", re.M | re.I)
 # The preview's sample print job (the page's Preview): a Benchy in PLA
 SAMPLE_JOB = {
     "file": "3DBenchy_PLA_1h12m", "progress": 42., "layer": 120,
     "layers": 285, "time_left": "41m", "eta": "21:52", "print_time": "31m",
     "estimated_time": "1h 12m", "queue": 0, "filament_g": 14.3,
+    "time": {"left": "41m", "timeleft": "41m", "eta": "21:52",
+             "print_time": "31m", "estimated": "1h 12m",
+             "method": {"default": "41m", "blend": "41m", "slicer": "38m",
+                        "first_layer": "41m", "file": "43m",
+                        "filament": "42m", "m73": "40m", "snapmaker": "42m"}},
     "object": "Benchy", "tools": "T0", "filaments": [
         {"index": 0, "name": "PLA Basic White", "material": "PLA",
          "color": "#FFFFFF", "vendor": "Generic", "grams": 14.3, "tool": "T0",
@@ -878,6 +912,8 @@ class PushNotifications:
         self.data: Dict[str, str] = {
             k[5:]: v for k, v in opts.items()
             if k.startswith("data_") and v}
+        # Time-left method: "" means the printer's default
+        self.time_left_method: str = get("time_left", "")
         logging.info("[pushraker] enabled: %s", ", ".join(
             f"{rid} ({'+'.join(d.channel for d in dests)})"
             for rid, (_, dests) in self.rows.items()) or "none")
@@ -951,6 +987,10 @@ class PushNotifications:
         # The slicer's settings from the job's file (per-filament
         # temperatures, materials, names; templating.slicer_settings)
         self._job_slicer: Dict[str, str] = {}
+        # The file's M73 R lines (byte offset -> minutes remaining), for the
+        # m73 method; the print time when layer 1 began (first_layer)
+        self._job_m73: List[Tuple[int, float]] = []
+        self._layer1_pd: Optional[float] = None
         self._status: Dict[str, Dict[str, Any]] = {
             "print_stats": {}, "virtual_sdcard": {}, "print_task_config": {},
             "exclude_object": {}, "machine_state_manager": {},
@@ -1052,7 +1092,11 @@ class PushNotifications:
                           name=self.store.default_name if self.store
                           else self.name,
                           rows_unavailable=self.printer.rows_unavailable,
-                          preprint=bool(self.printer.preprint_calibrations))
+                          preprint=bool(self.printer.preprint_calibrations),
+                          time_methods=[
+                              {"id": m, "label": l, "help": h}
+                              for m, (l, h) in self._time_methods().items()],
+                          time_default=self.printer.time_default)
 
     async def _reload(self, why: str) -> None:
         """Read pushraker.conf and apply it. Settings that don't pass
@@ -1384,15 +1428,26 @@ class PushNotifications:
         fils = self._filaments()
         live: Dict[str, Any] = {}
         if active:
-            left = self._time_left()           # "~41m left, ETA 21:52"
-            m = re.match(r"~(.+?) left(?:, ETA (.+))?$", left)
             est = self._estimated_time(filename)
+            left = self._left_seconds(self._time_method())
+            methods = {m: self._left_seconds(m) for m in self._time_methods()}
             live = {
                 "file": shown(filename), "progress": self._progress() * 100.,
                 "layer": info.get("current_layer"),
                 "layers": info.get("total_layer"),
-                "time_left": m.group(1) if m else None,
-                "eta": m.group(2) if m else None,
+                "time": {
+                    "left": self._dur(left), "timeleft": self._dur(left),
+                    "eta": self._clock(max(0., left)) or None
+                    if left is not None else None,
+                    "method": dict({m: self._dur(v) for m, v in methods.items()},
+                                   default=self._dur(left)),
+                    "print_time": self._dur(pd) if pd else None,
+                    "estimated": self._dur(est) if est else None,
+                },
+                # 0.3's names
+                "time_left": self._dur(left),
+                "eta": self._clock(max(0., left)) or None
+                if left is not None else None,
                 "print_time": format_duration(pd) if pd else None,
                 "estimated_time": format_duration(est) if est else None,
                 "queue": self._queue_count(filename),
@@ -1442,6 +1497,10 @@ class PushNotifications:
                 return None
             return tp.dig(base, path)
         return value
+
+    @staticmethod
+    def _dur(seconds: Optional[float]) -> Optional[tp.Duration]:
+        return tp.Duration(max(0., seconds)) if seconds is not None else None
 
     def _job_context(self, filaments: List[Dict[str, Any]],
                      sample: bool) -> Dict[str, Any]:
@@ -1560,11 +1619,15 @@ class PushNotifications:
                                ("Progress %", "{job.progress|0}"),
                                ("Layer", "{job.layer}"),
                                ("Layers", "{job.layers}"),
-                               ("Time left", "{job.time_left}"),
-                               ("ETA", "{job.eta}"),
-                               ("Print time", "{job.print_time}"),
-                               ("Estimated time", "{job.estimated_time}"),
                                ("In queue", "{job.queue}")]),
+            item("Time remaining", [
+                ("Time left", "{job.time.left}"),
+                ("Time left (h:mm)", "{job.time.left|hhmm}"),
+                ("ETA", "{job.time.eta}"),
+                ("Print time so far", "{job.time.print_time}"),
+                ("Slicer estimate", "{job.time.estimated}")]
+                + [(f"{label} method", f"{{job.time.method.{m}}}")
+                   for m, (label, _) in self._time_methods().items()]),
             item("Filaments used", [("Names", "{job.filaments}"),
                                     ("Materials", "{job.filaments.materials}"),
                                     ("Count", "{job.filaments.count}"),
@@ -2194,28 +2257,130 @@ class PushNotifications:
             return ""
         now = datetime.datetime.now(self.tz)
         at = now + datetime.timedelta(seconds=seconds_from_now)
-        fmt = "%H:%M" if at.date() == now.date() else "%a %H:%M"
-        return at.strftime(fmt)
+        days = (at.date() - now.date()).days
+        return at.strftime("%H:%M") if days == 0 else \
+            f"+{days}d {at.strftime('%H:%M')}"
 
-    def _time_left(self) -> str:
-        """Time left like Fluidd's default ("file") estimate:
-        print time / file progress - print time. Snapmaker's power-loss
-        recovery keeps the print time, so this holds for recovered jobs
-        too. Early in the job that ratio is far off (heating, purge and the
-        slow first layer are most of the time so far), so until
-        EARLY_PROGRESS the slicer's estimate minus the time printed is used
-        when there is one."""
-        pd = float(self._status["print_stats"].get("print_duration") or 0.)
-        progress = self._progress()
-        if progress <= 0. or progress >= 1.:
-            return ""
+    # ---- time left -------------------------------------------------------
+
+    def _time_method(self) -> str:
+        """The method in use: the setting, else the printer's default."""
+        m = self.time_left_method
+        return m if m in self._time_methods() else self.printer.time_default
+
+    def _time_methods(self) -> Dict[str, Tuple[str, str]]:
+        """id -> (label, help), the generic ones and the printer's own."""
+        out = dict(TIME_METHODS)
+        out.update(self.printer.time_methods)
+        return out
+
+    def _left_seconds(self, method: str) -> Optional[float]:
+        """Seconds of printing left by one method, None when it can't be
+        computed now (no estimate, nothing printed yet, done).
+
+        slicer       the slicer's estimate minus the print time so far
+        first_layer  the same, counting from when layer 1 began (the
+                     pre-print routine isn't in the slicer's estimate)
+        file         print time so far / file progress, minus print time
+                     (Fluidd's and Mainsail's "file" estimate)
+        filament     the same by filament used / filament total
+        blend        KlipperScreen's "auto": the slicer (from the first
+                     layer) until 30 % of the file, then a weighted mix of
+                     slicer, filament and file, leaning on file as the
+                     print goes on
+        m73          the slicer's own M73 R markers in the file, at the
+                     current position (interpolated); blend without them
+        The harness may add methods (Printer.time_methods / left_seconds).
+        """
+        ps = self._status["print_stats"]
+        pd = float(ps.get("print_duration") or 0.)
+        p = self._progress()
+        if p >= 1.:
+            return None
         est = self._estimated_time(self._job_filename)
-        if est > 0. and (pd <= 0. or progress < EARLY_PROGRESS):
-            left = max(est - pd, est * (1. - progress) * 0.5)
-        elif pd > 0.:
-            left = pd / progress - pd
-        else:
+        pd1 = pd - (self._layer1_pd or 0.)     # print time since layer 1
+        if method == "slicer":
+            return est - pd if est > 0 else None
+        if method == "first_layer":
+            return est - pd1 if est > 0 else None
+        if method == "file":
+            return pd / p - pd if pd > 0 and p > 0 else None
+        if method == "filament":
+            used = float(ps.get("filament_used") or 0.)
+            total = self._filament_total(self._job_filename)
+            return pd / (used / total) - pd \
+                if pd > 0 and total > 0 and 0 < used < total else None
+        if method == "m73":
+            left = self._m73_left()
+            return left if left is not None else self._left_seconds("blend")
+        if method == "blend":
+            if est > 0 and p <= BLEND_ABOVE:
+                left = est - pd1
+                # Already past the slicer's estimate: the pace is all
+                # there is
+                return left if left > 0 or not (pd > 0 and p > 0) \
+                    else pd / p - pd
+            total_file = pd / p if pd > 0 and p > 0 else 0.
+            used = float(ps.get("filament_used") or 0.)
+            ftot = self._filament_total(self._job_filename)
+            total_fil = pd / (used / ftot) if pd > 0 and ftot > 0 and \
+                0 < used < ftot else 0.
+            if not total_file:
+                return est - pd1 if est > 0 else None
+            # The slicer's total, placed on the first-layer clock
+            slicer_total = est + (self._layer1_pd or 0.)
+            w_s = 1. + BLEND_ABOVE - p if est > 0 and pd < slicer_total \
+                else 0.
+            w_f = min(p - BLEND_ABOVE, 0.33) if total_fil and pd < total_fil \
+                else 0.
+            w_p = p - BLEND_ABOVE
+            total = (slicer_total * w_s + total_fil * w_f + total_file * w_p) \
+                / (w_s + w_f + w_p)
+            return total - pd
+        try:
+            return self.printer.left_seconds(method, {
+                "estimated": est, "print_duration": pd, "progress": p,
+                "sd_progress": float(
+                    self._status["virtual_sdcard"].get("progress") or 0.),
+                "layer1_pd": self._layer1_pd})
+        except Exception as e:
+            logging.warning("[pushraker] time left (%s): %s", method, e)
+            return None
+
+    def _m73_left(self) -> Optional[float]:
+        """Minutes-left markers around the current file position, read as
+        seconds (interpolated between the marker before and after)."""
+        marks = self._job_m73
+        pos = self._status["virtual_sdcard"].get("file_position")
+        if not marks or pos is None:
+            return None
+        pos = int(pos)
+        before = None
+        for off, mins in marks:
+            if off <= pos:
+                before = (off, mins)
+            else:
+                if before is None:
+                    return mins * 60.
+                frac = (pos - before[0]) / max(1, off - before[0])
+                return (before[1] + (mins - before[1]) * frac) * 60.
+        return before[1] * 60. if before else None
+
+    def _filament_total(self, filename: str) -> float:
+        try:
+            fm = self.server.lookup_component("file_manager")
+            meta = fm.get_metadata_storage().get(filename, {}) or {}
+            return float(meta.get("filament_total") or 0.)
+        except Exception:
+            return 0.
+
+    def _time_left(self, method: Optional[str] = None) -> str:
+        """"~41m left, ETA 21:52" by the method in use (or `method`); ""
+        when nothing can be said yet."""
+        left = self._left_seconds(method or self._time_method())
+        if left is None:
             return ""
+        left = max(0., left)
         clock = self._clock(left)
         # "~": time left is an estimate (the slicer estimate is labelled)
         return f"~{format_duration(left)} left" + (f", ETA {clock}" if clock
@@ -2381,6 +2546,9 @@ class PushNotifications:
             self._is_by_object, filename)
         self._job_slicer = await self.eventloop.run_in_thread(
             self._slicer_settings, filename)
+        self._job_m73 = await self.eventloop.run_in_thread(
+            self._scan_m73, filename)
+        self._layer1_pd = None
         self._job_pauses = await self.eventloop.run_in_thread(
             self._scan_pauses, filename)
         self._pauses_seen = set()
@@ -2936,7 +3104,7 @@ class PushNotifications:
         try:
             status = await kapis.subscribe_objects(
                 dict({"print_stats": ["state", "filename", "info",
-                                      "print_duration"],
+                                      "print_duration", "filament_used"],
                       "virtual_sdcard": ["progress", "file_position"],
                       "exclude_object": ["objects", "current_object",
                                          "excluded_objects"],
@@ -3033,6 +3201,10 @@ class PushNotifications:
             layer = (ps.get("info") or {}).get("current_layer")
             if layer is not None and int(layer) >= 1:
                 self._preprint_done(filename)
+        if self._layer1_pd is None:
+            layer = (ps.get("info") or {}).get("current_layer")
+            if layer is not None and int(layer) >= 1:
+                self._layer1_pd = float(ps.get("print_duration") or 0.)
         if "layer_started" in self.rows and not self._layer_started_sent:
             # Layer 1 begins once the start routine (homing, bed mesh,
             # flow calibration) is over: time to watch the first layer
@@ -3107,6 +3279,26 @@ class PushNotifications:
             logging.warning("[pushraker] could not read %s: %s",
                             shown(filename), e)
             return False
+
+    def _scan_m73(self, filename: str) -> List[Tuple[int, float]]:
+        """The slicer's own time-left markers, M73 R<minutes>, with their
+        byte offsets (PrusaSlicer, Orca and its forks write one per layer
+        or percent). Runs in a thread: it reads the whole file."""
+        if not filename:
+            return []
+        try:
+            fm = self.server.lookup_component("file_manager")
+            path = os.path.join(fm.get_directory("gcodes"), filename)
+            out: List[Tuple[int, float]] = []
+            with open(path, "rb") as f:
+                data = f.read()
+            for m in RX_M73.finditer(data):
+                out.append((m.start(), float(m.group(1))))
+            return out
+        except Exception as e:
+            logging.warning("[pushraker] could not read %s: %s",
+                            shown(filename), e)
+            return []
 
     def _slicer_settings(self, filename: str) -> Dict[str, str]:
         """The slicer's "; key = value" settings at the end of the file.

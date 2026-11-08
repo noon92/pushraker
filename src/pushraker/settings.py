@@ -168,7 +168,7 @@ STRING_FIELDS = ("provider", "server", "topic", "auth", "username",
                  "complete_objects",
                  "email_host",
                  "email_security", "email_username", "email_from",
-                 "email_to", "progress_marks")
+                 "email_to", "progress_marks", "time_left")
 # Free text with line breaks (stored with \n escaped)
 TEXT_FIELDS = ("data_default",)
 SECRET_FIELDS = ("secret", "email_password", "webhook_url")
@@ -208,14 +208,20 @@ class Env:
                     left off the page unless turned on in pushraker.conf)
       preprint      the printer has pre-print calibrations (the Print
                     started row's checkbox)
+      time_methods  [{"id", "label", "help"}] the time-left methods on
+                    offer, and time_default the printer's default
     """
 
     def __init__(self, cameras: Optional[Dict[str, Dict[str, str]]] = None,
                  spoolman_url: str = "",
                  error_index_url: str = "", name: str = "Printer",
                  rows_unavailable: Sequence[str] = (),
-                 preprint: bool = False) -> None:
+                 preprint: bool = False,
+                 time_methods: Optional[List[Dict[str, str]]] = None,
+                 time_default: str = "blend") -> None:
         self.cameras = cameras or {}
+        self.time_methods = time_methods or []
+        self.time_default = time_default
         self.preprint = preprint
         self.rows_unavailable = set(rows_unavailable)
         self.spoolman_url = spoolman_url.rstrip("/")
@@ -276,6 +282,9 @@ def _defaults(name: str) -> Dict[str, Any]:
         "preprint_done": True,
         # The Progress row: which of 25, 50, 75 % it reports
         "progress_marks": "25,50,75",
+        # Time-left method (component.TIME_METHODS and the printer's own);
+        # "" for the printer's default
+        "time_left": "",
         # Data added to the end of every notification whose DATA is
         # Default ({object.field} tokens, see templating.py); "" for none
         "data_default": "",
@@ -636,6 +645,11 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     for rid in ROW_IDS:
         if ROW[rid][5] is None:
             s["rows"][rid]["image"] = False
+    if s["time_left"] and env is not None and env.time_methods and \
+            s["time_left"] not in {m["id"] for m in env.time_methods}:
+        raise ConfigError("Unknown time-left method")
+    if env is not None and s["time_left"] == env.time_default:
+        s["time_left"] = ""          # the printer's default: follow it
     marks = [m.strip() for m in s["progress_marks"].split(",") if m.strip()]
     if any(m not in ("25", "50", "75") for m in marks):
         raise ConfigError("Progress: 25, 50 and/or 75 %")
@@ -1130,6 +1144,8 @@ def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
         out["report_interval"] = str(s["report_interval"])
     if s["timezone"]:
         out["timezone"] = s["timezone"]
+    if s["time_left"]:
+        out["time_left"] = s["time_left"]
     if any(r in rows for r in SPOOLMAN_ROWS) and env.spoolman_url:
         out["spoolman_url"] = env.spoolman_url
         out["filament_low_percent"] = str(s["filament_low_percent"])
@@ -1323,6 +1339,8 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
         "spoolman": bool(env.spoolman_url),
         "preprint": env.preprint,
         "progress_marks": list(PROGRESS_MARKS),
+        "time_methods": env.time_methods,
+        "time_default": env.time_default,
         "data_modes": list(DATA_MODES),
         "data_max": DATA_MAX,
         "priorities": PRIORITIES,

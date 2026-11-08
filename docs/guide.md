@@ -274,6 +274,35 @@ while it prints and up to 2 minutes after it ends, and a power loss joins
 the print it interrupted; other emails (e.g. an idle warning) have the
 notification as their subject.
 
+## Time left and ETA
+
+Notifications say how long the print has left and when it should finish
+("~41m left, ETA 21:52"; the ETA needs the time zone the page saves, and
+reads "+1d 02:15" past midnight). How "time left" is worked out is a
+setting on the page, **Print time remaining estimation method**; the
+printer picks the default (marked on the page) and may add a method of its
+own. The ⓘ next to each method explains it; in short:
+
+| Method | How | Notes |
+|---|---|---|
+| Blend | the slicer's estimate until 30 % of the file, then a weighted mix of slicer, filament and pace, leaning on the pace as the print goes on (KlipperScreen's "auto") | the most accurate on tested prints; the default on printers without a method of their own |
+| Slicer | the slicer's estimated print time minus the time printed | early by the length of the start routine, which the slicer doesn't know about |
+| Slicer from first layer | the same, counted from when layer 1 began | the start routine (heating, bed scan, calibrations) doesn't count against the estimate |
+| File | time printed ÷ file progress − time printed (Fluidd's and Mainsail's "file") | the pace so far; wild early, good late |
+| Filament | the same by filament used ÷ the file's filament total | |
+| M73 | the slicer's own `M73 R` time-left markers in the file, at the current position | PrusaSlicer, OrcaSlicer and their forks write them; a file without them uses Blend |
+| Snapmaker (U1 only, its default) | the slicer's estimate × the share of the file still to print | what the touchscreen shows; drifts on prints that run slower than sliced |
+
+On nine prints replayed from a U1's logs, Blend was within ±7 minutes
+from the halfway point on, the Snapmaker method within ±40, File within
+±98 (and ±344 at 10 %).
+
+Every method is available to notification data whatever the setting:
+`{job.time.method.blend}`, `{job.time.method.snapmaker}`, ...,
+`{job.time.method.default}` (the one selected); `{job.time.left}` and
+`{job.time.eta}` follow the setting. Time left reads `1h 12m`; `|hhmm`
+gives `1:12`, `|m` whole minutes, `|h` decimal hours.
+
 ## Adding data
 
 Every notification can end with data of your own: temperatures, fan
@@ -313,8 +342,9 @@ about the print job.
 | `{job.file}` | the file name, without folder and extension |
 | `{job.progress\|0}` | file progress, 0–100 |
 | `{job.layer}` `{job.layers}` | current layer, total layers |
-| `{job.time_left}` `{job.eta}` | as in the notifications ("41m", "21:52") |
-| `{job.print_time}` `{job.estimated_time}` | print time so far; the slicer's estimate |
+| `{job.time.left}` `{job.time.eta}` | time left and ETA by the selected method ("41m", "21:52"; see Time left and ETA) |
+| `{job.time.method.blend}` etc. | time left by one method; `.default` for the selected one |
+| `{job.time.print_time}` `{job.time.estimated}` | print time so far; the slicer's estimate |
 | `{job.queue}` | print jobs waiting in Moonraker's job queue |
 | `{job.filament_g\|0}` | filament the job needs, grams (slicer) |
 | `{job.filaments}` | names of the filaments the job uses, slicer order |
@@ -613,6 +643,7 @@ email_from: you@gmail.com
 email_to: you@gmail.com
 webhook_enabled: false
 progress_marks: 25,50,75     # the Progress row's percentages
+time_left:                   # time-left method; empty for the printer's default
 # Data added to notifications: {object.field|format} tokens, \n for a line break
 data_default: Bed {heater_bed.temperature|0}/{heater_bed.target|0}°C
 # <notification>: on|off (push), <priority>, image|no_image, email|no_email

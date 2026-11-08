@@ -86,6 +86,11 @@ def dig(value: Any, path: Sequence[str]) -> Any:
     return value
 
 
+class Duration(float):
+    """Seconds that read as a duration: "1h 12m" by default, |hhmm as
+    "1:12", |m as whole minutes, |h as decimal hours."""
+
+
 def format_duration(seconds: float) -> str:
     seconds = max(0, int(round(seconds)))
     h, m = divmod(seconds // 60, 60)
@@ -99,6 +104,15 @@ def fmt_value(value: Any, fmt: str) -> str:
         return NA
     if isinstance(value, bool):
         return "yes" if value else "no"
+    if isinstance(value, Duration):
+        secs = max(0., float(value))
+        if fmt == "hhmm":
+            return "%d:%02d" % (secs // 3600, (secs % 3600) // 60)
+        if fmt == "m":
+            return str(int(round(secs / 60.)))
+        if fmt == "h":
+            return f"{secs / 3600.:.1f}"
+        return format_duration(secs)
     if isinstance(value, (list, tuple)):
         items = [fmt_value(v, fmt) for v in value]
         return ", ".join(i for i in items if i != NA) or NA

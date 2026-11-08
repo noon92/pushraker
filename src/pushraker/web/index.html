@@ -146,6 +146,26 @@
     .nt-hint a { color: var(--accent); }
     .nt-table tr.nt-nopush .nt-dim-push { opacity: 0.4; }
     .nt-no-push .nt-col-push, .nt-no-email .nt-col-email { display: none; }
+    /* Time-left method: one row of radio buttons, each with an (i) that
+       opens the method's explanation (hover on a computer, tap on a phone) */
+    .nt-eta { background: var(--item); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; position: relative; }
+    .nt-eta .nt-eta-lbl { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    .nt-eta-opts { display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: center; }
+    .nt-eta-opts label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #fff; white-space: nowrap; position: relative; font-size: 14px; }
+    .nt-eta-opts input[type=radio] { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; cursor: pointer; }
+    .nt-eta-opts .nt-eta-def { color: var(--muted); font-size: 12px; }
+    .nt-i { display: inline-flex; width: 16px; height: 16px; border: 1px solid #777; border-radius: 50%; color: #aaa; font-size: 11px; font-style: italic; font-family: Georgia, serif; align-items: center; justify-content: center; cursor: help; line-height: 1; background: none; padding: 0; }
+    .nt-i.on, .nt-i:hover { border-color: var(--accent); color: var(--accent); }
+    .nt-tip { display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 6; background: #1e1e1e; border: 1px solid #555; border-radius: 8px; padding: 10px 12px; width: 340px; font-size: 12px; color: var(--text); line-height: 1.45; white-space: normal; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-weight: normal; cursor: auto; }
+    .nt-tip.open { display: block; }
+    .nt-tip b { color: #fff; }
+    .nt-tip code { font-family: monospace; color: var(--accent); }
+    .nt-eta.nt-chg { box-shadow: inset 3px 0 0 var(--accent); }
+    @media (max-width: 600px) {
+        .nt-eta-opts { gap: 6px 14px; }
+        .nt-eta-opts label { position: static; }
+        .nt-tip { left: 12px; right: 12px; width: auto; top: calc(100% - 4px); }
+    }
     /* Notification data: the Default data bar, the DATA column's badges,
        and the editor (a popup) */
     .nt-def { display: flex; gap: 10px; align-items: center; background: var(--item); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -458,6 +478,7 @@
             </div>
         </div>
 
+        <div class="nt-eta" id="nt-eta"><div class="nt-eta-lbl">Print time remaining estimation method</div><div class="nt-eta-opts" id="nt-eta-opts"></div></div>
         <div class="nt-def" id="nt-def"><b>Default data</b><code id="nt-def-text"></code><button type="button" class="btn btn-secondary" id="nt-def-edit">Edit default data</button></div>
         <div class="nt-table-wrap">
             <table class="nt-table" id="nt-table">
@@ -712,6 +733,32 @@
         });
         updateRowDimming();
     }
+
+    // ---- time-left method -------------------------------------------------
+    // Radio buttons: the printer's default first, then the rest, each with
+    // an (i) that opens the method's explanation
+    function renderTimeMethods() {
+        const methods = (state.meta.time_methods || []).slice();
+        const def = state.meta.time_default;
+        methods.sort((a, b) => (a.id === def ? -1 : b.id === def ? 1 : 0));
+        const chosen = state.time_left || def;
+        el('nt-eta-opts').innerHTML = methods.map(m =>
+            `<label><input type="radio" name="nt-time" value="${esc(m.id)}"${m.id === chosen ? ' checked' : ''}> ${esc(m.label)}${m.id === def ? ' <span class="nt-eta-def">(default)</span>' : ''} <button type="button" class="nt-i" data-tip="${esc(m.id)}" aria-label="About ${esc(m.label)}">i</button><div class="nt-tip" data-tip-for="${esc(m.id)}"><b>${esc(m.label)}</b> — ${esc(m.help)} <code>{job.time.method.${esc(m.id)}}</code></div></label>`).join('');
+        const tips = el('nt-eta-opts');
+        const closeTips = () => { tips.querySelectorAll('.nt-tip.open').forEach(t => t.classList.remove('open')); tips.querySelectorAll('.nt-i.on').forEach(i => i.classList.remove('on')); };
+        tips.querySelectorAll('.nt-i').forEach(b => {
+            const tip = tips.querySelector(`.nt-tip[data-tip-for="${b.dataset.tip}"]`);
+            const open = () => { closeTips(); tip.classList.add('open'); b.classList.add('on'); };
+            // Hover opens it on a computer; a click (a tap on a phone)
+            // toggles it, and never selects the radio button
+            b.onclick = e => { e.preventDefault(); e.stopPropagation(); if (tip.classList.contains('open') && !matchMedia('(hover: hover)').matches) closeTips(); else open(); };
+            b.onmouseenter = () => { if (matchMedia('(hover: hover)').matches) open(); };
+            b.onmouseleave = () => { if (matchMedia('(hover: hover)').matches) closeTips(); };
+        });
+        tips.querySelectorAll('.nt-tip').forEach(t => { t.onclick = e => e.stopPropagation(); });
+        document.addEventListener('click', closeTips);
+    }
+    const timeMethod = () => { const r = document.querySelector('input[name="nt-time"]:checked'); return r ? r.value : (state.time_left || ''); };
 
     // ---- notification data ------------------------------------------------
     // What each row adds to the end of its notifications: the default
@@ -1194,6 +1241,7 @@
             dataState.rows[rid] = { mode: data.rows[rid].data_mode || 'default', text: data.rows[rid].data || '' };
         });
         renderDataBar();
+        renderTimeMethods();
         renderCameras();
         renderRows();
         updateProvider();
@@ -1274,7 +1322,7 @@
         for (const [c, v] of fieldSnap) {
             if (!c.isConnected || ctlValue(c) === v) continue;
             const box = (el('nt-rows').contains(c) && c.closest('tr')) ||
-                c.closest('label.nt-enable') || c.closest('.nt-field');
+                c.closest('label.nt-enable') || c.closest('.nt-field') || c.closest('.nt-eta');
             if (box) box.classList.add('nt-chg');
         }
         // The data: the bar and the rows whose choice or text changed
@@ -1369,6 +1417,7 @@
             filament_low_grams: parseInt(el('nt-fl-grams').value, 10) || 0,
             filament_unknown: el('nt-fl-unknown').checked,
             preprint_done: el('nt-preprint') ? el('nt-preprint').checked : !!state.preprint_done,
+            time_left: timeMethod(),
             progress_marks: (state.meta.progress_marks || [25, 50, 75]).filter(m => el('nt-pm-' + m) && el('nt-pm-' + m).checked).join(','),
             data_default: dataState.default,
             email_enabled: emailEnabled,

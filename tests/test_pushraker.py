@@ -1510,24 +1510,64 @@ async def test_status_report():
 
 
 async def test_time_left():
-    print("Time left: slicer estimate early, measured later")
+    print("Time left: the methods, the setting, the job.time tokens")
     reset_world()
     server, c = make({}, {"first_layer": [("ntfy", FakeService([], "ntfy"),
                                            False)]})
+    with open(os.path.join(GCODES, "Benchy.gcode"), "wb") as f:
+        # M73 markers: 60 min left at the start, 30 at the middle, 0 at the end
+        body = b"G1 X1\n" * 1000
+        f.write(b"M73 P0 R60\n" + body + b"M73 P50 R30\n" + body + b"M73 P100 R0\n")
+    META["filament_total"] = 1000.
     await start_job(server)          # estimated_time 3600, print_duration 600
+    check("the test printer (a U1) defaults to its own snapmaker method",
+          c._time_method() == "snapmaker" and "blend" in c._time_methods())
+    c.time_left_method = "blend"
 
-    async def at(pos, pd=600):
+    async def at(pos, pd=600, layer=None, used=None):
+        info = {"current_layer": layer} if layer else {}
+        ps = {"print_duration": pd, "info": info}
+        if used is not None:
+            ps["filament_used"] = used
         await c._on_status_update({"virtual_sdcard": {"file_position": pos},
-                                   "print_stats": {"print_duration": pd}}, 0)
-        return c._time_left()
-    left = await at(1000 + 200)                               # 2 % of the file
-    check("early in the job: slicer estimate minus time printed",
-          left.startswith("~50m left"), left)
-    left = await at(1000 + 5000)                              # 50 %
-    check("later: print time / progress", left.startswith("~10m left"), left)
-    left = await at(1000 + 200, pd=4000)   # early, but slower than the slicer said
-    check("early but already past the estimate: never 0 left",
-          left.startswith("~29m left"), left)
+                                   "print_stats": ps}, 0)
+        return {m: c._left_seconds(m) for m in c._time_methods()}
+    m = await at(1000 + 200)                               # 2 % of the file
+    check("early: blend is the slicer's estimate minus time printed",
+          round(m["blend"]) == 3000 and round(m["slicer"]) == 3000, m)
+    check("file: pace so far, extrapolated", round(m["file"]) == 29400, m)
+    m = await at(1000 + 500, pd=650, layer=1)              # layer 1 begins
+    m = await at(1000 + 5000, pd=2400, layer=40, used=500.)   # 50 %
+    check("first layer: the slicer's clock starts at layer 1",
+          round(m["slicer"]) == 1200 and round(m["first_layer"]) == 1850, m)
+    check("filament: by filament used", round(m["filament"]) == 2400, m)
+    check("blend at 50 %: weighted slicer (from layer 1), filament and file",
+          1900 < m["blend"] < 2200, m)
+    check("m73: the file's own markers, interpolated by position",
+          m["m73"] is not None and abs(m["m73"] - 30 * 60) < 60, m)
+    m = await at(1000 + 200, pd=4000, layer=1)   # early, slower than the slicer said
+    check("early but already past the estimate: the pace, never 0 left",
+          m["blend"] > 0 and c._time_left().startswith("~"), m)
+    # The setting picks the method; job.time tokens
+    c.time_left_method = "file"
+    m = await at(1000 + 5000, pd=2400)
+    left = c._time_left()
+    check("the setting picks the method (file)",
+          c._time_method() == "file" and left.startswith("~40m left"), left)
+    job = c._job_values()
+    check("job.time.left / .method.<m> / .eta",
+          pn.tp.fmt_value(job(["time", "left"]), "") == "40m"
+          and pn.tp.fmt_value(job(["time", "left"]), "hhmm") == "0:40"
+          and pn.tp.fmt_value(job(["time", "method", "slicer"]), "m") == "20"
+          and pn.tp.fmt_value(job(["time", "method", "default"]), "") == "40m"
+          and job(["time", "eta"]) is None,     # no time zone set: no clock
+          (job(["time", "left"]), job(["time", "method", "slicer"])))
+    c.time_left_method = "nope"
+    check("an unknown setting falls back to the printer's default",
+          c._time_method() == "snapmaker")
+    check("snapmaker: the slicer's estimate scaled by the file left",
+          round(m["snapmaker"]) == 3600, m)   # raw sd progress 0 in the test
+    META.pop("filament_total", None)
 
 
 async def test_calibration():

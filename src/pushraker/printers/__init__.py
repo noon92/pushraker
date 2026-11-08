@@ -71,6 +71,11 @@ class Printer:
     # that the picker shouldn't list (typed tokens still work), beyond
     # Klipper's internals
     hidden_objects: Sequence[str] = ()
+    # Time-left methods of this printer's own (id -> (label, help); see
+    # component.TIME_METHODS for the generic ones and left_seconds for the
+    # computing), and the method this printer defaults to
+    time_methods: Dict[str, Tuple[str, str]] = {}
+    time_default = "blend"
 
     def __init__(self, objects: Sequence[str]) -> None:
         self.objects = list(objects)
@@ -106,6 +111,14 @@ class Printer:
         (`map`: slicer filament -> toolhead), the tools used, and whether
         this is the preview's sample job."""
         return {}
+
+    def left_seconds(self, method: str, ctx: Dict[str, Any]) -> Optional[float]:
+        """Seconds left by one of this printer's own time_methods. `ctx`:
+        estimated (the slicer's seconds), print_duration, progress (file
+        progress over the G-code's byte range), sd_progress (Klipper's raw
+        virtual_sdcard.progress), layer1_pd (print time when layer 1
+        began, or None). None when it can't be computed."""
+        return None
 
     def catalogue(self, ctx: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
         """Picker items of this printer's own, by category id (see
