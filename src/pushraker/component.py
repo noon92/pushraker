@@ -519,6 +519,22 @@ def describe(ex: Dict[str, Any]) -> str:
                                  details.strip()) if x)
 
 
+def fault_event(ex: Dict[str, Any]) -> Dict[str, Any]:
+    """event.fault: a fault's parts for a template. text is what the
+    notifications write (code, the screen's title and advice)."""
+    try:
+        key = "%04d-%04d-%04d" % (int(ex.get("id")), int(ex.get("index")),
+                                  int(ex.get("code")))
+    except (TypeError, ValueError):
+        key = ""
+    title, _, details = exception_text().get(key, "").partition("_")
+    return {"code": format_code(ex), "emoji": fault_emoji(ex) or None,
+            "title": title.strip() or None,
+            "details": details.strip() or None,
+            "message": str(ex.get("message") or "").strip() or None,
+            "level": ex.get("level"), "text": describe(ex)}
+
+
 def coded(ps: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """The Snapmaker fault recorded in print_stats, if any."""
     ex = ps.get("exception") or {}
@@ -531,6 +547,8 @@ def fault_key(ex: Dict[str, Any]) -> FaultKey:
     return (ex.get("id"), ex.get("index"), ex.get("code"))
 
 
+TEMPLATE_TIMEOUT = 2.       # seconds a template may take to render
+
 # Moving to templates: what each notification's default template gave
 # against what was sent (see _parity)
 PARITY_LOG: List[Tuple[str, str, str, str]] = []
@@ -540,7 +558,7 @@ PARITY_LOG: List[Tuple[str, str, str, str]] = []
 JOB_BRANCHES = [re.compile(p) for p in (
     r"time", r"time\.remaining", r"filaments", r"filament\d+",
     r"queue", r"queue\.next", r"queue\.(?:job)?\d+", r"extruders",
-    r"pauses", r"pause\d+")]
+    r"pauses", r"pause\d+", r"objects")]
 
 # job.* values: while a print job runs or is paused, and this long after it
 # ends, for the notifications sent just after it
@@ -1507,7 +1525,7 @@ class PushNotifications:
         return {"printer": state,
                 "job": self._job_view(resolve, sample),
                 "extruders": self._extruders_view(resolve, state, sample),
-                "event": event or {},
+                "event": jj.prune(event or {}),
                 "machine": self._machine()}
 
     def _job_view(self, resolve: Any, sample: bool) -> jj.View:
@@ -1612,7 +1630,17 @@ class PushNotifications:
                                ) -> str:
         """A template's text. Raises jj.TemplateError on a mistake."""
         ctx = await self._template_context([text], sample, event)
-        return jj.render(text, ctx)
+        return await self._render(text, ctx)
+
+    async def _render(self, text: str, ctx: Dict[str, Any]) -> str:
+        """Rendered off Moonraker's event loop, with a time limit: a
+        template that loops for long doesn't hold up the printer."""
+        try:
+            return await asyncio.wait_for(self.eventloop.run_in_thread(
+                jj.render, text, ctx), TEMPLATE_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise jj.TemplateError(
+                f"took longer than {TEMPLATE_TIMEOUT:.0f} seconds") from None
 
     async def _resolver(self, tokens: Sequence[tp.Token],
                         state: Dict[str, Any], sample: bool) -> Any:
@@ -1827,12 +1855,24 @@ class PushNotifications:
                 estimated=self._dur(self._estimated_time(filename) or None)),
             "filaments": fils,
             "pauses": self._pauses_values(self._job_pauses),
+            "objects": self._objects_values(),
             "preprint": list(self._pp_names) or None,
             "extruders": sorted({f["extruder"] for f in used
                                  if f.get("extruder")},
                                 key=lambda e: self._ext_index(e) or 0)
             or None,
         }
+
+    def _objects_values(self) -> Dict[str, Any]:
+        """The file's objects (exclude_object), as shown; the one printing
+        now; whether the print job prints object by object."""
+        objs = self._objects()
+        cur = self._status["exclude_object"].get("current_object") or None
+        return {"count": len(objs) or None,
+                "names": [self._object_info(o)["name"] for o in objs]
+                or None,
+                "current": self._object_info(cur)["name"] if cur else None,
+                "by_object": bool(self._by_object)}
 
     @staticmethod
     def _pauses_values(pauses: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -3022,7 +3062,8 @@ class PushNotifications:
             return
         try:
             ctx = await self._template_context(list(d), False, event)
-            got = (jj.render(d[0], ctx), jj.render(d[1], ctx))
+            got = (await self._render(d[0], ctx),
+                   await self._render(d[1], ctx))
         except Exception as e:
             PARITY_LOG.append((key, "error", f"{title}\n{body}", str(e)))
             return
@@ -3067,7 +3108,8 @@ class PushNotifications:
                 # Snapmaker resumes a power-loss print as a new job
                 self._spawn(self._send(
                     "resumed", self._title("recovered"),
-                    self._lines(shown(filename), self._time_left())))
+                    self._lines(shown(filename), self._time_left()),
+                    event={"recovered": True}))
             else:
                 self._spawn(self._send(
                     "started", self._title("started"),
@@ -3090,7 +3132,9 @@ class PushNotifications:
                 self._spawn(self._send(
                     "error", self._title("error", kind="paused"),
                     f"{shown(filename)}\n{describe(ex)}",
-                    delay=PAUSE_SNAPSHOT_DELAY))
+                    delay=PAUSE_SNAPSHOT_DELAY,
+                    event={"kind": "paused", "file": shown(filename),
+                           "fault": fault_event(ex)}))
             elif "paused" in self.rows and self._job_pauses:
                 self._spawn(self._file_pause_alert(filename))
             else:
@@ -3105,7 +3149,8 @@ class PushNotifications:
                 {k: ps[k] for k in ("print_duration",) if k in ps})
             self._spawn(self._send(
                 "resumed", self._title("resumed"),
-                self._lines(shown(filename), self._time_left())))
+                self._lines(shown(filename), self._time_left()),
+                event={"recovered": False}))
         elif job_event == JobEvent.ERROR:
             # A Klipper shutdown ends the job with an error too: that goes
             # to the shutdown row (the exception handler would otherwise
@@ -3116,17 +3161,21 @@ class PushNotifications:
                     (ex is not None and self._fault_recent(fault_key(ex))):
                 self._skip(rid, "already reported")
             elif rid in self.rows:
+                event: Dict[str, Any] = {"kind": "error",
+                                         "file": shown(filename)}
                 if ex is not None:
                     self._mark_fault(fault_key(ex))
                     detail = f"{describe(ex)}"
+                    event["fault"] = fault_event(ex)
                 else:
                     detail = ps.get("message") or "Print failed"
+                    event["message"] = detail
                 if shutdown:
                     self._last_fault_send = time.monotonic()
                 self._spawn(self._send(
                     rid, self._title("shutdown") if shutdown
                     else self._title("error", kind="error"),
-                    f"{shown(filename)}\n{detail}"))
+                    f"{shown(filename)}\n{detail}", event=event))
         elif job_event in (JobEvent.COMPLETE, JobEvent.CANCELLED):
             if self._job_done_sent:
                 self._skip(str(job_event), "already reported by the print hook")
@@ -3234,9 +3283,12 @@ class PushNotifications:
                 "Print time: "
                 f"{format_duration(ps.get('print_duration', 0))}",
                 self._queue_line(filename, starting=False))
+            event: Dict[str, Any] = {}
         elif ex is not None and fault_reported:
             rid, title = "cancelled", self._title("cancelled")
             body = f"{shown(filename)}\nAfter: {describe(ex)}"
+            event = {"kind": "cancelled", "file": shown(filename),
+                     "fault": fault_event(ex), "after_fault": True}
         elif ex is not None:
             rid = self._fault_row()
             if rid is None:
@@ -3249,8 +3301,11 @@ class PushNotifications:
             title = self._title("error", kind="cancelled") \
                 if rid == "error" else self._title("cancelled")
             body = f"{shown(filename)}\n{describe(ex)}"
+            event = {"kind": "cancelled", "file": shown(filename),
+                     "fault": fault_event(ex)}
         else:
             rid, title, body = "cancelled", self._title("cancelled"), shown(filename)
+            event = {"kind": "cancelled", "file": shown(filename)}
         row = self.rows.get(rid)
         if row is None:
             return
@@ -3259,7 +3314,7 @@ class PushNotifications:
         snapshot = await self._fetch_snapshot() if row[0] == "snapshot" \
             else None
         await self._send(rid, title, body, snapshot=snapshot,
-                         snapshot_ready=True)
+                         snapshot_ready=True, event=event)
 
     # ---- job queue -----------------------------------------------------
 
@@ -3318,7 +3373,10 @@ class PushNotifications:
                 continue
             self._spawn(self._send(
                 rid, self._title("macro", title=title), message,
-                filename=self._job_filename if self._job_active else ""))
+                filename=self._job_filename if self._job_active else "",
+                key="macro", event={"title": title,
+                                    "message": message or None,
+                                    "priority": priority}))
 
     def _track_calibration(self) -> None:
         """Manual calibrations (touchscreen: bed levelling, XYZ offset,
@@ -3350,14 +3408,18 @@ class PushNotifications:
                     self._title("calibration_failed",
                                 what=cal[done]),
                     "The printer reports an abnormal state; check the "
-                    "screen.", camera_wait=0.))
+                    "screen.", camera_wait=0., event={"calibration": {
+                        "name": cal[done], "result": "failed"}}))
             elif done is not None and (state == self.printer.msm_idle
                                        or state in cal):
                 self._spawn(self._send(
                     "calibration",
                     self._title("calibration", what=cal[done]),
                     "Printer is idle." if state == self.printer.msm_idle else
-                    f"{cal[state]} starts next.", camera_wait=0.))
+                    f"{cal[state]} starts next.", camera_wait=0.,
+                    event={"calibration": {
+                        "name": cal[done], "result": "complete",
+                        "next": cal.get(state)}}))
             if state in cal:
                 self._calibrating = state
             else:
@@ -3373,7 +3435,11 @@ class PushNotifications:
                 self._lines(what, f"Brush the nozzle of Toolhead "
                             f"{self.printer.manual_clean[action]}, then "
                             "tap the screen."),
-                camera_wait=0.))
+                camera_wait=0., event={"calibration": {
+                    "name": what, "result": "intervention",
+                    "waiting_for": "brush",
+                    "extruder": self._ext_name(
+                        self.printer.manual_clean[action] - 1)}}))
         elif action == 0:
             self._spawn(self._intervention_hold(self._cal_hold, what))
 
@@ -3431,12 +3497,15 @@ class PushNotifications:
                     if temp >= T - CHAMBER_TOLERANCE:
                         self._chamber_send("chamber_reached", "chamber_reached",
                                            filename, state(temp, T),
-                                           "Printing…")
+                                           "Printing…", event=dict(
+                                               temperature=temp, target=T))
                     else:
                         self._chamber_send("chamber_fault", "chamber_timeout",
                                            filename, state(temp, T),
                                            "Printing below target chamber "
-                                           "temperature…")
+                                           "temperature…", event=dict(
+                                               kind="timeout",
+                                               temperature=temp, target=T))
                 ch["phase"] = "done"
             elif ch["phase"] == "none" and target > 0 and \
                     source != "purifier_idle" and (
@@ -3458,13 +3527,17 @@ class PushNotifications:
                     elif temp >= T:
                         self._chamber_send("chamber_reached",
                                            "chamber_reached", filename,
-                                           state(temp, T), "Printing…")
+                                           state(temp, T), "Printing…",
+                                           event=dict(temperature=temp,
+                                                      target=T))
                     else:
                         # Snapmaker's wait gave up (no rise for its TIMEOUT)
                         self._chamber_send("chamber_fault", "chamber_timeout",
                                            filename, state(temp, T),
                                            "Printing below target chamber "
-                                           "temperature…")
+                                           "temperature…", event=dict(
+                                               kind="timeout",
+                                               temperature=temp, target=T))
                     ch["phase"] = "done"
                 elif ch["ref"] is None or \
                         temp >= ch["ref"] + CHAMBER_STALL_RISE:
@@ -3476,7 +3549,9 @@ class PushNotifications:
                         "chamber_fault", "chamber_stalled", filename,
                         f"No rise in {CHAMBER_STALL_TIME / 60:.0f} min.",
                         f"Printer still waiting for {deg(T)} "
-                        f"(currently {deg(temp)})…")
+                        f"(currently {deg(temp)})…", event=dict(
+                            kind="stalled", temperature=temp, target=T,
+                            stalled_minutes=round(CHAMBER_STALL_TIME / 60)))
         if not self._ch_device:
             return
         dev = self._status.get(DRAGONBREATH) or {}
@@ -3484,10 +3559,18 @@ class PushNotifications:
             ch["connected"] = dev.get("connected")
             return
 
-        def next_line() -> str:
+        def heater_t() -> Optional[float]:
             t = (self._status.get(f"heater_generic {DRAGONBREATH}") or {}) \
                 .get("temperature")
-            t = temp if t is None else float(t)
+            return temp if t is None else float(t)
+
+        def fault_event(kind: str, **kw: Any) -> Dict[str, Any]:
+            return dict(kind=kind, waiting=ch["phase"] == "waiting",
+                        target=ch.get("target"), temperature=temp,
+                        heater_temperature=heater_t(), **kw)
+
+        def next_line() -> str:
+            t = heater_t()
             if ch["phase"] == "waiting":
                 return (f"Printer still waiting for {deg(ch['target'])}"
                         + (f" (currently {deg(t)})…" if t is not None
@@ -3499,7 +3582,8 @@ class PushNotifications:
             self._chamber_send(
                 "chamber_fault", "chamber_disconnected", filename,
                 "DragonBreath heater not responding, should shut off when "
-                "disconnected from printer.", next_line())
+                "disconnected from printer.", next_line(),
+                event=fault_event("disconnected"))
         ch["connected"] = connected
         reason = str(dev.get("fault_reason") or "fault").strip()
         if dev.get("fault"):
@@ -3507,7 +3591,8 @@ class PushNotifications:
                 ch["faults"].add(reason)
                 self._chamber_send(
                     "chamber_fault", "chamber_fault", filename,
-                    f"DragonBreath heater fault: {reason}.", next_line())
+                    f"DragonBreath heater fault: {reason}.", next_line(),
+                    event=fault_event("fault", reason=reason))
             ch["fault"] = reason
         else:
             ch["fault"] = None
@@ -3526,14 +3611,18 @@ class PushNotifications:
             temp = ch["ref"] or 0.
         self._chamber_send("chamber_waiting", "chamber_waiting", filename,
                            f"Chamber {temp:.0f} °C, target "
-                           f"{ch['target']:.0f} °C.", "Printer waiting…")
+                           f"{ch['target']:.0f} °C.", "Printer waiting…",
+                           event=dict(temperature=temp, target=ch["target"]))
 
     def _chamber_send(self, rid: str, title: str, filename: str,
-                      *lines: str) -> None:
+                      *lines: str,
+                      event: Optional[Dict[str, Any]] = None) -> None:
         if rid not in self.rows:
             return
         self._spawn(self._send(rid, self._title(title),
-                               self._lines(filename, *lines)))
+                               self._lines(filename, *lines),
+                               event={"chamber": event or {},
+                                      "file": filename}))
 
     # ---- filament loaded / unloaded ----------------------------------
 
@@ -3606,7 +3695,9 @@ class PushNotifications:
                 return      # the calibration moved on (or ended) meanwhile
         await self._send("calibration", self._title("intervention"),
                          self._lines(what, "The screen is waiting for you."),
-                         camera_wait=0.)
+                         camera_wait=0., event={"calibration": {
+                             "name": what, "result": "intervention",
+                             "waiting_for": "screen"}})
 
     async def _on_exception(self, excep: Dict[str, Any]) -> None:
         if fault_key(excep) == self._stale_fault:
@@ -3646,8 +3737,12 @@ class PushNotifications:
             filename = ps.get("filename") or ""
             if filename and ps.get("state") in ("printing", "paused"):
                 details = f"{shown(filename)}\n{details}"
+            else:
+                filename = ""
             self._mark_fault(key)
-            await self._send(rid, title, details.strip())
+            await self._send(rid, title, details.strip(), event={
+                "kind": "fault", "file": shown(filename),
+                "fault": fault_event(excep)})
         finally:
             self._faults_pending.discard(key)
 
@@ -3672,7 +3767,9 @@ class PushNotifications:
             if ps.get("state") in ("printing", "paused") else ""
         self._last_fault_send = time.monotonic()
         await self._send("shutdown", self._title("shutdown"),
-                         f"{shown(filename)}\n{msg}" if filename else msg)
+                         f"{shown(filename)}\n{msg}" if filename else msg,
+                         event={"kind": "shutdown", "file": shown(filename),
+                                "message": msg})
 
     # ---- print progress ------------------------------------------------
 
@@ -3821,7 +3918,12 @@ class PushNotifications:
                         + (f" (alert at {self.driver_hot:.0f} °C)"
                            if a in hot else "")
                         for a in self.printer.drivers.values()
-                        if temps[a] is not None))))
+                        if temps[a] is not None)),
+                    event={"limit": self.driver_hot, "drivers": [
+                        {"name": a, "temperature": float(temps[a]),
+                         "hot": a in hot}
+                        for a in self.printer.drivers.values()
+                        if temps[a] is not None]}))
         if self._by_object and not self._objects():
             # No EXCLUDE_OBJECT markers (label objects off): nothing to
             # track per object, so it's reported like a by-layer job
@@ -3857,7 +3959,8 @@ class PushNotifications:
                     "first_layer", self._title(
                         "first_layer",
                         ordinal=ORDINALS[self.layers_complete]),
-                    self._lines(shown(filename), self._time_left())))
+                    self._lines(shown(filename), self._time_left()),
+                    event={"layer": self.layers_complete}))
         pct = self._progress() * 100.
         crossed = [m for m in MILESTONES
                    if m <= pct and m not in self._milestones_sent]
@@ -3868,7 +3971,8 @@ class PushNotifications:
                 if f"progress_{m}" in self.rows:
                     self._spawn(self._send(
                         f"progress_{m}", self._title("progress", pct=m),
-                        self._lines(shown(filename), self._time_left())))
+                        self._lines(shown(filename), self._time_left()),
+                        event={"progress": m}, key="progress"))
                     break
         if "status_report" in self.rows:
             self._status_report(filename, pct)
@@ -3888,7 +3992,7 @@ class PushNotifications:
         layer, total = info.get("current_layer"), info.get("total_layer")
         parts = [f"{pct:.0f}% complete"]
         if self._by_object and self._obj_cur:
-            parts.append(str(self._obj_cur))
+            parts.append(self._object_info(self._obj_cur)["name"])
         if layer:
             parts.append(f"layer {int(layer)}"
                          + (f" of {int(total)}" if total else ""))
@@ -4127,7 +4231,11 @@ class PushNotifications:
                          else "paused", self._title("file_pause"),
                          self._lines(shown(filename), line,
                                      "Waiting for you to resume…"),
-                         delay=PAUSE_SNAPSHOT_DELAY)
+                         delay=PAUSE_SNAPSHOT_DELAY, key="file_pause",
+                         event={"pause": {
+                             "number": i + 1, "layer": p["layer"] or None,
+                             "kind": p["kind"] or "pause",
+                             "message": p["message"] or None}})
 
     def _objects(self) -> List[str]:
         return [str(o.get("name") or "") for o in
@@ -4135,6 +4243,15 @@ class PushNotifications:
 
     def _object_line(self, name: str) -> str:
         """'Object 2 of 3: Assembly' for a notification body."""
+        o = self._object_info(name)
+        where = f"Object {o['number']} of {o['count']}" if o["number"] \
+            else "Object"
+        return f"{where}: {o['name']}"
+
+    def _object_info(self, name: str) -> Dict[str, Any]:
+        """An object's name as shown (Orca's <model>_id_<n>_copy_<m> as the
+        model, numbered when it's on the plate more than once), its number
+        and how many objects there are."""
         objects = self._objects()
         n = objects.index(name) + 1 if name in objects else 0
         # Orca names objects <model>_id_<n>_copy_<m>; show the model, and
@@ -4147,8 +4264,7 @@ class PushNotifications:
                     if (RX_OBJECT_NAME.match(o) or m).group(1) == base]
             pretty = f"{base} #{same.index(name) + 1}" if len(same) > 1 \
                 else base
-        where = f"Object {n} of {len(objects)}" if n else "Object"
-        return f"{where}: {pretty}"
+        return {"name": pretty, "number": n or None, "count": len(objects)}
 
     def _track_objects(self, filename: str) -> None:
         """Print-by-object: report an object's first layers and its
@@ -4181,7 +4297,9 @@ class PushNotifications:
                 self._title("first_layer",
                             ordinal=ORDINALS[self.layers_complete]),
                 self._lines(shown(filename), self._object_line(cur),
-                            self._time_left())))
+                            self._time_left()),
+                event={"layer": self.layers_complete,
+                       "object": self._object_info(cur)}))
 
     def _object_done(self, name: str, filename: str) -> None:
         if "object_complete" not in self.rows:
@@ -4189,7 +4307,8 @@ class PushNotifications:
         self._spawn(self._send(
             "object_complete", self._title("object_complete"),
             self._lines(shown(filename), self._object_line(name),
-                        self._time_left())))
+                        self._time_left()),
+            event={"object": self._object_info(name)}))
 
     def _get_gcode_bytes(self, filename: str) -> Tuple[Any, Any]:
         if not filename:
@@ -4255,7 +4374,8 @@ class PushNotifications:
             "Resume is available on the touchscreen."
         await self._send("power_loss", self._title("power_loss"),
                          f"{shown(filename)}\n{details}" if filename else details,
-                         camera_wait=PL_CAMERA_WAIT)
+                         camera_wait=PL_CAMERA_WAIT,
+                         event={"file": shown(filename)})
 
     # ---- Spoolman: filament checks ----------------------------------------
     #
@@ -5055,7 +5175,9 @@ class PushNotifications:
         finally:
             self._ace_runouts.discard(ch)
         await self._send("error", self._title("error", kind="paused"),
-                         f"{shown(filename)}\n{describe(ex)}")
+                         f"{shown(filename)}\n{describe(ex)}",
+                         event={"kind": "paused", "file": shown(filename),
+                                "fault": fault_event(ex)})
 
     def _check_spool_switch(self) -> None:
         """A slicer filament moved to another toolhead mid-print: the

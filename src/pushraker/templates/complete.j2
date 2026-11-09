@@ -1,0 +1,6 @@
+{{ job.file }}
+Print time: {{ job.time.elapsed|default("0m") }}
+{# Moonraker's job queue: what is still waiting #}
+{% if job.queue.remaining %}
+{{ job.queue.remaining|plural("1 print", "prints") }} remaining in queue{% if job.queue.time %} (total {{ job.queue.time }}){% endif %}
+{% endif %}

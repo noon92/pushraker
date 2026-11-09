@@ -1,0 +1,6 @@
+{# The print job it happened to, if any #}
+{% if event.file %}
+{{ event.file }}
+{% endif %}
+{# The error code and what the screen says (or Klipper's message) #}
+{{ event.fault.text or event.message }}

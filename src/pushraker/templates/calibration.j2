@@ -1,0 +1,17 @@
+{# result: complete, failed, or intervention (someone is needed at the printer) #}
+{% if event.calibration.result == "failed" %}
+The printer reports an abnormal state; check the screen.
+{% elif event.calibration.result == "complete" %}
+{% if event.calibration.next %}
+{{ event.calibration.next }} starts next.
+{% else %}
+Printer is idle.
+{% endif %}
+{% else %}
+{{ event.calibration.name }}
+{% if event.calibration.waiting_for == "brush" %}
+Brush the nozzle of {{ event.calibration.extruder|toolhead("Toolhead #") }}, then tap the screen.
+{% else %}
+The screen is waiting for you.
+{% endif %}
+{% endif %}

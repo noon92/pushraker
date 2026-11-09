@@ -1,0 +1,6 @@
+{{ job.file }}
+{{ job.progress|round|int }}% complete{% if job.objects.by_object and job.objects.current %}, {{ job.objects.current }}{% endif %}{% if job.layer %}, layer {{ job.layer }}{% if job.layers %} of {{ job.layers }}{% endif %}{% endif %}.
+{# Time left by the estimation method chosen in settings; the ETA needs the time zone #}
+{% if job.time.remaining %}
+~{{ job.time.remaining }} left{% if job.time.eta %}, ETA {{ job.time.eta }}{% endif %}
+{% endif %}

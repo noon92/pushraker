@@ -1,0 +1,1 @@
+⚠️ {{ machine.name }} {% if event.chamber.kind == "timeout" %}timed out waiting for chamber temperature, printing anyway{% elif event.chamber.kind == "stalled" %}chamber not heating{% elif event.chamber.kind == "disconnected" %}chamber heater disconnected{% else %}chamber heater fault{% endif %}

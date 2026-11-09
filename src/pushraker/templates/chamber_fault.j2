@@ -1,0 +1,20 @@
+{{ event.file }}
+{# kind: timeout, stalled, disconnected or fault (the last two: DragonBreath) #}
+{% if event.chamber.kind == "timeout" %}
+Chamber {{ event.chamber.temperature|round|int }} °C, target {{ event.chamber.target|round|int }} °C.
+Printing below target chamber temperature…
+{% elif event.chamber.kind == "stalled" %}
+No rise in {{ event.chamber.stalled_minutes }} min.
+Printer still waiting for {{ event.chamber.target|round|int }} °C (currently {{ event.chamber.temperature|round|int }} °C)…
+{% else %}
+{% if event.chamber.kind == "disconnected" %}
+DragonBreath heater not responding, should shut off when disconnected from printer.
+{% else %}
+DragonBreath heater fault: {{ event.chamber.reason }}.
+{% endif %}
+{% if event.chamber.waiting %}
+Printer still waiting for {{ event.chamber.target|round|int }} °C{% if event.chamber.heater_temperature is defined %} (currently {{ event.chamber.heater_temperature|round|int }} °C)…{% else %}…{% endif %}
+{% else %}
+Print job continuing{% if event.chamber.heater_temperature is defined %}, chamber {{ event.chamber.heater_temperature|round|int }} °C…{% else %}…{% endif %}
+{% endif %}
+{% endif %}

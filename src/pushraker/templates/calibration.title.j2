@@ -1,0 +1,1 @@
+{% if event.calibration.result == "intervention" %}👋 {{ machine.name }} user intervention needed{% elif event.calibration.result == "failed" %}📐 {{ machine.name }} {{ event.calibration.name }} failed{% else %}📐 {{ machine.name }} {{ event.calibration.name }} complete{% endif %}

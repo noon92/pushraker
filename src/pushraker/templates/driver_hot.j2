@@ -1,0 +1,5 @@
+{{ job.file }}
+{# Each stepper driver with a temperature sensor; event.limit is the setting #}
+{% for d in event.drivers %}
+{{ d.name }} driver: {{ d.temperature|round|int }} °C{% if d.hot %} (alert at {{ event.limit|round|int }} °C){% endif %}
+{% endfor %}

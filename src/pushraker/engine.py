@@ -28,6 +28,8 @@ from . import templating as tp
 # The names a template starts from
 ROOTS = ("printer", "job", "extruders", "event", "machine")
 MAX_OUTPUT = 20000          # characters: a runaway loop stops here
+MAX_RANGE = 1000            # range() in a template (Jinja's own: 100000)
+MAX_POWER = 100             # the largest exponent ** takes
 
 
 class NA(jinja2.ChainableUndefined):
@@ -115,6 +117,8 @@ class View:
 
     def __bool__(self) -> bool:
         value = self._value()
+        if isinstance(value, tp.Duration):
+            return True         # 0m left is still something to say
         if value is None:
             return self._items(self._path) is not None and \
                 bool(self._items(self._path))
@@ -256,8 +260,36 @@ def _finalize(value: Any) -> Any:
     return tp.fmt_value(value, "")
 
 
-ENV = SandboxedEnvironment(undefined=NA, keep_trailing_newline=False,
-                           autoescape=False, finalize=_finalize)
+class _Sandbox(SandboxedEnvironment):
+    """Jinja's sandbox (no _attributes, no unsafe callables, str.format
+    checked), with smaller limits: range() up to MAX_RANGE, ** up to
+    MAX_POWER."""
+    intercepted_binops = frozenset(["**"])
+
+    def call_binop(self, context: Any, operator: str, left: Any,
+                   right: Any) -> Any:
+        if operator == "**":
+            try:
+                if abs(float(raw(right))) > MAX_POWER:
+                    raise jinja2.exceptions.SecurityError(
+                        f"** is limited to powers up to {MAX_POWER}")
+            except (TypeError, ValueError):
+                pass
+            return raw(left) ** raw(right)
+        return super().call_binop(context, operator, left, right)
+
+
+def _range(*args: int) -> range:
+    r = range(*args)
+    if len(r) > MAX_RANGE:
+        raise jinja2.exceptions.SecurityError(
+            f"range() is limited to {MAX_RANGE} items")
+    return r
+
+
+ENV = _Sandbox(undefined=NA, keep_trailing_newline=False,
+               autoescape=False, finalize=_finalize)
+ENV.globals["range"] = _range
 
 # A line holding only {% %} tags and {# #} comments (and spaces)
 RX_TAG_LINE = re.compile(
@@ -331,6 +363,16 @@ def _error_line(e: BaseException) -> str:
             line = tb.tb_lineno
         tb = tb.tb_next
     return f"line {line}: " if line else ""
+
+
+def prune(value: Any) -> Any:
+    """Data for a template: None values left out, so they read n/a, are
+    false and take |default()."""
+    if isinstance(value, dict):
+        return {k: prune(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [prune(v) for v in value]
+    return value
 
 
 # ---- what a template reads --------------------------------------------------

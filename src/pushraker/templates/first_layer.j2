@@ -1,0 +1,9 @@
+{{ job.file }}
+{# Printing object by object: the object that reached this layer #}
+{% if event.object %}
+Object {{ event.object.number }} of {{ event.object.count }}: {{ event.object.name }}
+{% endif %}
+{# Time left by the estimation method chosen in settings; the ETA needs the time zone #}
+{% if job.time.remaining %}
+~{{ job.time.remaining }} left{% if job.time.eta %}, ETA {{ job.time.eta }}{% endif %}
+{% endif %}

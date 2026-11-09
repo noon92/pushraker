@@ -1,0 +1,4 @@
+{{ job.file }}
+{# The pause written into the file that the print job just reached #}
+Pause{% if job.pauses.count > 1 %} {{ event.pause.number }} of {{ job.pauses.count }}{% endif %}{% if event.pause.layer %} at layer {{ event.pause.layer }}{% endif %}{% if event.pause.kind == "filament change" %} for a filament change{% endif %}, as planned in the print job.{% if event.pause.message %} "{{ event.pause.message }}"{% endif %}
+Waiting for you to resume…

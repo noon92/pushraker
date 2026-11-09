@@ -1,0 +1,5 @@
+{{ job.file }}
+{# Time left by the estimation method chosen in settings; the ETA needs the time zone #}
+{% if job.time.remaining %}
+~{{ job.time.remaining }} left{% if job.time.eta %}, ETA {{ job.time.eta }}{% endif %}
+{% endif %}

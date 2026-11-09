@@ -1,0 +1,5 @@
+{{ event.file }}
+{# Cancelled because of a fault (After: when the fault was already sent) #}
+{% if event.fault %}
+{% if event.after_fault %}After: {% endif %}{{ event.fault.text }}
+{% endif %}
