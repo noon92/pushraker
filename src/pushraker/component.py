@@ -90,6 +90,7 @@ from . import settings as cfgmod
 from . import printers
 from . import templating as tp
 from . import engine as jj
+from . import defaults as dflt
 from . import __version__
 
 if TYPE_CHECKING:
@@ -530,11 +531,16 @@ def fault_key(ex: Dict[str, Any]) -> FaultKey:
     return (ex.get("id"), ex.get("index"), ex.get("code"))
 
 
+# Moving to templates: what each notification's default template gave
+# against what was sent (see _parity)
+PARITY_LOG: List[Tuple[str, str, str, str]] = []
+
 # job.* paths that have values under them (a View in a template); some
 # are values themselves too ({{ job.time.remaining }})
 JOB_BRANCHES = [re.compile(p) for p in (
     r"time", r"time\.remaining", r"filaments", r"filament\d+",
-    r"queue", r"queue\.next", r"queue\.(?:job)?\d+", r"extruders")]
+    r"queue", r"queue\.next", r"queue\.(?:job)?\d+", r"extruders",
+    r"pauses", r"pause\d+")]
 
 # job.* values: while a print job runs or is paused, and this long after it
 # ends, for the notifications sent just after it
@@ -1518,7 +1524,8 @@ class PushNotifications:
 
         def items(path: List[str]) -> Optional[list]:
             nonlocal base
-            if path not in (["filaments"], ["queue"], ["extruders"]):
+            if path not in (["filaments"], ["queue"], ["extruders"],
+                            ["pauses"]):
                 return None
             if base is None:
                 base = self._job_base(sample)
@@ -1527,6 +1534,8 @@ class PushNotifications:
                         if f.get("used", True)]
             if path == ["queue"]:
                 return list((base.get("queue") or {}).get("items") or [])
+            if path == ["pauses"]:
+                return list((base.get("pauses") or {}).get("items") or [])
             return list(base.get("extruders") or [])
         return jj.View(look, branch, items, [], "job")
 
@@ -1756,6 +1765,19 @@ class PushNotifications:
                 if rest == ["count"]:
                     return len(names or []) if base else None
                 return names if rest in ([], ["names"]) else None
+            if head == "pauses":
+                pz = base.get("pauses") or {}
+                if not rest:
+                    return pz.get("count")
+                return tp.dig(pz, rest) if rest[0] != "items" else None
+            m = re.fullmatch(r"pause(\d+)", head)
+            if m:
+                items = (base.get("pauses") or {}).get("items") or []
+                n = int(m.group(1))
+                if not 0 < n <= len(items):
+                    return None
+                return tp.dig(items[n - 1], rest) if rest else \
+                    items[n - 1].get("layer")
             m = re.fullmatch(r"filament(\d+)", head)
             if m:
                 f = filament(int(m.group(1)))
@@ -1766,15 +1788,20 @@ class PushNotifications:
         return value
 
     def _times(self, remaining: Dict[str, Optional[float]],
-               default: Optional[float], elapsed: float) -> Dict[str, Any]:
+               default: Optional[float], elapsed: float,
+               sample: bool = False) -> Dict[str, Any]:
         rem = {m: self._dur(v) for m, v in remaining.items()}
         rem["default"] = self._dur(default)
         return {"remaining": rem,
                 "elapsed": self._dur(elapsed) if elapsed else None,
-                "eta": self._eta(default)}
+                "eta": self._eta(default, sample)}
 
-    def _eta(self, left: Optional[float]) -> Optional[tp.Clock]:
-        if left is None:
+    def _eta(self, left: Optional[float],
+             sample: bool = False) -> Optional[tp.Clock]:
+        # The printer's clock runs on UTC: an ETA needs the time zone
+        # setting (the page fills it from the browser). The preview's
+        # sample shows one anyway.
+        if left is None or (self.tz is None and not sample):
             return None
         now = datetime.datetime.now(self.tz) if self.tz else \
             datetime.datetime.now()
@@ -1794,15 +1821,30 @@ class PushNotifications:
             "plate": self._job_slicer.get("curr_bed_type") or None,
             "queue": self._queue_values(
                 filename, self._left_seconds(self._time_method())),
-            "time": self._times(
+            "time": dict(self._times(
                 {m: self._left_seconds(m) for m in self._time_methods()},
                 self._left_seconds(self._time_method()), pd),
+                estimated=self._dur(self._estimated_time(filename) or None)),
             "filaments": fils,
+            "pauses": self._pauses_values(self._job_pauses),
+            "preprint": list(self._pp_names) or None,
             "extruders": sorted({f["extruder"] for f in used
                                  if f.get("extruder")},
                                 key=lambda e: self._ext_index(e) or 0)
             or None,
         }
+
+    @staticmethod
+    def _pauses_values(pauses: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """The file's pauses: count, layers (when every pause's layer is
+        known) and each pause (layer, message, kind)."""
+        items = [{"layer": p.get("layer") or None,
+                  "message": p.get("message") or None,
+                  "kind": p.get("kind") or "pause"} for p in pauses]
+        layers = [i["layer"] for i in items if i["layer"]]
+        return {"count": len(items), "items": items,
+                "layers": layers if items and len(layers) == len(items)
+                else None}
 
     def _sample_filament(self, n: int) -> Dict[str, Any]:
         """The sample job's filament n: four in use, any number on demand."""
@@ -1820,11 +1862,12 @@ class PushNotifications:
 
     def _queue_item(self, name: str, seconds: float, grams: Optional[float],
                     meters: Optional[float], materials: List[str],
-                    start: float) -> Dict[str, Any]:
+                    start: float, sample: bool = False) -> Dict[str, Any]:
         return {"name": name, "time": self._dur(seconds) if seconds
                 else None, "grams": grams, "meters": meters,
                 "materials": materials or None,
-                "eta": self._eta(start + seconds) if seconds else None}
+                "eta": self._eta(start + seconds, sample) if seconds
+                else None}
 
     def _sample_queue_item(self, n: int, start: float = 0.
                            ) -> Dict[str, Any]:
@@ -1834,17 +1877,19 @@ class PushNotifications:
                 SAMPLE_QUEUE[(i - 1) % len(SAMPLE_QUEUE)][1] * 3600.
                 for i in range(1, n))
         return self._queue_item(name, hours * 3600., grams, meters, mats,
-                                start)
+                                start, sample=True)
 
     def _queue_summary(self, items: List[Dict[str, Any]],
-                       left: Optional[float]) -> Dict[str, Any]:
+                       left: Optional[float],
+                       sample: bool = False) -> Dict[str, Any]:
         secs = sum(float(i["time"]) for i in items if i.get("time"))
         grams = [i["grams"] for i in items if i.get("grams")]
         meters = [i["meters"] for i in items if i.get("meters")]
         return {"remaining": len(items), "items": items,
                 "list": [i["name"] for i in items] or None,
                 "time": self._dur(secs) if items else None,
-                "eta": self._eta((left or 0.) + secs) if items else None,
+                "eta": self._eta((left or 0.) + secs, sample) if items
+                else None,
                 "grams": round(sum(grams), 1) if grams else None,
                 "meters": round(sum(meters), 2) if meters else None}
 
@@ -1897,8 +1942,10 @@ class PushNotifications:
                  for n in range(1, len(SAMPLE_QUEUE) + 1)]
         return {"file": SAMPLE_FILE, "progress": 42.3,
                 "layer": 120, "layers": 285, "plate": "Textured PEI Plate",
-                "queue": self._queue_summary(queue, SAMPLE_LEFT),
-                "time": self._times(spread, SAMPLE_LEFT, 18 * 3600 + 51 * 60),
+                "queue": self._queue_summary(queue, SAMPLE_LEFT, sample=True),
+                "time": dict(self._times(spread, SAMPLE_LEFT,
+                                         18 * 3600 + 51 * 60, sample=True),
+                             estimated=self._dur(46 * 3600 + 3 * 60)),
                 "filaments": fils,
                 "extruders": sorted({f["extruder"] for f in fils},
                                     key=lambda e: self._ext_index(e) or 0)}
@@ -2357,7 +2404,8 @@ class PushNotifications:
         self, rid: str, title: str, body: str,
         filename: str = "", snapshot: Optional[str] = None,
         snapshot_ready: bool = False, delay: float = 0.,
-        camera_wait: float = 0.,
+        camera_wait: float = 0., event: Optional[Dict[str, Any]] = None,
+        key: Optional[str] = None,
     ) -> bool:
         """Send one notification to each of its destinations; images are
         optional and never block it.
@@ -2371,6 +2419,7 @@ class PushNotifications:
         row = self.rows.get(rid)
         if row is None:
             return False
+        await self._parity(key or rid, title, body, event)
         image, dests = row
         # Take a place in each channel's queue now, before any waiting
         tickets = [self._reserve(d.channel, rid) for d in dests]
@@ -2960,6 +3009,26 @@ class PushNotifications:
         clock = self._clock(est)
         return f"Estimated print time {format_duration(est)}" + (
             f", ETA {clock}" if clock else "")
+
+    async def _parity(self, key: str, title: str, body: str,
+                      event: Optional[Dict[str, Any]]) -> None:
+        """Moving to templates: with PUSHRAKER_PARITY set (the tests), the
+        notification's default template must give what was built here."""
+        if not os.environ.get("PUSHRAKER_PARITY") or key.startswith("_"):
+            return
+        d = dflt.default(key)
+        if d is None:
+            PARITY_LOG.append((key, "missing", "", ""))
+            return
+        try:
+            ctx = await self._template_context(list(d), False, event)
+            got = (jj.render(d[0], ctx), jj.render(d[1], ctx))
+        except Exception as e:
+            PARITY_LOG.append((key, "error", f"{title}\n{body}", str(e)))
+            return
+        want = (title, body)
+        PARITY_LOG.append((key, "ok" if got == want else "differs",
+                           "\n".join(want), "\n".join(got)))
 
     @staticmethod
     def _lines(*parts: str) -> str:
@@ -4001,9 +4070,7 @@ class PushNotifications:
         self._pp_sent = True
         if cfgmod.PREPRINT_ROW not in self.rows:
             return
-        names = self._pp_names
-        done = names[0] if len(names) == 1 else \
-            ", ".join(names[:-1]) + " and " + names[-1]
+        done = ", ".join(self._pp_names)
         self._spawn(self._send(
             cfgmod.PREPRINT_ROW, self._title("preprint_done"),
             self._lines(shown(filename),
@@ -4020,8 +4087,7 @@ class PushNotifications:
         where = ""
         if len(layers) == len(ps):
             where = (f" (layer {layers[0]})" if len(layers) == 1 else
-                     " (layers " + ", ".join(str(n) for n in layers[:-1])
-                     + f" and {layers[-1]})")
+                     " (layers " + ", ".join(str(n) for n in layers) + ")")
         return ("\n⏸️ Print job contains a pause" if len(ps) == 1 else
                 f"\n⏸️ Print job contains {len(ps)} pauses") + where + "."
 

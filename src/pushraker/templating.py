@@ -117,7 +117,19 @@ NAME_FORMATS = ("", "Toolhead #", "Tool #", "T#")
 
 
 class Duration(float):
-    """Seconds that read as a duration ("1h 12m" by default; patterns)."""
+    """Seconds that read as a duration ("1h 12m" by default; patterns).
+    Adding or subtracting durations (or seconds) gives a duration."""
+
+    def __add__(self, other: Any) -> "Duration":
+        return Duration(float(self) + float(other))
+
+    __radd__ = __add__
+
+    def __sub__(self, other: Any) -> "Duration":
+        return Duration(float(self) - float(other))
+
+    def __rsub__(self, other: Any) -> "Duration":
+        return Duration(float(other) - float(self))
 
 
 class Clock:

@@ -13,6 +13,7 @@
 # Exits non-zero if any check fails.
 
 import asyncio
+import datetime
 import logging
 import copy
 import email
@@ -36,6 +37,9 @@ sys.path.insert(0, HERE)
 
 _passes = 0
 _failures = 0
+# Every notification sent also renders its default template; they must
+# match (see parity_report)
+os.environ["PUSHRAKER_PARITY"] = "1"
 
 
 def check(name, ok, detail=""):
@@ -77,6 +81,9 @@ from moonraker.common import JobEvent  # noqa: E402
 import pushraker.component as pn  # noqa: E402
 
 pn.SEND_RETRY_DELAYS = (0.2, 0.2, 0.2)
+# The tests' own sends (delivery, not contents): no template to match
+pn.PushNotifications._send_unchecked = \
+    lambda self, *a, **k: self._send(*a, key="_", **k)
 pn.CONSOLE_GROUP = 0.05
 RANK_RED = 2
 CONSOLE = []
@@ -370,9 +377,9 @@ async def test_order_and_priority():
     # A status notification that is retrying doesn't hold up a fault
     log.clear()
     ntfy.fail = 2
-    c._spawn(c._send("progress_25", "⏳ U1 25%", "Benchy"))
+    c._spawn(c._send_unchecked("progress_25", "⏳ U1 25%", "Benchy"))
     await asyncio.sleep(0.05)
-    c._spawn(c._send("error", "⚠️ U1 Error: fault", "Benchy\ncode"))
+    c._spawn(c._send_unchecked("error", "⚠️ U1 Error: fault", "Benchy\ncode"))
     await asyncio.sleep(1.0)
     sent = [e["title"] for e in log if e["ok"]]
     check("fault goes ahead of a retrying status notification",
@@ -391,8 +398,8 @@ async def test_expiry_and_independence():
                                        ("email", mail, True)]})
     await start_job(server)
     t0 = time.monotonic()
-    c._spawn(c._send("progress_25", "⏳ U1 25%", "Benchy"))
-    c._spawn(c._send("complete", "✅ U1 complete", "Benchy"))
+    c._spawn(c._send_unchecked("progress_25", "⏳ U1 25%", "Benchy"))
+    c._spawn(c._send_unchecked("complete", "✅ U1 complete", "Benchy"))
     await asyncio.sleep(0.15)
     mails = [e for e in log if e["channel"] == "email"]
     check("email isn't held up by a failing push service",
@@ -443,7 +450,7 @@ async def test_same_preparation_everywhere():
                      {r: [("telegram", tg, False), ("discord", dc, False)]
                       for r in ("complete", "filament_low")})
     await start_job(server, "A & <B>.gcode")
-    await c._send("complete", "✅ U1 complete", "A & <B>\nPrint time: 1m")
+    await c._send_unchecked("complete", "✅ U1 complete", "A & <B>\nPrint time: 1m")
     item = dict(ch=0, sid=7, name="Tom & <Jerry> PLA", rem=40., full=1000.,
                 colour=(200, 0, 0), need=0., backups=[], refill_on=False,
                 exact=True, status="orange", together="green",
@@ -492,7 +499,7 @@ async def test_email_threads():
                                                          "complete")})
     await start_job(server)
     await asyncio.sleep(0.3)
-    await c._send("complete", "✅ U1 complete", "Benchy\nPrint time: 10m")
+    await c._send_unchecked("complete", "✅ U1 complete", "Benchy\nPrint time: 10m")
     msgs = [email.message_from_string(m) for m in sent]
     check("two emails sent", len(msgs) == 2, len(msgs))
     if len(msgs) == 2:
@@ -1188,7 +1195,7 @@ async def test_file_pauses():
               (55, "", "filament change")],
           c._job_pauses)
     check("started says so", log and log[0]["body"].endswith(
-        "\n\n⏸️ Print job contains 3 pauses (layers 12, 40 and 55)."),
+        "\n\n⏸️ Print job contains 3 pauses (layers 12, 40, 55)."),
         log and log[0]["body"])
     log.clear()
     # The file's pause: file position just past the pause line
@@ -1554,6 +1561,7 @@ async def test_time_left():
     left = c._time_left()
     check("the setting picks the method (file)",
           c._time_method() == "file" and left.startswith("~40m left"), left)
+    c.tz = datetime.timezone.utc       # the ETA needs a time zone
     job = c._job_values()
     check("job.time.remaining / .remaining.<m> / .eta / .elapsed",
           pn.tp.fmt_value(job(["time", "remaining"]), "") == "40m"
@@ -1689,7 +1697,7 @@ async def test_image_names():
     server, c = make({"name": "U1-martha"},
                      {"progress_50": [("ntfy", ntfy, False)]})
     await start_job(server, "sub dir/My Part (v2).gcode")
-    await c._send("progress_50", "⏳ U1-martha 50%", "x",
+    await c._send_unchecked("progress_50", "⏳ U1-martha 50%", "x",
                   filename="sub dir/My Part (v2).gcode")
     name = os.path.basename(log[0]["attach"]) if log else ""
     check("named like 2026-10-22_17-05-03_U1-martha_50pct_sub-dir-My-Part-v2.jpg",
@@ -1721,8 +1729,8 @@ async def test_send_gap():
     try:
         server, c = make({}, {"started": [("ntfy", ntfy, False)],
                               "progress_25": [("ntfy", ntfy, False)]})
-        c._spawn(c._send("started", "▶️ U1 started", "x"))
-        c._spawn(c._send("progress_25", "⏳ U1 25%", "x"))
+        c._spawn(c._send_unchecked("started", "▶️ U1 started", "x"))
+        c._spawn(c._send_unchecked("progress_25", "⏳ U1 25%", "x"))
         await asyncio.sleep(1.2)
         t = [e["t"] for e in log]
         check("second send waits for the gap, order kept",
@@ -2023,7 +2031,7 @@ async def test_console():
                                        ("email", email, True),
                                        ("webhook", hook, False)]})
     CONSOLE.clear()
-    await c._send("complete", "✅ U1 complete", "Benchy")
+    await c._send_unchecked("complete", "✅ U1 complete", "Benchy")
     await asyncio.sleep(0.3)
     check("sent where it went; each failed attempt, same causes joined; "
           "then the final failure", CONSOLE == [
@@ -2046,7 +2054,7 @@ async def test_console():
                                        ("email", FakeService(log2, "email"),
                                         True)]})
     CONSOLE.clear()
-    ok = await c._send("complete", "✅ U1 complete", "Benchy")
+    ok = await c._send_unchecked("complete", "✅ U1 complete", "Benchy")
     await asyncio.sleep(0.3)
     check("a crashed delivery counts as failed and is reported",
           ok is False and CONSOLE == [
@@ -2328,7 +2336,7 @@ async def test_preprint():
     check("complete once the last one is back to idle",
           [e["title"] for e in log] ==
           ["📐 U1 pre-print calibrations complete"]
-          and "Bed levelling and Extrusion flow calibration (pressure advance) done"
+          and "Bed levelling, Extrusion flow calibration (pressure advance) done"
           in log[0]["body"], [(e["title"], e["body"]) for e in log])
     log.clear()
     await c._on_status_update({"print_stats": {"info": {"current_layer": 1}}}, 0)
@@ -2719,6 +2727,27 @@ async def run_component_tests():
             check(t.__name__, False, repr(e))
         # let the component's background tasks finish
         await asyncio.sleep(0.2)
+    parity_report()
+
+
+def parity_report():
+    """Each notification's default template against what it sent, over
+    every send in the tests."""
+    log = pn.PARITY_LOG
+    keys = sorted({k for k, *_ in log})
+    first_bad = {}
+    for k, how, want, got in log:
+        if how != "ok" and k not in first_bad:
+            first_bad[k] = (how, want, got)
+    done = [k for k in keys if k not in first_bad]
+    print(f"\n  templates: {len(done)} of {len(keys)} notifications match"
+          f" ({', '.join(done) or 'none'})")
+    for k, (how, want, got) in sorted(first_bad.items()):
+        if how == "missing":
+            print(f"    {k}: no template yet")
+        else:
+            print(f"    {k}: {how}\n      sent:     {want!r}\n"
+                  f"      template: {got!r}")
 
 
 def main():
