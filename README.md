@@ -4,7 +4,9 @@ Push notifications for Klipper printers, as a Moonraker component: print
 started, paused, resumed, complete, cancelled, progress, first layer, faults
 and shutdowns, power-loss recovery, chamber temperature, filament (Spoolman,
 backup spools, MMUs), with pictures (camera snapshot, model preview, spool
-drawings). Sent through [Apprise](https://github.com/caronc/apprise): ntfy,
+drawings). Every notification's title, contents and image can be edited
+on the page, as Jinja templates over Klipper's values and pushraker's own
+(print job, toolheads, filament, queue). Sent through [Apprise](https://github.com/caronc/apprise): ntfy,
 Pushover, Gotify, Telegram, Discord, a webhook, email. Configured from its
 own web page, live, with no Moonraker or Klipper restart.
 
@@ -13,7 +15,7 @@ It grew out of the Push Notifications feature of the
 where it is built in. User documentation: the
 [Push Notifications guide](docs/guide.md).
 
-**Status: 0.2.** The component has been in
+**Status: 0.4.** The component has been in
 use on the Snapmaker U1 for a while; the page, the settings file and the
 installer are new. Other printers: the generic parts work (Klipper's
 standard objects: print_stats, exclude_object, heater_generic, tmc

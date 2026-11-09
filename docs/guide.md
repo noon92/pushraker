@@ -159,7 +159,7 @@ sits behind a reverse proxy under one) and an app token: in the Gotify web UI,
 Live Camera links in the text when a Printer URL is set.
 
 Gotify messages can't carry attachments, so Gotify gets **no pictures**,
-whatever the Image column says; email and the webhook still get them.
+whatever image the notification is set to; email and the webhook still get them.
 
 ### Telegram
 
@@ -297,137 +297,187 @@ On nine prints replayed from a U1's logs, Blend was within ±7 minutes
 from the halfway point on, the Snapmaker method within ±40, File within
 ±98 (and ±344 at 10 %).
 
-Every method is available to notification data whatever the setting:
-`{job.time.remaining.blend}`, `{job.time.remaining.snapmaker}`, …, and
-`{job.time.remaining.default}` (the one selected; `{job.time.remaining}`
-alone is the same). `{job.time.eta}` follows the selected method.
+Every method is available to templates whatever the setting:
+`job.time.remaining.blend`, `job.time.remaining.snapmaker`, …, and
+`job.time.remaining.default` (the one selected; `job.time.remaining`
+alone is the same). `job.time.eta` follows the selected method.
 
-## Adding data
+## Templates
 
-Every notification can end with data of your own: temperatures, fan
-speeds, what's loaded in each toolhead, what the print job uses. Each row
-of the table has an **Edit** button under **Data**: the notification adds
-the default data (no mark), its own data (red `*`), or none (blue `*`).
-**Edit default data** above the table sets the default data. The editor
-has a tree of the printer's values (click one to insert it at the cursor)
-and a preview.
+Each notification's title and contents are [Jinja](https://jinja.palletsprojects.com/en/stable/templates/)
+templates, the same language as Klipper macros. Each row's **Edit**
+button opens the editor: **Title**, **Contents**, **Image** and a
+**Preview** with the printer's live values (a sample print job when none
+is running, and a sample of what the notification is about). A red `*`
+on **Edit** marks a notification that differs from its default; **Reset**
+puts it back. Only what you change is stored: everything else follows the
+defaults, including new defaults in later versions.
 
-For example, this custom data for Print started:
+The **Values** tree inserts a value at the cursor (in the title or the
+contents, whichever you used last), with a format where there's a choice.
+The **Jinja** buttons insert `if`, `elif`, `else`, `for each` and
+`{# comment #}`; inside an `if`'s condition, **Compare** inserts `==`,
+`and`, `"text"` and so on. Inside a `for` loop, the tree starts with the
+loop item's values.
 
+```jinja
+{{ job.file }}
+{# Only when the slicer said how long #}
+{% if job.time.estimated %}
+Estimated {{ job.time.estimated|duration("H:MM") }}, ETA {{ job.time.eta }}
+{% endif %}
+Bed {{ printer.heater_bed.temperature|round|int }}°C, cavity {{ printer["temperature_sensor cavity"].temperature|round(1) }}°C
+{% for f in job.filaments %}
+{{ f.extruder|toolhead }}: {{ f.material }} {{ f.name }}, {{ f.grams|round|int }} g
+{% endfor %}
 ```
-Nozzle {extruder1.target|0}°C · Ø{extruder1.nozzle_diameter} mm
-Loaded: {extruder1.filament.material}, {extruder1.filament.name}
-Remaining {job.time.remaining.default|H:MM}, ETA {job.time.eta}
-```
 
-adds to the end of the notification:
+- `{{ … }}` prints a value, `{% … %}` is logic, `{# … #}` a comment.
+- A line holding only tags and comments leaves nothing behind (no empty
+  line); blank lines you type stay.
+- A value that isn't available reads `n/a` and counts as false:
+  `{% if job.plate %}` skips it, `|default("none")` replaces it.
+- A template with a mistake can't be saved (the editor says where). One
+  that fails when sent sends the default instead, with why.
+- Templates run sandboxed, with a time and size limit: they read values,
+  they can't change anything.
+- Templates never delay a notification: everything is read in one query
+  (5 seconds at most). Long texts are cut to the service's limit
+  (Pushover: 1024 characters).
 
-```
-Nozzle 220°C · Ø0.4 mm
-Loaded: PLA, Snapmaker PLA SnapSpeed
-Remaining 1:12, ETA 21:52
-```
+### Names
 
-- A token is `{object.field}`: a Klipper object and one of its status
-  fields, named exactly as Klipper names them (the
-  [status reference](https://www.klipper3d.org/Status_Reference.html)):
-  `heater_bed.temperature`, `temperature_sensor cavity.temperature`,
-  `fan.speed`. Any object works, in the tree or not. Klipper calls
-  toolheads `extruder`, `extruder1`, `extruder2`…
-- `job.*` values exist while a print job runs or is paused, and for 5
-  minutes after it ends.
-- A value that isn't available reads `n/a`. Data never delays or blocks
-  a notification: everything is read in one query (5 seconds at most).
-- Long texts are cut to the service's limit (Pushover: 1024 characters).
+| Name | What |
+|---|---|
+| `printer.*` | Klipper's objects, exactly as in macros: `printer.heater_bed.temperature`, `printer["temperature_sensor cavity"].temperature`, `printer.extruder1.target` ([status reference](https://www.klipper3d.org/Status_Reference.html)). Any object works, in the tree or not |
+| `job.*` | the print job ([Print job values](#print-job-values)), while one runs or is paused and for 5 minutes after it ends |
+| `extruders.*` | every toolhead ([Toolheads](#toolheads)) |
+| `event.*` | what this notification is about ([event](#event)) |
+| `machine.*` | the printer ([machine](#machine)) |
 
-### Formats
+Numbers start at 1: `job.filament1` is the slicer's first filament,
+`job.queue.job1` the next print job in the queue.
 
-After `|`, a format. The tree offers them as the last step, with
-examples; you can also type your own.
+### Filters
 
-- Numbers: `|0` `|1` `|2` decimal places. `|pct` shows a 0–1 value (fan
-  speed, heater power) as a percentage.
-- Times: `D` days, `H` hours, `M` minutes, in any case. A doubled letter
-  is two digits. The largest unit in the pattern carries the total, the
-  smaller ones what's left over. A word made only of those letters is a
-  field; other words, spaces and punctuation print as typed, and text in
-  double quotes is never read as a field. For 3 days 4 hours 5 minutes:
-  `|M` → `4565`, `|H:MM` → `76:05`, `|D H:MM` → `3 4:05`,
-  `|H"h" MM"m"` → `76h 05m`, `|D days H hours M minutes` →
-  `3 days 4 hours 5 minutes`. Without a format: `76h 05m` (as the
-  notifications write it). Seconds are dropped, never rounded up.
-- The ETA is a clock time in your time zone: `|HH:MM` → `09:05`, `|H:MM`
-  → `9:05`, with `+1d ` in front when it's tomorrow.
-- Lists (filament names, the queue): `|comma` (the default) or `|line`,
-  one per line. A number format applies to each item
-  (`{extruders.temperatures|0}` → `220, 219, 25`).
-- Toolhead names: `#` is the toolhead's number, from 1. `|Toolhead #` →
-  `Toolhead 1`, `|Tool #`, `|T#` → `T1`, or any text with `#` in it.
-  Without a format: Klipper's name (`extruder`, `extruder1`).
-- Temperatures: the tree's °C button after the decimals inserts the token
-  followed by `°C`.
+Jinja's own (`round`, `int`, `default`, `join`, `length`, `upper`,
+`replace`, `first`, `sum`, …: [list](https://jinja.palletsprojects.com/en/stable/templates/#list-of-builtin-filters)),
+and:
+
+| Filter | Example |
+|---|---|
+| `duration(pattern)` | a time: `D` days, `H` hours, `M` minutes, any case, doubled = two digits; the largest carries the total; other text prints as typed, text in double quotes never counts as a field. 3 days 4 hours 5 minutes: `"M"` → `4565`, `"H:MM"` → `76:05`, `"D H:MM"` → `3 4:05`. Without a pattern: `76h 05m`. Seconds are dropped |
+| `clock(pattern)` | the ETA, in your time zone: `"HH:MM"` → `09:05`, `"H:MM"` → `9:05`, with `+1d ` when it's tomorrow |
+| `toolhead(pattern)` | a toolhead name, or a list, by number from 1: `"Toolhead #"` (the default) → `Toolhead 2`, `"T#"` → `T2`. Without the filter: Klipper's name (`extruder1`) |
+| `pct(decimals)` | a 0–1 value (fan speed, heater power) as a percentage: `0.42` → `42%` |
+| `plural(one, many)` | `job.pauses.count\|plural("a pause", "pauses")` → `a pause`, `3 pauses` |
+| `ordinal` | `2` → `2nd` |
+| `lines` | a list, one item per line |
+
+A list prints comma-separated (`extruders.names` → `extruder, extruder1`);
+`|map("round", 1)|list` rounds each item.
+
+### Images
+
+Under **Image**, by thumbnail: **None**, **Render** (the slicer's
+picture of the model; print job notifications only), **Camera** (a
+snapshot; pick the camera, or the printer's, set as **Camera** on the
+page), **Graphic** (the spool picture, for filament notifications), with
+**Show filament remaining** for the amounts on it. Colours follow the
+running-low threshold (orange at or under it, green above).
+
+### CodeMirror
+
+**Install CodeMirror** above the contents box swaps it for a code editor
+with line numbers, colours and autocomplete (≈330 KB, MIT). It's
+downloaded from this pushraker version's release on GitHub, checked
+against its checksum, updated with pushraker, and removable from
+**Manage CodeMirror**. Templates work the same without it.
 
 ### Toolheads
 
-The extruders' own Klipper fields (`temperature`, `target`, `power`,
-`nozzle_diameter`), and two values pushraker adds, where the printer
-knows them:
+`extruders.*` is every toolhead, used by the print job or not, in
+toolhead order, as lists: `extruders.names`, `.count`, Klipper's
+`.temperatures` `.targets` `.powers` `.nozzle_diameters`, and the
+filament loaded: `.filaments` (names) `.materials` `.vendors` `.colors`
+`.grams_left` `.slots`. A toolhead with nothing loaded is left out of
+the filament lists.
 
-| Token | Value |
+One toolhead: Klipper's fields are under `printer` (`printer.extruder1.temperature`);
+what pushraker adds is under `extruders`:
+
+| Name | Value |
 |---|---|
-| `{extruder1.filament.name}` `.material` `.vendor` `.color` | the filament loaded in that toolhead |
-| `{extruder1.filament.grams_left}` | filament left on its spool (Spoolman) |
-| `{extruder1.slot}` | multiACE: the slot feeding it ("ACE 1 slot 3") |
+| `extruders.extruder1.filament.name` `.material` `.vendor` `.color` | the filament loaded in that toolhead |
+| `extruders.extruder1.filament.grams_left` | filament left on its spool (Spoolman) |
+| `extruders.extruder1.slot` | multiACE: the slot feeding it ("ACE 1 slot 3") |
 
 On the Snapmaker U1 the printer knows the loaded filament from its RFID
-tag or the screen.
-
-`extruders.*` lists every toolhead, used by the print job or not, in
-toolhead order: `{extruders.names}`, `.count`, Klipper's `.temperatures`
-`.targets` `.powers` `.nozzle_diameters`, and the filament loaded:
-`.filaments` (names) `.materials` `.vendors` `.colors` `.grams_left`
-`.slots`. A toolhead with nothing loaded is left out of the filament
-lists.
+tag or the screen. `{% for e in extruders %}` goes through the toolheads
+(`e.name`, `e.temperature`, `e.filament.name`, `e.slot`, …).
 
 ### Print job values
 
-`job.*` values are generated by pushraker, not Klipper values.
+Generated by pushraker, not Klipper values.
 
-| Token | Value |
+| Name | Value |
 |---|---|
-| `{job.file}` | the file name, without folder and extension |
-| `{job.progress}` | progress through the file, 0–100 |
-| `{job.layer}` `{job.layers}` | current layer, total layers |
-| `{job.plate}` | the plate type it was sliced for (Bambu Studio, OrcaSlicer and its forks; other slicers have none) |
-| `{job.time.remaining}` | time left, by the selected method (see Time left and ETA) |
-| `{job.time.remaining.blend}` … | time left by one method; `.default` for the selected one |
-| `{job.time.elapsed}` | print time so far (stops while paused) |
-| `{job.time.eta}` | when it should finish |
-| `{job.filaments.names}` `.materials` `.colors` `.grams` | the filaments the job uses, in slicer order |
-| `{job.filaments.count}` `.total_grams` | how many; their total weight |
-| `{job.filament#.name}` | one filament: replace `#` with its number in the slicer (1, 2, 3…) |
-| `{job.filament#.material}` `.color` `.vendor` `.grams` | its slicer settings |
-| `{job.filament#.extruder}` | the toolhead it prints with (`extruder2`) |
-| `{job.filament#.slot}` | multiACE: the slot feeding it |
-| `{job.filament#.nozzle_temperature}` `.nozzle_diameter` `.bed_temperature` | its slicer settings |
-| `{job.extruders.names}` | the toolheads the job uses (`extruder, extruder2`; `\|Toolhead #` → `Toolhead 1, Toolhead 3`) |
-| `{job.extruders.count}` | how many |
-| `{job.queue.remaining}` | print jobs waiting in Moonraker's job queue after this one |
-| `{job.queue.list}` | their names |
-| `{job.queue.time}` `.eta` `.grams` `.meters` | all of them: slicer time, when the last should finish, filament |
-| `{job.queue.next.name}` `.time` `.eta` `.grams` `.meters` `.materials` | the next one |
-| `{job.queue.#.name}` … | one by position: replace `#` with 1, 2, 3… (same fields as `next`) |
+| `job.file` | the file name, without folder and extension |
+| `job.progress` | progress through the file, 0–100 |
+| `job.layer` `job.layers` | current layer, total layers |
+| `job.plate` | the plate type it was sliced for (Bambu Studio, OrcaSlicer and its forks) |
+| `job.time.remaining` | time left, by the selected method ([Time left and ETA](#time-left-and-eta)) |
+| `job.time.remaining.blend` … | time left by one method; `.default` for the selected one |
+| `job.time.elapsed` | print time so far (stops while paused) |
+| `job.time.estimated` | the slicer's estimate for the whole print job |
+| `job.time.eta` | when it should finish |
+| `job.filaments` | the filaments the job uses, in slicer order: a list to loop over, or `.names` `.materials` `.colors` `.grams` `.count` `.total_grams` |
+| `job.filament1.name` `.material` `.color` `.vendor` `.grams` | one filament by its number in the slicer |
+| `job.filament1.extruder` | the toolhead it prints with (`extruder2`; `\|toolhead` → `Toolhead 3`) |
+| `job.filament1.slot` | multiACE: the slot feeding it |
+| `job.filament1.nozzle_temperature` `.nozzle_diameter` `.bed_temperature` | its slicer settings |
+| `job.extruders.names` `.count` | the toolheads the job uses |
+| `job.pauses` | pauses written into the file (M600, PAUSE, M601…): `.count`, `.layers`, and a list to loop over (each: `layer`, `message`, `kind`); `job.pause1.layer` … one by number |
+| `job.preprint` | pre-print calibrations chosen (Snapmaker U1) |
+| `job.objects` | exclude-object objects: `.count`, `.names`, `.current`, `.by_object` |
+| `job.queue.remaining` | print jobs waiting in Moonraker's job queue after this one |
+| `job.queue.list` | their names |
+| `job.queue.time` `.eta` `.grams` `.meters` | all of them: slicer time, when the last should finish, filament |
+| `job.queue.next.name` `.time` `.eta` `.grams` `.meters` `.materials` | the next one |
+| `job.queue.job1.name` … | one by position (same fields as `next`) |
 
 Per-filament values come from the slicer's settings at the end of the
-G-code file (OrcaSlicer, Snapmaker Orca, Bambu Studio, PrusaSlicer).
-They are what the file was sliced with, not necessarily what the printer
-does: in a multi-material print one filament's heated bed temperature
-wins, and the nozzle temperature in effect is whatever the G-code sets.
-A file without them (another slicer, hand-written G-code) reads `n/a`.
+G-code file (OrcaSlicer, Snapmaker Orca, Bambu Studio, PrusaSlicer): what
+the file was sliced with, not necessarily what the printer does (in a
+multi-material print one filament's bed temperature wins). A file
+without them reads `n/a`.
 
-In `pushraker.conf` the default data is `data_default:` and a
-notification's own is `<notification>_data: custom, <text>` (or `none`),
-with `\n` for a line break. A `#` left in a token is refused on save.
+### event
+
+What the notification is about; the **⚡ This notification** branch of
+the tree lists what each one has. For example:
+
+| Notification | event |
+|---|---|
+| Error, Warning, Klipper shutdown | `event.kind`, `event.file`, `event.fault.code` `.title` `.details` `.message` `.text` |
+| Print cancelled | `event.kind`, `event.file`, `event.fault` (when a fault caused it) |
+| Layer complete, Progress | `event.layer`, `event.progress` |
+| Object complete | `event.object.name` `.number` `.count` |
+| Paused by the print job | `event.pause.number` `.layer` `.kind` `.message` |
+| From macros and G-code | `event.title` `event.message` `event.priority` |
+| Manual calibrations | `event.calibration.name` `.result` `.next` |
+| Driver running hot | `event.limit`, `event.drivers` (each: `name`, `temperature`, `hot`) |
+| Chamber | `event.chamber.temperature` `.target`; faults: `.kind` `.stalled_minutes` `.waiting` |
+| Filament loaded / unloaded | `event.loaded`, `event.extruder`, `event.filament.name` `.grams_left` `.spool_id` |
+| Not enough filament, Spool running low | `event.count`, `event.issues` (each: `extruder`, `name`, `grams_left`, `grams_needed`, `status`, `refill`, `backups`, `together`, `blockers`, …) |
+| Switched to backup spool | `event.ace`, `event.from` / `event.to` (`label`, `extruder`, `name`, `spool_id`, `grams_left`) |
+| Spool in ACE slot ran out | `event.extruder`, `event.slot.label` `.name`, `event.next`, `event.quad_replenish.on` `.where` |
+
+### machine
+
+`machine.name` (the page's printer name), `.model`, `.hostname`, `.ip`,
+`.pushraker_version`, `.moonraker_version`, `.klipper_version`,
+`.links.web_ui` `.camera` `.errors`.
 
 ## Notifications from macros and G-code
 
@@ -443,12 +493,17 @@ RESPOND PREFIX=notify MSG="Print ejection failed || Plate still occupied, queue 
 - Fields are separated by ` || ` (space, two pipes, space): the title (before
   the first separator), the message, and optionally a priority (`min`, `low`,
   `default`, `high` or `max`) as the last field. Without one, the row's
-  **Default** priority is used. Whether a camera picture is attached is the
-  row's image checkbox, not up to the macro.
+  **Default** priority is used. The image is the one set in the row's
+  editor, not up to the macro; the row's title and contents templates
+  wrap what the macro sends (`event.title`, `event.message`).
 - Keep file names in the message, not the title. Don't use `;` anywhere:
   Klipper ends the line there.
-- In macros, Jinja template variables work (`{printer.print_stats.filename}`);
+- In macros, Klipper's own Jinja works (`{printer.print_stats.filename}`);
   in the slicer's custom G-code, its placeholders (`{input_filename_base}`).
+- pushraker's values (`job`, `extruders`, …) work too: write the Jinja
+  inside `{% raw %}…{% endraw %}` so Klipper passes it on, and pushraker
+  renders it:
+  `RESPOND PREFIX=notify MSG="{% raw %}Ejected {{ job.file }} || ETA of the next: {{ job.queue.next.eta }}{% endraw %}"`.
 - On a printer without push notifications, or with them off, the line is only
   console output: nothing fails.
 
@@ -701,15 +756,17 @@ email_to: you@gmail.com
 webhook_enabled: false
 progress_marks: 25,50,75     # the Progress row's percentages
 time_left:                   # time-left method; empty for the printer's default
-# Data added to notifications: {object.field|format} tokens, \n for a line break
-data_default: Bed {heater_bed.temperature|0}/{heater_bed.target|0}°C
-# <notification>: on|off (push), <priority>, image|no_image, email|no_email
-# <notification>_data: default | none | custom, <text>
-started: on, default, image, no_email
-started_data: custom, Toolheads: {job.extruders}\nFilament: {job.filaments.total_grams|0} g
-paused: on, default, image, no_email
-error: on, max, image, email
-complete_data: none
+# <notification>: on|off (push), <priority>, email|no_email
+started: on, default, no_email
+paused: on, default, no_email
+error: on, max, email
+...
+# Templates and images, where they differ from the defaults (\n for a line break):
+# <notification>_title, _contents, _image (none|render|camera|graphic),
+# _camera (a Moonraker webcam name), _remaining (true|false)
+started_contents: {{ job.file }}\nToolheads: {{ job.extruders.names|toolhead }}
+paused_image: none
+complete_camera: case
 ...
 ```
 
