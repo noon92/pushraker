@@ -5,30 +5,39 @@
 """Notification data: text with {object.field|format} tokens, filled in
 when a notification is sent.
 
-A token names a Klipper object and one of its status fields, as Moonraker
-reports them ({heater_bed.temperature}, {temperature_sensor cavity
-.temperature}, {print_stats.info.current_layer}), or one of pushraker's
-own values about the print job ({job.filaments}, {job.filament2.material},
-{job.time_left}: the component computes them, see component._job_values).
-An optional format follows a bar: |0 |1 |2 (decimals), |pct (a 0-1 fraction
-as a percentage), |time (seconds as "1h 12m"). A value that isn't there
-reads "n/a"; a token nobody can parse is left as typed. Rendering never
-raises: a broken token must not stop a notification.
+A token names a Klipper object and one of its status fields, exactly as
+Moonraker reports them ({heater_bed.temperature}, {temperature_sensor
+cavity.temperature}, {extruder1.nozzle_diameter}), a value pushraker adds
+to an extruder ({extruder1.filament.material}), or a value pushraker
+generates about the print job ({job.filament2.name},
+{job.time.remaining}; see component._job_values).
 
-The catalogue (what the page's picker offers) is built here too, from
-the printer's object list: known object types get friendly labels and
-their useful fields, the rest is listed under Other with raw names.
+After a bar, a format:
+  numbers     |0 |1 |2 decimals; |pct a 0-1 fraction as a percentage
+  durations   a pattern of D (days), H (hours), M (minutes), any case;
+              a doubled letter is two digits; the largest unit in the
+              pattern carries the total, the smaller ones what's left
+              over; anything else is printed as is, and text in double
+              quotes too ("h" prints h): |H:MM -> 1:05, |M -> 65
+  clock times the same letters: |HH:MM -> 09:05; a later day adds +1d
+A value that isn't there reads "n/a"; a token that can't be parsed is
+left as typed. Rendering never raises: a broken token must not stop a
+notification.
 """
 
 from __future__ import annotations
+import datetime
 import re
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 NA = "n/a"
 # {object.field}, {object with space.field.sub}, {job.filament2.name|fmt}
-RX_TOKEN = re.compile(r"\{([A-Za-z_][^{}|]*?)(?:\|([A-Za-z0-9_]+))?\}")
+RX_TOKEN = re.compile(r"\{([A-Za-z_][^{}|]*?)(?:\|([^{}|]*))?\}")
+# A token still holding the # placeholder (job.filament#.name)
+RX_PLACEHOLDER = re.compile(r"\{[^{}]*#[^{}]*\}")
 MAX_DATA = 1500      # characters of rendered data per notification
 JOB = "job"
+DECIMALS = ("0", "1", "2", "3")
 
 
 class Token:
@@ -43,7 +52,7 @@ def parse(text: str) -> List[Token]:
     """The tokens of a text, in order (duplicates included)."""
     out: List[Token] = []
     for m in RX_TOKEN.finditer(text or ""):
-        name, fmt = m.group(1).strip(), (m.group(2) or "").lower()
+        name, fmt = m.group(1).strip(), (m.group(2) or "").strip()
         if "." not in name:
             continue        # an object alone has no value
         obj, _, rest = name.partition(".")
@@ -53,6 +62,11 @@ def parse(text: str) -> List[Token]:
             continue
         out.append(Token(m.group(0), obj, path, fmt))
     return out
+
+
+def placeholders(text: str) -> List[str]:
+    """Tokens that still hold #: the user has to put a number there."""
+    return RX_PLACEHOLDER.findall(text or "")
 
 
 def objects_needed(tokens: Sequence[Token]) -> Dict[str, List[str]]:
@@ -87,8 +101,15 @@ def dig(value: Any, path: Sequence[str]) -> Any:
 
 
 class Duration(float):
-    """Seconds that read as a duration: "1h 12m" by default, |hhmm as
-    "1:12", |m as whole minutes, |h as decimal hours."""
+    """Seconds that read as a duration ("1h 12m" by default; patterns)."""
+
+
+class Clock:
+    """A clock time ("21:52", "+1d 09:05" on a later day; patterns)."""
+    __slots__ = ("at", "days")
+
+    def __init__(self, at: datetime.datetime, days: int) -> None:
+        self.at, self.days = at, days
 
 
 def format_duration(seconds: float) -> str:
@@ -99,20 +120,60 @@ def format_duration(seconds: float) -> str:
     return f"{m}m" if m else f"{seconds}s"
 
 
+RX_PATTERN = re.compile(r'"([^"]*)"|([dD]+|[hH]+|[mM]+)|(.)', re.S)
+UNIT_MINUTES = {"d": 1440, "h": 60, "m": 1}
+
+
+def apply_pattern(pattern: str, minutes: int,
+                  units_total: bool = True) -> str:
+    """D/H/M pattern over a number of minutes. units_total: the largest
+    unit in the pattern carries the total (durations); otherwise each
+    unit is the clock's own field (hours 0-23, minutes 0-59)."""
+    parts = [(m.group(1), m.group(2), m.group(3))
+             for m in RX_PATTERN.finditer(pattern)]
+    present = [u[0].lower() for _, u, _ in parts if u]
+    order = [u for u in ("d", "h", "m") if u in present]
+    values: Dict[str, int] = {}
+    if units_total:
+        left = minutes
+        for u in order:
+            values[u] = left // UNIT_MINUTES[u]
+            left -= values[u] * UNIT_MINUTES[u]
+    else:
+        values = {"d": minutes // 1440, "h": (minutes // 60) % 24,
+                  "m": minutes % 60}
+    out = []
+    for quoted, unit, other in parts:
+        if quoted is not None:
+            out.append(quoted)
+        elif unit:
+            v = values.get(unit[0].lower(), 0)
+            out.append(f"{v:02d}" if len(unit) >= 2 else str(v))
+        else:
+            out.append(other)
+    return "".join(out)
+
+
+def is_pattern(fmt: str) -> bool:
+    return bool(re.search(r"[dDhHmM]", re.sub(r'"[^"]*"', "", fmt)))
+
+
 def fmt_value(value: Any, fmt: str) -> str:
     if value is None or value == "":
         return NA
+    low = fmt.lower()
     if isinstance(value, bool):
         return "yes" if value else "no"
     if isinstance(value, Duration):
-        secs = max(0., float(value))
-        if fmt == "hhmm":
-            return "%d:%02d" % (secs // 3600, (secs % 3600) // 60)
-        if fmt == "m":
-            return str(int(round(secs / 60.)))
-        if fmt == "h":
-            return f"{secs / 3600.:.1f}"
-        return format_duration(secs)
+        minutes = int(round(max(0., float(value)) / 60.))
+        if fmt and is_pattern(fmt):
+            return apply_pattern(fmt, minutes)
+        return format_duration(float(value))
+    if isinstance(value, Clock):
+        clock = value.at.hour * 60 + value.at.minute
+        text = apply_pattern(fmt, clock, units_total=False) \
+            if fmt and is_pattern(fmt) else value.at.strftime("%H:%M")
+        return (f"+{value.days}d " if value.days > 0 else "") + text
     if isinstance(value, (list, tuple)):
         items = [fmt_value(v, fmt) for v in value]
         return ", ".join(i for i in items if i != NA) or NA
@@ -120,22 +181,17 @@ def fmt_value(value: Any, fmt: str) -> str:
         return ", ".join(f"{k}: {fmt_value(v, fmt)}" for k, v in value.items()
                          ) or NA
     if isinstance(value, (int, float)):
-        if fmt in ("0", "1", "2", "3"):
-            return f"{float(value):.{fmt}f}"
-        if fmt == "pct":
+        if low in DECIMALS:
+            return f"{float(value):.{low}f}"
+        if low == "pct":
             return f"{float(value) * 100.:.0f}%"
-        if fmt == "time":
-            return format_duration(float(value))
-        if fmt == "int":
-            return str(int(round(float(value))))
         if isinstance(value, float):
             # Klipper's floats have noise: 60.00390625 reads as 60.0
-            text = f"{value:.1f}"
-            return text[:-2] if text.endswith(".0") and fmt == "" and \
-                abs(value - round(value)) < 1e-9 else text
+            text = f"{value:.2f}".rstrip("0").rstrip(".")
+            return text
         return str(value)
     text = str(value)
-    if fmt in ("0", "1", "2", "3", "pct", "time", "int"):
+    if low in DECIMALS + ("pct",):
         try:
             return fmt_value(float(text), fmt)
         except ValueError:
@@ -151,6 +207,8 @@ def render(text: str, resolve: Callable[[Token], Any]) -> str:
         toks = parse(m.group(0))
         if not toks:
             return m.group(0)
+        if "#" in m.group(0):
+            return NA
         try:
             value = resolve(toks[0])
         except Exception:
@@ -162,46 +220,87 @@ def render(text: str, resolve: Callable[[Token], Any]) -> str:
     return out.strip()
 
 
-# ---- catalogue -----------------------------------------------------------
+# ---- the picker's tree ------------------------------------------------------
 
-# Object types the picker knows: category, label (None: the object's own
-# name after the type), fields as (field, label, format)
-THERMAL = "thermals"
-FANS = "fans"
-PRINT_JOB = "job"
-FILAMENT = "filament"
-OTHER = "other"
-CATEGORIES = [
-    (THERMAL, "🌡️ Thermals"), (FANS, "🌀 Fans"), (PRINT_JOB, "🖨️ Print job"),
-    (FILAMENT, "🧵 Filament"), (OTHER, "❔ Other"),
-]
-HEATER_FIELDS = [("temperature", "Temperature", "0"),
-                 ("target", "Target", "0"), ("power", "Power", "pct")]
-FAN_FIELDS = [("speed", "Speed", "pct"), ("rpm", "RPM", "0")]
-KNOWN: Dict[str, Tuple[str, Optional[str], List[Tuple[str, str, str]]]] = {
-    "heater_bed": (THERMAL, "Heated bed", HEATER_FIELDS),
-    "extruder": (THERMAL, "Nozzle", HEATER_FIELDS),
-    "heater_generic": (THERMAL, None, HEATER_FIELDS),
-    "temperature_sensor": (THERMAL, None,
-                           [("temperature", "Temperature", "0")]),
-    "temperature_host": (THERMAL, "Host CPU",
-                         [("temperature", "Temperature", "0")]),
-    "temperature_mcu": (THERMAL, None, [("temperature", "Temperature", "0")]),
-    "temperature_fan": (FANS, None, FAN_FIELDS + [
-        ("temperature", "Temperature", "0"), ("target", "Target", "0")]),
-    "fan": (FANS, "Part cooling fan", FAN_FIELDS),
-    "fan_generic": (FANS, None, FAN_FIELDS),
-    "heater_fan": (FANS, None, FAN_FIELDS),
-    "controller_fan": (FANS, None, FAN_FIELDS),
-    "filament_switch_sensor": (FILAMENT, None, [
-        ("filament_detected", "Filament detected", ""),
-        ("enabled", "Enabled", "")]),
-    "filament_motion_sensor": (FILAMENT, None, [
-        ("filament_detected", "Filament detected", ""),
-        ("enabled", "Enabled", "")]),
-    "output_pin": (OTHER, None, [("value", "Value", "")]),
-    "led": (OTHER, None, [("color_data", "Colour", "")]),
-    "neopixel": (OTHER, None, [("color_data", "Colour", "")]),
+def format_options(value: Any, fraction: bool = False
+                   ) -> List[Dict[str, str]]:
+    """The formats the picker offers for a value, each with how it reads:
+    [{"label": "219.8", "fmt": "1"}]. Empty: no choice to make."""
+    if isinstance(value, Duration):
+        return [{"label": fmt_value(value, f), "fmt": f}
+                for f in ("", "H:MM", "HH:MM", "M")]
+    if isinstance(value, Clock):
+        return [{"label": fmt_value(value, f), "fmt": f}
+                for f in ("", "H:MM")]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return []
+    if fraction:
+        return [{"label": fmt_value(value, "pct"), "fmt": "pct"},
+                {"label": fmt_value(value, "2"), "fmt": "2"}]
+    if isinstance(value, int):
+        return []
+    return [{"label": fmt_value(value, f), "fmt": f} for f in ("0", "1", "2")]
+
+
+def node(name: str, hint: str = "", info: str = "",
+         token: Optional[str] = None, formats: Optional[List[Dict[str, str]]]
+         = None, children: Optional[List[Dict[str, Any]]] = None,
+         placeholder: bool = False) -> Dict[str, Any]:
+    """One entry of the picker's tree. `token` (without braces) is what
+    clicking inserts (with a format, when `formats` offers some); an
+    entry with children or formats opens instead."""
+    out: Dict[str, Any] = {"name": name}
+    if hint:
+        out["hint"] = hint
+    if info:
+        out["info"] = info
+    if token:
+        out["token"] = token
+    if formats:
+        out["formats"] = formats
+    if children:
+        out["children"] = children
+    if placeholder:
+        out["placeholder"] = True
+    return out
+
+
+# Klipper's own fields of the object types the picker knows: (field, hint,
+# info, the value is a 0-1 fraction)
+HEATER_FIELDS = [
+    ("temperature", "now", "", False),
+    ("target", "set", "The temperature it is set to; 0 when off.", False),
+    ("power", "heater power", "How hard the heater is working, 0-100 %.",
+     True)]
+EXTRUDER_FIELDS = [
+    ("temperature", "nozzle, now", "", False),
+    ("target", "nozzle, set", "The nozzle temperature it is set to; 0 when "
+     "off.", False),
+    ("power", "heater power", "How hard the nozzle heater is working, "
+     "0-100 %.", True),
+    ("nozzle_diameter", "mm", "", False)]
+# Values whose decimals aren't a choice (a 0.4 nozzle is never "0")
+NO_FORMATS = {"nozzle_diameter"}
+SENSOR_FIELDS = [("temperature", "now", "", False)]
+FAN_FIELDS = [
+    ("speed", "", "Fan speed, 0-100 %.", True),
+    ("rpm", "", "Measured speed; n/a for a fan without a tachometer.",
+     False)]
+THERMAL_TYPES = {"heater_bed": HEATER_FIELDS, "heater_generic": HEATER_FIELDS,
+                 "temperature_sensor": SENSOR_FIELDS,
+                 "temperature_host": SENSOR_FIELDS,
+                 "temperature_mcu": SENSOR_FIELDS}
+FAN_TYPES = {"fan": FAN_FIELDS, "fan_generic": FAN_FIELDS,
+             "heater_fan": FAN_FIELDS, "controller_fan": FAN_FIELDS,
+             "temperature_fan": FAN_FIELDS + [
+                 ("temperature", "now", "", False),
+                 ("target", "set", "", False)]}
+GENERIC_HINTS = {"heater_bed": "heated bed", "fan": "part cooling fan",
+                 "temperature_host": "host computer"}
+FIELD_INFO = {
+    "filament_detected": "yes when the filament sensor sees filament.",
+    "enabled": "yes when the sensor is switched on.",
+    "value": "The pin's value, 0-1 (1 = fully on).",
 }
 # Klipper's and Moonraker's internals: never offered (typing a token for
 # one still works)
@@ -214,76 +313,41 @@ HIDDEN = {
     "screws_tilt_adjust", "quad_gantry_level", "z_tilt", "delta_calibrate",
     "skew_correction", "force_move", "respond", "homing_override",
     "stepper_enable", "menu", "board_pins", "gcode_arcs", "pid_calibrate",
-    "garbage_collection",
+    "garbage_collection", "heaters",
 }
-HIDDEN_PREFIXES = ("gcode_macro ", "mcu", "tmc", "stepper_", "extruder_stepper ",
+HIDDEN_PREFIXES = ("gcode_macro ", "mcu", "stepper_", "extruder_stepper ",
                    "manual_stepper ", "gcode_button ", "delayed_gcode ",
                    "duplicate_pin_override", "verify_heater ", "bed_mesh ",
                    "adxl345", "lis2dw", "display", "endstop_phase",
                    "homing_heaters", "output_pin _", "fan_generic _",
-                   "temperature_sensor _")
-# Fields of unknown objects that are worth offering: scalars, not lists
-# or dicts, and not Klipper's bookkeeping
-SKIP_FIELDS = {"is_active", "mcu_build_versions", "mcu_version",
-               "last_stats", "pins", "config"}
+                   "temperature_sensor _", "_")
+SKIP_FIELDS = {"mcu_build_versions", "mcu_version", "last_stats", "pins",
+               "config"}
 
 
-def label_for(obj: str, printer_label: Callable[[str], Optional[str]]
-              ) -> str:
-    own = printer_label(obj)
-    if own:
-        return own
-    kind, _, name = obj.partition(" ")
-    known = KNOWN.get(kind)
-    if known and known[1] and not name:
-        return known[1]
-    if kind == "extruder" and not name and obj != "extruder":
-        return f"Nozzle {int(obj[8:]) + 1}"
-    base = name or kind
-    return base.replace("_", " ").strip().capitalize()
+def hidden(obj: str, extra: Sequence[str] = ()) -> bool:
+    return obj in HIDDEN or obj in extra or obj.startswith(HIDDEN_PREFIXES)
 
 
-def catalogue(objects: Sequence[str], status: Dict[str, Dict[str, Any]],
-              printer_label: Callable[[str], Optional[str]],
-              printer_hidden: Sequence[str] = (),
-              extra: Optional[Dict[str, List[Dict[str, Any]]]] = None
-              ) -> List[Dict[str, Any]]:
-    """The picker's categories: [{"id", "label", "items": [{"label",
-    "object", "values": [{"label", "token"}]}]}]. `status` holds the
-    current fields of the unknown objects (for Other). `extra` adds items
-    to categories (the harness: the job's toolheads, an MMU's slots)."""
-    items: Dict[str, List[Dict[str, Any]]] = {c: [] for c, _ in CATEGORIES}
-    hidden = set(printer_hidden)
-    for obj in objects:
-        if obj in HIDDEN or obj in hidden or \
-                obj.startswith(HIDDEN_PREFIXES) or obj.startswith("_"):
-            continue
-        kind = obj.partition(" ")[0]
-        if kind == "extruder" or re.fullmatch(r"extruder\d+", obj):
-            kind = "extruder"
-        known = KNOWN.get(kind)
-        label = label_for(obj, printer_label)
-        if known:
-            cat, _, fields = known
-            values = [{"label": fl, "token": f"{{{obj}.{f}" + (f"|{fm}" if fm
-                                                                else "") + "}"}
-                      for f, fl, fm in fields]
-        else:
-            cat = OTHER
-            st = status.get(obj) or {}
-            values = [{"label": k.replace("_", " "), "token": f"{{{obj}.{k}}}"}
-                      for k, v in sorted(st.items())
-                      if k not in SKIP_FIELDS and not k.startswith("_")
-                      and isinstance(v, (int, float, str, bool))]
-            if not values:
-                continue
-        items[cat].append({"label": label, "object": obj, "values": values})
-    for cat, more in (extra or {}).items():
-        items.setdefault(cat, []).extend(more)
+def fields_tree(obj: str, values: Dict[str, Any], prefix: str = "",
+                depth: int = 0) -> List[Dict[str, Any]]:
+    """An object's fields as Klipper names them, for Other: numbers,
+    text and yes/no are values; nested dicts open; lists are left out."""
     out = []
-    for cid, clabel in CATEGORIES:
-        if items.get(cid):
-            out.append({"id": cid, "label": clabel, "items": items[cid]})
+    for k in sorted(values):
+        v = values[k]
+        if k in SKIP_FIELDS or k.startswith("_"):
+            continue
+        path = f"{prefix}{k}"
+        if isinstance(v, dict):
+            if depth < 2:
+                kids = fields_tree(obj, v, f"{path}.", depth + 1)
+                if kids:
+                    out.append(node(k, children=kids))
+        elif isinstance(v, (int, float, str, bool)) or v is None:
+            out.append(node(k, info=FIELD_INFO.get(k, ""),
+                            token=f"{obj}.{path}",
+                            formats=format_options(v)))
     return out
 
 

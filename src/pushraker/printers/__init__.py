@@ -99,18 +99,36 @@ class Printer:
 
     # -- notification data (templating.py) --
 
-    def label(self, obj: str) -> Optional[str]:
-        """The picker's name for one of this printer's objects (None: the
-        generic one, from the object's type and name)."""
+    def hint(self, obj: str) -> Optional[str]:
+        """A few words shown next to one of this printer's objects in the
+        picker ("cavity"); the object keeps its Klipper name."""
         return None
 
-    def job_values(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
-        """This printer's own job.* values, added to pushraker's. `ctx`
-        has the job's filaments (each a dict the method may add keys to,
-        e.g. the slot feeding it), the printer status, the toolhead map
-        (`map`: slicer filament -> toolhead), the tools used, and whether
-        this is the preview's sample job."""
+    def filament_extruder(self, index: int, ctx: Dict[str, Any]
+                          ) -> Optional[int]:
+        """The extruder (0 = extruder, 1 = extruder1...) that prints the
+        slicer's filament `index` (0 = the slicer's filament 1): T<n> on a
+        plain printer; a printer with a toolhead map looks it up."""
+        return index
+
+    def extruder_values(self, ch: int, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """What pushraker adds to extruder <ch>: {"filament": {"name",
+        "material", "vendor", "color"} of the filament loaded, "slot": the
+        MMU slot feeding it, "spool_id": its Spoolman spool}. `ctx`:
+        status (the component's subscribed objects), ptc, map, ace. Empty
+        when the printer doesn't know."""
         return {}
+
+    def extruder_catalogue(self, obj: str, spoolman: bool
+                           ) -> List[Dict[str, Any]]:
+        """Picker entries for what extruder_values gives (templating.node
+        trees under the extruder `obj`); none on a plain printer."""
+        return []
+
+    def fan_catalogue(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Picker entries for fans of this printer's own objects (the
+        objects' current status in `state`)."""
+        return []
 
     def left_seconds(self, method: str, ctx: Dict[str, Any]) -> Optional[float]:
         """Seconds left by one of this printer's own time_methods. `ctx`:
@@ -119,12 +137,6 @@ class Printer:
         virtual_sdcard.progress), layer1_pd (print time when layer 1
         began, or None). None when it can't be computed."""
         return None
-
-    def catalogue(self, ctx: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
-        """Picker items of this printer's own, by category id (see
-        templating.CATEGORIES; a new id makes a new category): {category:
-        [{"label", "object", "values": [{"label", "token"}]}]}."""
-        return {}
 
 
 from .snapmaker_u1 import SnapmakerU1  # noqa: E402

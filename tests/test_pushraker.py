@@ -1539,7 +1539,7 @@ async def test_time_left():
     m = await at(1000 + 500, pd=650, layer=1)              # layer 1 begins
     m = await at(1000 + 5000, pd=2400, layer=40, used=500.)   # 50 %
     check("first layer: the slicer's clock starts at layer 1",
-          round(m["slicer"]) == 1200 and round(m["first_layer"]) == 1850, m)
+          round(m["slicer"]) == 1200 and round(m["slicer_first_layer"]) == 1850, m)
     check("filament: by filament used", round(m["filament"]) == 2400, m)
     check("blend at 50 %: weighted slicer (from layer 1), filament and file",
           1900 < m["blend"] < 2200, m)
@@ -1555,13 +1555,16 @@ async def test_time_left():
     check("the setting picks the method (file)",
           c._time_method() == "file" and left.startswith("~40m left"), left)
     job = c._job_values()
-    check("job.time.left / .method.<m> / .eta",
-          pn.tp.fmt_value(job(["time", "left"]), "") == "40m"
-          and pn.tp.fmt_value(job(["time", "left"]), "hhmm") == "0:40"
-          and pn.tp.fmt_value(job(["time", "method", "slicer"]), "m") == "20"
-          and pn.tp.fmt_value(job(["time", "method", "default"]), "") == "40m"
-          and job(["time", "eta"]) is None,     # no time zone set: no clock
-          (job(["time", "left"]), job(["time", "method", "slicer"])))
+    check("job.time.remaining / .remaining.<m> / .eta / .elapsed",
+          pn.tp.fmt_value(job(["time", "remaining"]), "") == "40m"
+          and pn.tp.fmt_value(job(["time", "remaining"]), "H:MM") == "0:40"
+          and pn.tp.fmt_value(job(["time", "remaining", "slicer"]), "M")
+          == "20"
+          and pn.tp.fmt_value(job(["time", "remaining", "default"]), "")
+          == "40m"
+          and pn.tp.fmt_value(job(["time", "elapsed"]), "HH:MM") == "00:40"
+          and job(["time", "eta"]) is not None,
+          (job(["time", "remaining"]), job(["time", "remaining", "slicer"])))
     c.time_left_method = "nope"
     check("an unknown setting falls back to the printer's default",
           c._time_method() == "snapmaker")
@@ -2391,10 +2394,20 @@ async def test_data():
     log = []
     ntfy, pover = FakeService(log, "ntfy"), FakeService(log, "pushover")
     STATE["heater_bed"] = {"temperature": 59.6, "target": 60.0, "power": 0.3}
+    for n in ("extruder", "extruder1", "extruder2", "extruder3"):
+        STATE[n] = {"temperature": 219.8, "target": 220.0, "power": 0.31,
+                    "nozzle_diameter": 0.4}
+    STATE["fan"] = {"speed": 0.55, "rpm": None}
+    STATE["purifier"] = {"exhaust_fan": {"speed": 0.4}, "inner_fan":
+                         {"speed": 1.0}, "inner_fan_rpm": 3200}
+    STATE["some_addon"] = {"state": "idle", "count": 3, "nested": {"x": 1.5}}
     STATE["temperature_sensor cavity"] = {"temperature": 31.0}
     STATE["print_task_config"] = {"extruder_map_table": [2, 0, 1, 3],
                                   "filament_type": ["PETG", "PLA", "PLA", "NONE"],
-                                  "filament_vendor": ["Elegoo", "Bambu", "", ""]}
+                                  "filament_vendor": ["Elegoo", "Bambu", "Bambu", ""],
+                                  "filament_exist": [True, True, True, False],
+                                  "filament_color_rgba": ["FF0000FF", "FFFFFFFF",
+                                                          "000000FF", ""]}
     META["filament_weight"] = [14.3, 0, 3.2]
     with open(os.path.join(GCODES, "Benchy.gcode"), "wb") as f:
         f.write(b"G28\n" * 50 + b"; CONFIG_BLOCK_START\n"
@@ -2410,15 +2423,20 @@ async def test_data():
     text = ("Bed {heater_bed.temperature|0}/{heater_bed.target|0}°C · "
             "Cavity {temperature_sensor cavity.temperature|0}°C\n"
             "Filaments: {job.filaments} · {job.filaments.materials} · "
-            "{job.filaments.count} · {job.tools} · {job.filament_g|0} g\n"
-            "F1: {job.filament1.name}, {job.filament1.nozzle.temperature|0}°C, "
-            "bed {job.filament1.bed.temperature|0}°C, Ø{job.filament1.nozzle.diameter}, "
-            "{job.filament1.tool}\n"
-            "F3 bed: {job.filament3.bed.temperature|0} · F2 colour: {job.filament2.color}\n"
+            "{job.filaments.count} · {job.extruders} · "
+            "{job.filaments.total_grams|0} g\n"
+            "F1: {job.filament1.name}, {job.filament1.nozzle_temperature|0}°C, "
+            "bed {job.filament1.bed_temperature|0}°C, Ø{job.filament1.nozzle_diameter}, "
+            "{job.filament1.extruder}\n"
+            "F3 bed: {job.filament3.bed_temperature|0} · F2 colour: {job.filament2.color}\n"
+            "T2 loaded: {extruder2.filament.material}, {extruder2.filament.name}\n"
             "Missing: {nope.x} {heater_bed.nope} {job.filament7.name} · "
             "Power {heater_bed.power|pct} · {broken")
     server, c = make({"data_started": text, "data_default": "Layer {job.layer}",
-                      "data_progress": "Progress {job.progress|0}% · {job.time_left}"},
+                      "data_progress": "Progress {job.progress|0}% · "
+                                       "{job.time.remaining.default|H:MM} · "
+                                       "{job.time.remaining.file|M} · "
+                                       "{job.time.elapsed|HH:MM}"},
                      {"started": [("ntfy", ntfy, False)],
                       "paused": [("pushover", pover, False)],
                       "progress_50": [("ntfy", ntfy, False)]})
@@ -2429,10 +2447,13 @@ async def test_data():
           "Bed 60/60°C · Cavity 31°C" in body, body)
     check("job.filaments: the filaments the job uses, slicer order, names "
           "from the slicer",
-          "Filaments: PLA Basic @U1, PLA Matte · PLA, PLA · 2 · T0, T2 · 18 g"
-          in body, body)
-    check("per-filament slicer settings (slicer numbering, plate-type bed)",
-          "F1: PLA Basic @U1, 220°C, bed 60°C, Ø0.4, T0" in body, body)
+          "Filaments: PLA Basic @U1, PLA Matte · PLA, PLA · 2 · "
+          "extruder1, extruder2 · 18 g" in body, body)
+    check("per-filament slicer settings (slicer numbering, plate-type bed), "
+          "the extruder from the toolhead map",
+          "F1: PLA Basic @U1, 220°C, bed 60°C, Ø0.4, extruder2" in body, body)
+    check("the filament loaded in an extruder (print_task_config)",
+          "T2 loaded: PLA, Bambu PLA" in body, body)
     check("a filament the job doesn't use still has its slicer values",
           "F3 bed: 55 · F2 colour: #00FF00" in body, body)
     check("unavailable values read n/a; an unparsable token is left alone",
@@ -2449,9 +2470,9 @@ async def test_data():
     await asyncio.sleep(0.4)
     body = log[0]["body"] if log else ""
     check("progress_50 gets the Progress row's data, with job.progress "
-          "and job.time_left",
+          "and job.time patterns",
           body.startswith("Benchy\n~") and "\nProgress 52% · " in body
-          and body.endswith("m"), body)
+          and re.search(r"Progress 52% · \d+:\d\d · \d+ · 00:30$", body), body)
     # The preview: the sample job when none is running, live values
     log.clear()
     await server.handlers["job_state:state_changed"](
@@ -2460,24 +2481,63 @@ async def test_data():
     c._status["print_stats"]["state"] = "complete"
     out = await c._ep_preview(WebRequest("POST", {"row": "started", "text":
         "{job.file} {job.filaments} {job.filament1.material} "
-        "{heater_bed.temperature|0} {job.toolheads}"}))
-    check("preview: the sample Benchy for job values, the printer's live "
-          "values for Klipper objects",
+        "{heater_bed.temperature|0} {job.extruders} {job.filament29.name} "
+        "{job.filament29.extruder} {job.time.remaining|H:MM} {job.filament#.name}"}))
+    check("preview: the sample Benchy for job values, any filament number, "
+          "the printer's live values for Klipper objects; # reads n/a",
           out["text"] == "3DBenchy_PLA_1h12m PLA Basic White PLA 60 "
-          "Toolhead 1 (PLA Basic White)" and not out["live_job"], out)
+          "extruder PLA Basic White extruder 0:41 n/a"
+          and not out["live_job"] and out["placeholders"]
+          == ["{job.filament#.name}"], out)
     cat = await c._ep_objects(WebRequest("GET"))
     cats = {x["id"]: x for x in cat["categories"]}
-    thermals = {i["label"]: i for i in cats["thermals"]["items"]}
-    check("catalogue: friendly labels from the harness, fields with formats",
-          "Heated bed" in thermals and "Cavity" in thermals
-          and thermals["Heated bed"]["values"][0]["token"]
-          == "{heater_bed.temperature|0}"
-          and "print_task_config" not in str(cat), sorted(thermals))
-    check("catalogue: pushraker's job values and the U1's toolheads",
-          any(v["token"] == "{job.filaments}" for i in cats["job"]["items"]
-              for v in i["values"])
-          and any(v["token"] == "{job.toolheads}" for i in cats["job"]["items"]
-                  for v in i["values"]), cats["job"])
+
+    def names(nodes):
+        return [n["name"] for n in nodes]
+    check("tree: Klipper's own names, the extruders under Toolheads",
+          "heater_bed" in names(cats["thermals"]["children"])
+          and "temperature_sensor cavity" in names(cats["thermals"]["children"])
+          and "extruder" not in names(cats["thermals"]["children"])
+          and names(cats["toolheads"]["children"])[:2] == ["extruder",
+                                                          "extruder1"]
+          and "print_task_config" not in str(cat), cats.keys())
+    ext1 = cats["toolheads"]["children"][1]
+    check("an extruder: Klipper's fields, then the filament loaded",
+          names(ext1["children"])[-1] == "filament"
+          and {"temperature", "target", "power"} <= set(names(ext1["children"]))
+          and ext1["children"][0]["token"] == "extruder1.temperature", ext1)
+    job = {n["name"]: n for n in cats["job"]["children"]}
+    rem = {n["name"]: n for n in job["time"]["children"]}["remaining"]
+    check("time: remaining (default first, then alphabetical), elapsed, eta",
+          names(job["time"]["children"]) == ["remaining", "elapsed", "eta"]
+          and names(rem["children"])[0] == "default"
+          and names(rem["children"])[1:] == sorted(names(rem["children"])[1:])
+          and [f["fmt"] for f in rem["children"][0]["formats"]]
+          == ["", "H:MM", "HH:MM", "M"], names(rem["children"]))
+    check("filament#: the placeholder, every value as the slicer gives it",
+          job["filament#"]["children"][0]["token"] == "job.filament#.name"
+          and job["filament#"]["children"][0].get("placeholder"), job["filament#"])
+
+    # Click every value: each token (and each format) the tree offers
+    # previews to a value with the sample print job, never n/a
+    def leaves(nodes):
+        for n in nodes:
+            if n.get("token"):
+                yield n
+            yield from leaves(n.get("children") or [])
+    bad = []
+    for catg in cat["categories"]:
+        for n in leaves(catg["children"]):
+            fmts = [f["fmt"] for f in n.get("formats") or []] or [""]
+            for fmt in fmts:
+                for num in ("1", "29"):
+                    tok = "{" + n["token"].replace("#", num) + \
+                        ("|" + fmt if fmt else "") + "}"
+                    got = (await c._ep_preview(WebRequest(
+                        "POST", {"row": "started", "text": tok})))["text"]
+                    if got in ("", "n/a") or "n/a" in got:
+                        bad.append((tok, got))
+    check("every value in the tree previews to a real value", not bad, bad)
     # Pushover's 1024-character limit: the body is cut, the data last
     c.data = {"paused": "x" * 2000}
     STATE["print_stats"] = ps("paused")

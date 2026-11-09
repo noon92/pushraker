@@ -645,6 +645,16 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     for rid in ROW_IDS:
         if ROW[rid][5] is None:
             s["rows"][rid]["image"] = False
+    if s["time_left"] == "first_layer":       # 0.3.1's name
+        s["time_left"] = "slicer_first_layer"
+    from .templating import placeholders
+    for rid, text in [("default", s["data_default"])] + [
+            (rid, s["rows"][rid].get("data", "")) for rid in ROW_IDS]:
+        left = placeholders(text)
+        if left:
+            what = "Default data" if rid == "default" else ROW[rid][1]
+            raise ConfigError(f"{what}: replace # in {left[0]} with a "
+                              "filament number")
     if s["time_left"] and env is not None and env.time_methods and \
             s["time_left"] not in {m["id"] for m in env.time_methods}:
         raise ConfigError("Unknown time-left method")

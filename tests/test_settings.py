@@ -322,6 +322,18 @@ def run_settings_tests():
           and moved["rows"]["complete"]["priority"] == "high", moved)
     check("...and pass validation as they are",
           not st.stored_error(moved, ENV), st.stored_error(moved, ENV))
+    try:
+        st.validate(dict(rows={"started": {"data_mode": "custom",
+                                           "data": "{job.filament#.name}"}}),
+                    fresh(), ENV)
+        ok, msg = False, "accepted"
+    except st.ConfigError as e:
+        ok, msg = "replace # in {job.filament#.name}" in str(e), str(e)
+    check("a # left in a data text is refused on save, naming the token",
+          ok, msg)
+    check("0.3.1's first_layer method name is read as slicer_first_layer",
+          st.validate(dict(time_left="first_layer"), fresh())["time_left"]
+          == "slicer_first_layer")
     check("older settings: provider none means push off",
           not st.parse_section({"provider": "none"}, fresh())["push_enabled"])
     view = st.public_view(moved, ENV, False, "0.1.0")
