@@ -146,8 +146,8 @@ def run_settings_tests():
     check("print hooks: lift and report for complete and cancel, the error "
           "row for a fault cancel", hv == {"complete": 2, "cancelled": 2,
                                            "fault": 2}, hv)
-    s2 = dict(s, rows=dict(s["rows"], complete=dict(s["rows"]["complete"],
-                                                     image=False)))
+    s2 = dict(s, rows=dict(s["rows"]),
+              templates={"complete": {"image": "none"}})
     s2["rows"]["error"] = dict(s2["rows"]["error"], enabled=False)
     hv = st.hook_values(s2, ENV)
     check("...report only without a picture; cancel row when error is off",
@@ -232,7 +232,7 @@ def run_settings_tests():
           "tk_secret123" not in cfg_text and "tk_secret123" in sec_text
           and oct(os.stat(store.secrets_path).st_mode & 0o777) == "0o600"
           and cfg_text.startswith("[pushraker]\n")
-          and "\nstarted: on, default, image, no_email\n" in cfg_text,
+          and "\nstarted: on, default, no_email\n" in cfg_text,
           cfg_text[:300])
     back = store.load()
     check("everything comes back", back["secret"] == "tk_secret123"
@@ -317,20 +317,40 @@ def run_settings_tests():
           moved["enabled"] and moved["name"] == "Martha"
           and moved["secret"] == "tk_old" and moved["camera"] == "case"
           and moved["rows"]["started"] == {"enabled": False, "priority": "low",
-                                           "image": False, "email": True,
-                                           "data_mode": "default", "data": ""}
+                                           "email": True}
+          and moved["templates"]["started"] == {"image": "none"}
           and moved["rows"]["complete"]["priority"] == "high", moved)
     check("...and pass validation as they are",
           not st.stored_error(moved, ENV), st.stored_error(moved, ENV))
     try:
-        st.validate(dict(rows={"started": {"data_mode": "custom",
-                                           "data": "{job.filament#.name}"}}),
+        st.validate(dict(templates={"started": {
+            "contents": "{{ job.file }}\n{% if job.queue %}\nx"}}),
                     fresh(), ENV)
         ok, msg = False, "accepted"
     except st.ConfigError as e:
-        ok, msg = "replace # in {job.filament#.name}" in str(e), str(e)
-    check("a # left in a data text is refused on save, naming the token",
+        ok, msg = str(e).startswith("Print started, contents: line "), str(e)
+    check("a template Jinja can't read is refused on save, saying where",
           ok, msg)
+    t = st.validate(dict(templates={"paused": {
+        "contents": st.template_default("paused")["contents"],
+        "image": "render"}}), fresh(), ENV)
+    check("only what differs from the default is kept",
+          t["templates"] == {"paused": {"image": "render"}}, t["templates"])
+    t2 = st.validate(dict(templates={"paused": None}), t, ENV)
+    check("Reset: back to the default", t2["templates"] == {},
+          t2["templates"])
+    work2 = tempfile.mkdtemp(prefix="pushraker_tpl_")
+    store2 = st.Store(os.path.join(work2, "config"), work2, name="T")
+    store2.save(st.validate(dict(templates={"started": {
+        "title": "Go {{ machine.name }}", "contents": "a\n\nb",
+        "remaining": False, "image": "camera", "camera": "chamber"}}),
+        store2.load(), ENV))
+    back2 = store2.load()
+    check("an edited template goes through pushraker.conf and back",
+          back2["templates"]["started"] == {
+              "title": "Go {{ machine.name }}", "contents": "a\n\nb",
+              "remaining": False, "image": "camera", "camera": "chamber"},
+          back2["templates"])
     check("0.3.1's first_layer method name is read as slicer_first_layer",
           st.validate(dict(time_left="first_layer"), fresh())["time_left"]
           == "slicer_first_layer")
@@ -367,10 +387,10 @@ def run_hidden_rows_tests():
     store.save(store.load())
     text = open(store.settings_path).read()
     check("the settings file lists them, off",
-          "\nwarning: off, max, image, no_email\n" in text, text[-400:])
+          "\nwarning: off, max, no_email\n" in text, text[-400:])
     with open(store.settings_path, "w") as f:
-        f.write(text.replace("\nwarning: off, max, image, no_email\n",
-                             "\nwarning: on, max, image, no_email\n"))
+        f.write(text.replace("\nwarning: off, max, no_email\n",
+                             "\nwarning: on, max, no_email\n"))
     edited = store.load()
     meta = {m["id"]: m for m in st.public_view(edited, env, False, "0")
             ["meta"]["rows"]}

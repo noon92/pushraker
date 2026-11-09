@@ -278,6 +278,14 @@ CLOCK_FORMATS = ("", "H:MM")
 
 def format_options(value: Any, fraction: bool = False
                    ) -> List[Dict[str, str]]:
+    out = _format_options(value, fraction)
+    for o in out:
+        o["filter"] = jinja_filter(value, o["fmt"])
+    return out
+
+
+def _format_options(value: Any, fraction: bool = False
+                    ) -> List[Dict[str, str]]:
     """The formats the picker offers for a value, each with how it reads:
     [{"label": "219.8", "fmt": "1"}]. Empty: no choice to make. Time
     formats read on a fixed example (27h 12m; 09:05 tomorrow), so every
@@ -302,7 +310,9 @@ def format_options(value: Any, fraction: bool = False
     if isinstance(value, (list, tuple)) and any(
             isinstance(v, float) for v in value) and all(
             v is None or isinstance(v, (int, float)) for v in value):
-        return [{"label": fmt_value(value, f), "fmt": f}
+        return [{"label": fmt_value(value, "pct") if f == "pct" else
+                 fmt_value([round(v, int(f)) if f and v is not None else v
+                            for v in value], ""), "fmt": f}
                 for f in (("pct", "2") if fraction else ("", "0", "1"))] + \
             [{"label": "one per line", "fmt": "line"}]
     if isinstance(value, (list, tuple)):
@@ -312,10 +322,63 @@ def format_options(value: Any, fraction: bool = False
         return []
     if fraction:
         return [{"label": fmt_value(value, "pct"), "fmt": "pct"},
-                {"label": fmt_value(value, "2"), "fmt": "2"}]
+                {"label": fmt_value(round(value, 2), ""), "fmt": "2"}]
     if isinstance(value, int):
         return []
-    return [{"label": fmt_value(value, f), "fmt": f} for f in ("0", "1", "2")]
+    # As Jinja's round() writes them (no trailing zeros)
+    return [{"label": fmt_value(round(value, int(f)), ""), "fmt": f}
+            for f in ("0", "1", "2")]
+
+
+def jinja_name(token: str) -> str:
+    """A picker token as the template names it: job.* and extruders.* as
+    they are, a toolhead's added values under extruders, Klipper's objects
+    under printer (printer["name with spaces"]); a queue position is
+    job.queue.job<N>."""
+    toks = parse("{" + token + "}")
+    if not toks:
+        return token
+    t = toks[0]
+    path = list(t.path)
+    if t.obj == JOB and len(path) > 1 and path[0] == "queue" and \
+            (path[1] == "#" or path[1].isdigit()):
+        path[1] = "job" + path[1]
+    if t.obj in (JOB, EXTRUDERS):
+        return ".".join([t.obj] + path)
+    if re.fullmatch(r"extruder\d*", t.obj) and path and \
+            path[0] in ("filament", "slot"):
+        return ".".join([EXTRUDERS, t.obj] + path)
+    base = f'printer["{t.obj}"]' if not re.fullmatch(r"\w+", t.obj) \
+        else f"printer.{t.obj}"
+    return ".".join([base] + path)
+
+
+def jinja_filter(value: Any, fmt: str) -> str:
+    """A picker format as a Jinja filter: |round(1), |pct, |lines,
+    |duration('H:MM'), |clock('H:MM'), |toolhead('T#')."""
+    if not fmt or fmt == "comma":
+        return ""
+    if fmt == "line":
+        return "|lines"
+    if fmt == "pct":
+        return "|pct"
+    quoted = "'" + fmt.replace("'", "") + "'"
+    sample = value[0] if isinstance(value, (list, tuple)) and value \
+        else value
+    if isinstance(sample, ToolName) or (isinstance(value, (list, tuple))
+                                        and any(isinstance(v, ToolName)
+                                                for v in value)):
+        return f"|toolhead({quoted})"
+    if isinstance(sample, Duration):
+        return f"|duration({quoted})"
+    if isinstance(sample, Clock):
+        return f"|clock({quoted})"
+    if fmt.isdigit():
+        n = int(fmt)
+        if isinstance(value, (list, tuple)):
+            return f"|map('round', {n})|list"
+        return "|round|int" if n == 0 else f"|round({n})"
+    return ""
 
 
 def node(name: str, hint: str = "", info: str = "",
@@ -332,6 +395,7 @@ def node(name: str, hint: str = "", info: str = "",
         out["info"] = info
     if token:
         out["token"] = token
+        out["expr"] = jinja_name(token)
     if formats:
         out["formats"] = formats
     if children:

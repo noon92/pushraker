@@ -210,8 +210,10 @@ def _toolhead(value: Any, pattern: str = "Toolhead #") -> str:
 
 
 def _pct(value: Any, decimals: int = 0) -> str:
-    """A 0-1 fraction as a percentage: 0.42 -> 42%."""
+    """A 0-1 fraction as a percentage: 0.42 -> 42% (each, for a list)."""
     v = raw(value)
+    if isinstance(v, (list, tuple)):
+        return ", ".join(_pct(x, decimals) for x in v if x is not None)
     try:
         return f"{float(v) * 100.:.{int(decimals)}f}%"
     except (TypeError, ValueError):
@@ -321,6 +323,11 @@ def compile_template(text: str) -> jinja2.Template:
         return ENV.from_string(_tag_lines(text))
     except jinja2.TemplateSyntaxError as e:
         raise TemplateError(f"line {e.lineno}: {e.message}") from None
+
+
+# A value still holding the # placeholder (job.filament#.name): the
+# number is to be typed in. Not a # inside a filter's text (|toolhead('T#')).
+RX_PLACEHOLDER = re.compile(r"(?<![\w'\"#])[a-z_]+\d*(?:\.\w+)*#[\w.]*")
 
 
 def check(text: str) -> Optional[str]:

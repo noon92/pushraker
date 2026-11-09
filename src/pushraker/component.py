@@ -116,13 +116,6 @@ ROW_IDS = (
     "filament_short", "filament_low", "spool_switch", "slot_empty",
 )
 SPOOLMAN_ROWS = ("filament_short", "filament_low", "spool_switch")
-# Notification data (templating.py) is set per settings row; the
-# component's rows that share one
-DATA_ALIAS = {"preprint_done": "started", "file_pause": "paused",
-              "object_complete": "complete",
-              **{f"progress_{m}": "progress" for m in MILESTONES},
-              **{f"macro_{p}": "macro" for p in
-                 ("min", "low", "default", "high", "max")}}
 DATA_QUERY_TIMEOUT = 5.
 # Time-left methods, id -> (label, help); see _left_seconds
 TIME_METHODS = {
@@ -549,6 +542,9 @@ def fault_key(ex: Dict[str, Any]) -> FaultKey:
 
 TEMPLATE_TIMEOUT = 2.       # seconds a template may take to render
 
+# event.* in the editor's preview, per notification
+SAMPLE_EVENTS: Dict[str, Dict[str, Any]] = {}
+
 # Moving to templates: what each notification's default template gave
 # against what was sent (see _parity)
 PARITY_LOG: List[Tuple[str, str, str, str]] = []
@@ -848,10 +844,6 @@ class PushNotifications:
                 v = self._option(config, key)
                 if v:
                     out[key] = v
-        for rid in set(ROW_IDS) | set(DATA_ALIAS.values()) | {"default"}:
-            v = config.get(f"data_{rid}", None)
-            if v is not None:
-                out[f"data_{rid}"] = str(v)
         return out
 
     def _apply_options(self, opts: Dict[str, str]) -> None:
@@ -904,6 +896,10 @@ class PushNotifications:
         self.rows = rows
         self.name: str = get("name", "Printer")
         self.snapshot_url: Optional[str] = opts.get("snapshot_url") or None
+        # A notification's own camera, where it has one (by template key)
+        self.snapshot_urls: Dict[str, str] = {
+            k[len("snapshot_url_"):]: v for k, v in opts.items()
+            if k.startswith("snapshot_url_") and v}
         # "Layer N complete" is reported when layer N + 1 starts
         self.layers_complete: int = int(num("layers_complete", 2, 1, 3))
         # Print-by-object: "layer N complete" for each object, or once
@@ -944,11 +940,6 @@ class PushNotifications:
             self.error_index_url = opts["error_index_url"]
         # RESPOND PREFIX=notify MSG="title || message || priority"
         self.macro_priority: str = get("macro_priority", "default")
-        # Data added to the end of each row's notifications (templating.py),
-        # by the settings' row id
-        self.data: Dict[str, str] = {
-            k[5:]: v for k, v in opts.items()
-            if k.startswith("data_") and v}
         # Time-left method: "" means the printer's default
         self.time_left_method: str = get("time_left", "")
         logging.info("[pushraker] enabled: %s", ", ".join(
@@ -1424,9 +1415,6 @@ class PushNotifications:
 
     # ---- notification data (templating.py) ----------------------------------
 
-    def _data_for(self, rid: str) -> str:
-        return self.data.get(DATA_ALIAS.get(rid, rid), "")
-
     @staticmethod
     def _ext_index(obj: str) -> Optional[int]:
         """extruder -> 0, extruder3 -> 3; None for anything else."""
@@ -1437,37 +1425,6 @@ class PushNotifications:
     def _ext_name(ch: int) -> tp.ToolName:
         return tp.ToolName("extruder" if ch == 0 else f"extruder{ch}",
                            ch + 1)
-
-    async def _data_text(self, rid: str, text: Optional[str] = None,
-                         sample: bool = False) -> str:
-        """The row's data, rendered: one Moonraker query for every object
-        the tokens read, the values pushraker adds for the rest. Never
-        raises; what can't be read is "n/a". `sample`: the preview, with a
-        sample print job when none is running."""
-        text = self._data_for(rid) if text is None else text
-        if not text.strip():
-            return ""
-        try:
-            tokens = tp.parse(text)
-            need = tp.objects_needed(tokens)
-            for t in tokens:
-                f = EXTRUDERS_KLIPPER.get(t.path[0]) \
-                    if t.obj == tp.EXTRUDERS else None
-                for ext in self.printer.extruders if f else ():
-                    if f not in need.setdefault(ext, []):
-                        need[ext].append(f)
-            state: Dict[str, Any] = {}
-            if need:
-                try:
-                    state = await asyncio.wait_for(self._query(need),
-                                                   DATA_QUERY_TIMEOUT)
-                except Exception as e:
-                    logging.warning("[pushraker] data query: %s", e)
-            resolve = await self._resolver(tokens, state, sample)
-            return tp.render(text, resolve)
-        except Exception as e:
-            logging.warning("[pushraker] notification data: %s", e)
-            return ""
 
     # ---- templates (Jinja) ----------------------------------------------
 
@@ -2292,14 +2249,34 @@ class PushNotifications:
         ]
 
     async def _ep_preview(self, web_request: Any) -> Dict[str, Any]:
-        """The page's Preview: the text rendered with the printer's live
-        values, and a sample print job when none is running."""
+        """The editor's Preview: a notification's title and contents
+        rendered with the printer's live values, a sample print job when
+        none is running, and a sample of what the notification is about.
+        A mistake comes back as error (where and what), not raised."""
         args = dict(web_request.get_args())
-        text = cfgmod.clean_text(args.get("text", ""))
-        rid = str(args.get("row") or "started")
-        rendered = await self._data_text(rid, text, sample=True)
-        return {"text": rendered, "live_job": self._job_active or self._busy(),
-                "placeholders": tp.placeholders(text)}
+        key = str(args.get("key") or "started")
+        title = cfgmod.clean_text(args.get("title", ""), cfgmod.TITLE_MAX)
+        contents = cfgmod.clean_text(args.get("contents", ""),
+                                     cfgmod.CONTENTS_MAX)
+        out: Dict[str, Any] = {"title": "", "text": "", "error": None,
+                               "live_job": self._job_active or self._busy(),
+                               "placeholders": [m.group(0) for m in
+                                                jj.RX_PLACEHOLDER.finditer(
+                                                    title + contents)]}
+        ctx = await self._template_context([title, contents], True,
+                                           self._sample_event(key))
+        for field, text in (("title", title), ("text", contents)):
+            try:
+                out[field] = await self._render(text, ctx)
+            except jj.TemplateError as e:
+                out["error"] = {"field": "title" if field == "title"
+                                else "contents", "message": str(e)}
+        return out
+
+    def _sample_event(self, key: str) -> Dict[str, Any]:
+        """What the preview shows for event.* (the sample of what the
+        notification is about)."""
+        return dict(SAMPLE_EVENTS.get(key) or {})
 
     @staticmethod
     def _email_hint(why: str) -> List[str]:
@@ -2406,16 +2383,20 @@ class PushNotifications:
             return None
         return path
 
-    async def _fetch_snapshot(self, quiet: bool = False) -> Optional[str]:
+    async def _fetch_snapshot(self, quiet: bool = False,
+                              key: str = "") -> Optional[str]:
+        """A snapshot from the notification's camera (`key`: its template)
+        or the printer's."""
         return await self.eventloop.run_in_thread(
-            self._fetch_snapshot_sync, quiet)
+            self._fetch_snapshot_sync, quiet, self.snapshot_urls.get(key))
 
-    async def _wait_for_snapshot(self, timeout: float) -> Optional[str]:
+    async def _wait_for_snapshot(self, timeout: float,
+                                 key: str = "") -> Optional[str]:
         """Snapshot, waiting up to `timeout` for the camera to come up."""
         deadline = time.monotonic() + timeout
         while True:
             last = time.monotonic() + PL_CAMERA_POLL >= deadline
-            path = await self._fetch_snapshot(quiet=not last)
+            path = await self._fetch_snapshot(quiet=not last, key=key)
             if path is not None or last:
                 return path
             await asyncio.sleep(PL_CAMERA_POLL)
@@ -2460,19 +2441,20 @@ class PushNotifications:
         row = self.rows.get(rid)
         if row is None:
             return False
-        await self._parity(key or rid, title, body, event)
+        key = key or rid
+        await self._parity(key, title, body, event)
         image, dests = row
         # Take a place in each channel's queue now, before any waiting
         tickets = [self._reserve(d.channel, rid) for d in dests]
         try:
             if delay:
                 await asyncio.sleep(delay)
-            body = self._lines(body, await self._data_text(rid))
+            title, body = await self._compose(key, title, body, event)
             if camera_wait and image == "snapshot" and not snapshot_ready:
-                path = await self._wait_for_snapshot(camera_wait)
+                path = await self._wait_for_snapshot(camera_wait, key)
             else:
                 path = await self._image(image, filename, snapshot,
-                                         snapshot_ready)
+                                         snapshot_ready, key)
             named = self._named_copy(path, title, filename)
             report: List[Dict[str, Any]] = []
             try:
@@ -2688,10 +2670,11 @@ class PushNotifications:
 
     async def _image(
         self, image: str, filename: str, snapshot: Optional[str],
-        snapshot_ready: bool
+        snapshot_ready: bool, key: str = ""
     ) -> Optional[str]:
         if image == "snapshot":
-            return snapshot if snapshot_ready else await self._fetch_snapshot()
+            return snapshot if snapshot_ready else \
+                await self._fetch_snapshot(key=key)
         if image == "render" and filename:
             return self._thumbnail(filename)
         return None
@@ -3051,6 +3034,42 @@ class PushNotifications:
         return f"Estimated print time {format_duration(est)}" + (
             f", ETA {clock}" if clock else "")
 
+    def _template(self, key: str) -> Dict[str, Any]:
+        """A notification's template as set (its edits over the
+        default)."""
+        if key not in cfgmod.TEMPLATE:
+            return {}
+        return cfgmod.template(self.settings or {}, key)
+
+    async def _compose(self, key: str, title: str, body: str,
+                       event: Optional[Dict[str, Any]]) -> Tuple[str, str]:
+        """The notification's title and text from its template. An edited
+        template that fails sends the default's text, with what went
+        wrong; the default failing (it shouldn't) sends what was built
+        here."""
+        tpl = self._template(key)
+        if not tpl:
+            return title, body
+        d = dflt.default(key)
+        try:
+            ctx = await self._template_context(
+                [tpl["title"], tpl["contents"]], False, event)
+            return (await self._render(tpl["title"], ctx),
+                    await self._render(tpl["contents"], ctx))
+        except jj.TemplateError as e:
+            edited = d is None or (tpl["title"], tpl["contents"]) != d
+            logging.warning("[pushraker] %s template: %s", key, e)
+            if not edited:
+                return title, body
+            try:
+                ctx = await self._template_context(list(d), False, event)
+                return (await self._render(d[0], ctx), self._lines(
+                    await self._render(d[1], ctx),
+                    f"⚠️ Your template failed: {e}"))
+            except jj.TemplateError:
+                return title, self._lines(
+                    body, f"⚠️ Your template failed: {e}")
+
     async def _parity(self, key: str, title: str, body: str,
                       event: Optional[Dict[str, Any]]) -> None:
         """Moving to templates: with PUSHRAKER_PARITY set (the tests), the
@@ -3375,12 +3394,31 @@ class PushNotifications:
                 if title:
                     self._skip("macro", f"{priority} notifications are off")
                 continue
-            self._spawn(self._send(
-                rid, self._title("macro", title=title), message,
-                filename=self._job_filename if self._job_active else "",
-                key="macro", event={"title": title,
-                                    "message": message or None,
-                                    "priority": priority}))
+            self._spawn(self._macro(rid, title, message, priority))
+
+    async def _macro(self, rid: str, title: str, message: str,
+                     priority: str) -> None:
+        """A notification from G-code. Its title and message may hold Jinja
+        of their own (in a Klipper macro written inside {% raw %} ...
+        {% endraw %}, so Klipper passes it on): rendered here, with the same
+        values as any template. One that fails is sent as written, with
+        why."""
+        texts = [t for t in (title, message) if "{{" in t or "{%" in t]
+        if texts:
+            try:
+                ctx = await self._template_context(texts)
+                if title in texts:
+                    title = await self._render(title, ctx)
+                if message in texts:
+                    message = await self._render(message, ctx)
+            except jj.TemplateError as e:
+                message = self._lines(message,
+                                      f"⚠️ Template in the G-code failed: {e}")
+        await self._send(
+            rid, self._title("macro", title=title), message,
+            filename=self._job_filename if self._job_active else "",
+            key="macro", event={"title": title, "message": message or None,
+                                "priority": priority})
 
     def _track_calibration(self) -> None:
         """Manual calibrations (touchscreen: bed levelling, XYZ offset,
@@ -5702,15 +5740,21 @@ class PushNotifications:
         kind, dests = row
         tickets = [self._reserve(d.channel, rid) for d in dests]
         paths: Dict[Tuple[int, ...], Optional[str]] = {}
+        shared: Optional[str] = None
         try:
-            extra = await self._data_text(rid)
+            if kind in ("render", "snapshot"):
+                shared = await self._image(
+                    kind, self._job_filename if self._job_active else "",
+                    None, False, rid)
+            remaining = self._template(rid).get("remaining", True)
             per_dest: List[List[Tuple[str, str, Optional[str]]]] = []
             for d in dests:
                 if packer is None:
-                    for t, b, _rows in messages or []:
+                    msgs = []
+                    for t, b, rows in messages or []:
                         await self._parity(rid, t, b, event)
-                    msgs = [(t, self._lines(b, extra), rows)
-                            for t, b, rows in messages or []]
+                        t, b = await self._compose(rid, t, b, event)
+                        msgs.append((t, b, rows))
                     keyed = [((k,), m) for k, m in enumerate(msgs)]
                 else:
                     title, header, issues, text_fn, row_fn = packer
@@ -5722,18 +5766,21 @@ class PushNotifications:
                             else f"{title} ({n}/{len(parts)})"
                         if event_fn is not None:
                             head, caps = used[n - 1]
-                            await self._parity(rid, t, body, event_fn(
+                            ev = event_fn(
                                 [issues[i] for i in idx],
                                 [caps[i] for i in idx], head,
-                                n if len(parts) > 1 else None, len(parts)))
+                                n if len(parts) > 1 else None, len(parts))
+                            await self._parity(rid, t, body, ev)
+                            t, body = await self._compose(rid, t, body, ev)
                         keyed.append((tuple(idx), (
-                            t, self._lines(body, extra),
-                            [row_fn(issues[i]) for i in idx])))
+                            t, body, [row_fn(issues[i]) for i in idx])))
                 out = []
                 for key, (t, b, rows) in keyed:
-                    path = None
+                    path = shared
                     if kind == "spool":
                         if key not in paths:
+                            if not remaining:
+                                rows = self._no_amounts(rows)
                             drawn = await self.eventloop.run_in_thread(
                                 self._render_rows, rows)
                             paths[key] = self._named_copy(drawn, t)
@@ -5752,10 +5799,23 @@ class PushNotifications:
         finally:
             for t in tickets:
                 await t.gate.done(t.ticket)
-            for p in paths.values():
+            for p in list(paths.values()) + (
+                    [shared] if kind == "snapshot" else []):
                 if p:
                     shutil.rmtree(os.path.dirname(p), ignore_errors=True)
         return all(results)
+
+    @staticmethod
+    def _no_amounts(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """The spool picture without how much is left (the template's
+        "filament remaining" off): spools drawn full, no colours."""
+        def plain(sp: Dict[str, Any]) -> Dict[str, Any]:
+            sp = dict(sp, remaining=None, unknown=False, status="ink",
+                      needs="")
+            if sp.get("refills"):
+                sp["refills"] = [plain(r) for r in sp["refills"]]
+            return sp
+        return [plain(r) for r in rows]
 
 
 def load_component(config: ConfigHelper) -> PushNotifications:

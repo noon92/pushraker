@@ -101,10 +101,70 @@ ROWS = [
     ("spool_switch", "Switched to backup spool", "🔄", True, "default",
      "spool", "refill", False),
     # multiACE: the slot feeding a toolhead went empty mid-print
-    ("slot_empty", "ACE slot ran empty", "🧵", True, "default", "spool",
-     "refill", False),
+    ("slot_empty", "Spool in ACE slot ran out", "🧵", True, "default",
+     "spool", "refill", False),
 ]
 ROW_IDS = [r[0] for r in ROWS]
+
+# Notification templates (templates/<key>.title.j2 and <key>.j2): key, the
+# row whose destinations it uses, its name on the page, the image it sends
+# by default and the images it offers. Render: the print job's picture,
+# camera: a snapshot, graphic: pushraker's spool picture.
+IMAGES = ("none", "render", "camera", "graphic")
+JOB_IMAGES = ("none", "render", "camera")
+SPOOL_IMAGES = ("none", "render", "camera", "graphic")
+TEMPLATES = [
+    ("started", "started", "Print started", "render", JOB_IMAGES),
+    ("preprint_done", "started", "Pre-print calibrations done", "render",
+     JOB_IMAGES),
+    ("paused", "paused", "Print paused", "camera", JOB_IMAGES),
+    ("file_pause", "paused", "Paused by the print job", "camera",
+     JOB_IMAGES),
+    ("resumed", "resumed", "Print resumed", "camera", JOB_IMAGES),
+    ("layer_started", "layer_started", "First layer started", "camera",
+     JOB_IMAGES),
+    ("first_layer", "first_layer", "Layer complete", "camera", JOB_IMAGES),
+    ("progress", "progress", "Progress", "camera", JOB_IMAGES),
+    ("status_report", "status_report", "Status report", "camera",
+     JOB_IMAGES),
+    ("complete", "complete", "Print complete", "camera", JOB_IMAGES),
+    ("object_complete", "complete", "Object complete", "camera", JOB_IMAGES),
+    ("cancelled", "cancelled", "Print cancelled", "camera", JOB_IMAGES),
+    ("macro", "macro", "From macros and G-code", "camera", JOB_IMAGES),
+    ("calibration", "calibration", "Manual calibrations", "camera",
+     JOB_IMAGES),
+    ("filament_change", "filament_change", "Filament loaded / unloaded",
+     "graphic", ("none", "camera", "graphic")),
+    ("chamber_waiting", "chamber_waiting", "Waiting for chamber temperature",
+     "camera", JOB_IMAGES),
+    ("chamber_reached", "chamber_reached", "Reached chamber temperature",
+     "camera", JOB_IMAGES),
+    ("chamber_fault", "chamber_fault", "Chamber faults", "camera",
+     JOB_IMAGES),
+    ("error", "error", "Error", "camera", JOB_IMAGES),
+    ("warning", "warning", "Warning", "camera", JOB_IMAGES),
+    ("shutdown", "shutdown", "Klipper shutdown", "camera", JOB_IMAGES),
+    ("power_loss", "power_loss", "Power loss recovery", "camera",
+     JOB_IMAGES),
+    ("driver_hot", "driver_hot", "Driver running hot", "camera", JOB_IMAGES),
+    ("filament_short", "filament_short", "Not enough filament", "graphic",
+     SPOOL_IMAGES),
+    ("filament_low", "filament_low", "Spool running low", "graphic",
+     SPOOL_IMAGES),
+    ("spool_switch", "spool_switch", "Switched to backup spool", "graphic",
+     SPOOL_IMAGES),
+    ("slot_empty", "slot_empty", "Spool in ACE slot ran out", "graphic",
+     SPOOL_IMAGES),
+]
+TEMPLATE_KEYS = [t[0] for t in TEMPLATES]
+TEMPLATE = {t[0]: t for t in TEMPLATES}
+TEMPLATE_FIELDS = ("title", "contents", "image", "camera", "remaining")
+TITLE_MAX = 300
+CONTENTS_MAX = 5000
+# The component's names for a row's notifications, to their templates
+OPTION_KEYS = dict({f"progress_{m}": "progress" for m in (25, 50, 75)},
+                   **{f"macro_{p}": "macro" for p in
+                      ("min", "low", "default", "high", "max")})
 ROW = {r[0]: r for r in ROWS}
 # Print-by-object: "Print complete" for each object is sent as its own
 # notification (so a webhook sees event=object_complete), with the Print
@@ -121,8 +181,6 @@ PROGRESS_MARKS = (25, 50, 75)
 PROGRESS_ROWS = {m: f"progress_{m}" for m in PROGRESS_MARKS}
 # Notification data (templating.py): a row adds the default data, its own
 # text, or nothing
-DATA_MODES = ("default", "custom", "none")
-DATA_MAX = 1500
 ERROR_ROWS = ("error", "warning", "shutdown")
 # Rows that read Spoolman (the first two need it; the switch works without)
 SPOOLMAN_ROWS = ("filament_short", "filament_low", "spool_switch")
@@ -170,7 +228,6 @@ STRING_FIELDS = ("provider", "server", "topic", "auth", "username",
                  "email_security", "email_username", "email_from",
                  "email_to", "progress_marks", "time_left")
 # Free text with line breaks (stored with \n escaped)
-TEXT_FIELDS = ("data_default",)
 SECRET_FIELDS = ("secret", "email_password", "webhook_url")
 INT_FIELDS = ("layers_complete", "email_port", "filament_low_percent",
               "filament_low_grams", "driver_temp", "report_interval")
@@ -285,9 +342,6 @@ def _defaults(name: str) -> Dict[str, Any]:
         # Time-left method (component.TIME_METHODS and the printer's own);
         # "" for the printer's default
         "time_left": "",
-        # Data added to the end of every notification whose DATA is
-        # Default ({object.field} tokens, see templating.py); "" for none
-        "data_default": "",
         "driver_temp": 105,     # °C, X or Y stepper driver (row: driver_hot)
         "report_interval": 30,  # minutes of print time between status reports
         "email_enabled": False,
@@ -301,9 +355,12 @@ def _defaults(name: str) -> Dict[str, Any]:
         "email_from": "",
         "email_to": "",
         "rows": {r[0]: {"enabled": r[3], "priority": r[4],
-                        "image": r[5] is not None, "email": r[7],
-                        "data_mode": "default", "data": ""}
+                        "email": r[7]}
                  for r in ROWS},
+        # Each notification's template and image, where they differ from
+        # the default: {key: {title, contents, image, camera, remaining}}.
+        # What isn't here follows the default, also after an upgrade.
+        "templates": {},
     }
 
 
@@ -339,23 +396,28 @@ def section_lines(s: Dict[str, Any]) -> List[str]:
         lines.append(f"{key}: {s[key]}")
     for key in INT_FIELDS:
         lines.append(f"{key}: {s[key]}")
-    lines.append("# Data added to notifications: {object.field|format} tokens, "
-                 "\\n for a line break")
-    for key in TEXT_FIELDS:
-        lines.append(f"{key}: {escape_text(s[key])}")
-    lines.append("# <notification>: on|off (push), <priority>, image|no_image, "
+    lines.append("# <notification>: on|off (push), <priority>, "
                  "email|no_email")
-    lines.append("# <notification>_data: default | none | custom, <text>")
     for rid in ROW_IDS:
         r = s["rows"][rid]
         lines.append(f"{rid}: {'on' if r['enabled'] else 'off'}, "
                      f"{r['priority']}, "
-                     f"{'image' if r['image'] else 'no_image'}, "
                      f"{'email' if r['email'] else 'no_email'}")
-        mode = r.get("data_mode", "default")
-        if mode != "default" or r.get("data"):
-            lines.append(f"{rid}_data: {mode}" + (
-                f", {escape_text(r['data'])}" if mode == "custom" else ""))
+    lines.append("# Templates (Jinja; \\n for a line break) and images, "
+                 "where they differ from the")
+    lines.append("# defaults: <notification>_title, _contents, _image "
+                 "(none|render|camera|graphic),")
+    lines.append("# _camera (a Moonraker webcam name), _remaining "
+                 "(true|false: filament left on the graphic)")
+    for key in TEMPLATE_KEYS:
+        t = s["templates"].get(key) or {}
+        for field in TEMPLATE_FIELDS:
+            if field not in t:
+                continue
+            v = t[field]
+            v = ("true" if v else "false") if field == "remaining" else \
+                escape_text(v) if field in ("title", "contents") else v
+            lines.append(f"{key}_{field}: {v}")
     return [ln + "\n" for ln in lines]
 
 
@@ -375,21 +437,33 @@ def parse_section(sec: Any, s: Dict[str, Any]) -> Dict[str, Any]:
             s[key] = int(sec.get(key, str(s[key])))
         except ValueError:
             pass
-    for key in TEXT_FIELDS:
-        if key in sec:
-            s[key] = unescape_text(sec.get(key, "").strip())
     for rid in ROW_IDS:
         raw = sec.get(rid)
         if raw:
-            _parse_row(s["rows"][rid], raw)
-        raw = sec.get(f"{rid}_data")
-        if raw:
-            mode, _, text = raw.partition(",")
-            mode = mode.strip().lower()
-            if mode in DATA_MODES:
-                s["rows"][rid]["data_mode"] = mode
-                s["rows"][rid]["data"] = unescape_text(text.strip()) \
-                    if mode == "custom" else ""
+            if _parse_row(s["rows"][rid], raw) is False:
+                # Before templates: no_image on the row: its notifications
+                # send none
+                for t in TEMPLATES:
+                    if t[1] == rid:
+                        s["templates"].setdefault(t[0], {})["image"] = "none"
+    # Notification data (before templates) isn't carried over: its tokens
+    # aren't Jinja; templates replace it
+    for key in TEMPLATE_KEYS:
+        t: Dict[str, Any] = {}
+        for field in TEMPLATE_FIELDS:
+            raw = sec.get(f"{key}_{field}")
+            if raw is None:
+                continue
+            raw = raw.strip()
+            if field == "remaining":
+                t[field] = raw.lower() == "true"
+            elif field in ("title", "contents"):
+                t[field] = unescape_text(raw)
+            else:
+                t[field] = raw
+        if t:
+            s["templates"].setdefault(key, {}).update(t)
+    s["templates"] = clean_templates(s["templates"])
     # Settings from before the Progress row: 25% / 50% / 75% complete were
     # rows of their own; the first one on gives the row its settings
     old = [(m, sec.get(PROGRESS_ROWS[m])) for m in PROGRESS_MARKS]
@@ -402,21 +476,25 @@ def parse_section(sec: Any, s: Dict[str, Any]) -> Dict[str, Any]:
         first = rows[on[0]] if on else rows[min(rows)]
         s["rows"]["progress"].update(
             enabled=first["enabled"], priority=first["priority"],
-            image=first["image"], email=first["email"])
+            email=first["email"])
     s["camera"] = LEGACY_CAMERAS.get(s["camera"], s["camera"])
     return s
 
 
-def _parse_row(row: Dict[str, Any], raw: str) -> Dict[str, Any]:
+def _parse_row(row: Dict[str, Any], raw: str) -> Any:
+    """on|off, priority, email|no_email (before templates also
+    image|no_image: False when it said no_image)."""
     parts = [p.strip().lower() for p in raw.split(",")]
     row["enabled"] = parts[0] == "on"
-    if len(parts) > 1 and parts[1] in PRIORITIES:
-        row["priority"] = parts[1]
-    if len(parts) > 2:
-        row["image"] = parts[2] == "image"
-    if len(parts) > 3:
-        row["email"] = parts[3] == "email"
-    return row
+    image = None
+    for p in parts[1:]:
+        if p in PRIORITIES:
+            row["priority"] = p
+        elif p in ("email", "no_email"):
+            row["email"] = p == "email"
+        elif p in ("image", "no_image"):
+            image = p == "image"
+    return False if image is False else row
 
 
 def read_ini(path: str) -> configparser.RawConfigParser:
@@ -585,9 +663,6 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     for key in STRING_FIELDS:
         if key in data:
             s[key] = str(data[key] or "").strip()
-    for key in TEXT_FIELDS:
-        if key in data:
-            s[key] = clean_text(data[key])
     for key in SECRET_FIELDS:
         if data.get(key):
             s[key] = str(data[key])
@@ -634,27 +709,25 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
         r["enabled"] = bool(row.get("enabled", r["enabled"]))
         if row.get("priority") in PRIORITIES:
             r["priority"] = row["priority"]
-        r["image"] = bool(row.get("image", r["image"]))
         r["email"] = bool(row.get("email", r["email"]))
-        if row.get("data_mode") in DATA_MODES:
-            r["data_mode"] = row["data_mode"]
-        if "data" in row:
-            r["data"] = clean_text(row["data"])
-        if r.get("data_mode", "default") != "custom":
-            r["data"] = ""
-    for rid in ROW_IDS:
-        if ROW[rid][5] is None:
-            s["rows"][rid]["image"] = False
+    if "templates" in data:
+        tpls = data["templates"]
+        if not isinstance(tpls, dict):
+            raise ConfigError("Invalid request")
+        for key, t in tpls.items():
+            if key not in TEMPLATE or not isinstance(t, (dict, type(None))):
+                continue
+            if not t:
+                s["templates"].pop(key, None)        # reset to the default
+                continue
+            new = dict(s["templates"].get(key) or {})
+            for field in TEMPLATE_FIELDS:
+                if field in t:
+                    new[field] = t[field]
+            s["templates"][key] = new
+        s["templates"] = clean_templates(s["templates"], strict=True)
     if s["time_left"] == "first_layer":       # 0.3.1's name
         s["time_left"] = "slicer_first_layer"
-    from .templating import placeholders
-    for rid, text in [("default", s["data_default"])] + [
-            (rid, s["rows"][rid].get("data", "")) for rid in ROW_IDS]:
-        left = placeholders(text)
-        if left:
-            what = "Default data" if rid == "default" else ROW[rid][1]
-            raise ConfigError(f"{what}: replace # in {left[0]} with a "
-                              "number")
     if s["time_left"] and env is not None and env.time_methods and \
             s["time_left"] not in {m["id"] for m in env.time_methods}:
         raise ConfigError("Unknown time-left method")
@@ -808,30 +881,83 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     return s
 
 
-def clean_text(value: Any) -> str:
-    """Notification data as typed: line breaks kept, other control
+def clean_text(value: Any, cap: int) -> str:
+    """A template as typed: line breaks and tabs kept, other control
     characters dropped, capped."""
     text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
-    text = re.sub(r"[^\S\n]*\n", "\n", text)
-    text = "".join(c for c in text if c == "\n" or not RX_CONTROL.match(c))
-    if len(text) > DATA_MAX:
-        raise ConfigError(f"Notification data: up to {DATA_MAX} characters")
-    return text.strip()
+    text = "".join(c for c in text if c in "\n\t" or not RX_CONTROL.match(c))
+    if len(text) > cap:
+        raise ConfigError(f"Templates: up to {cap} characters")
+    return text.rstrip()
+
+
+def template_default(key: str) -> Dict[str, Any]:
+    """A notification's default template, image and options."""
+    from . import defaults
+    title, contents = defaults.default(key) or ("", "")
+    return {"title": title, "contents": contents,
+            "image": TEMPLATE[key][3], "camera": "", "remaining": True}
+
+
+def clean_templates(tpls: Dict[str, Any],
+                    strict: bool = False) -> Dict[str, Any]:
+    """Each notification's edits, checked: what equals the default is
+    dropped (it follows the default again). strict (saving from the
+    page): a template Jinja can't read is refused, with where."""
+    from . import engine
+    out: Dict[str, Any] = {}
+    for key, t in (tpls or {}).items():
+        if key not in TEMPLATE or not isinstance(t, dict):
+            continue
+        d = template_default(key)
+        kept: Dict[str, Any] = {}
+        for field in TEMPLATE_FIELDS:
+            if field not in t:
+                continue
+            v = t[field]
+            if field == "title":
+                v = clean_text(v, TITLE_MAX).replace("\n", " ")
+            elif field == "contents":
+                v = clean_text(v, CONTENTS_MAX)
+            elif field == "image":
+                v = str(v)
+                if v not in TEMPLATE[key][4]:
+                    if strict:
+                        raise ConfigError(f"{TEMPLATE[key][2]}: no such "
+                                          "image")
+                    continue
+            elif field == "camera":
+                v = str(v or "")
+                if not RX_CAMERA.fullmatch(v):
+                    raise ConfigError("Invalid camera")
+            else:
+                v = bool(v)
+            if field in ("title", "contents") and strict:
+                left = engine.RX_PLACEHOLDER.search(v)
+                if left:
+                    raise ConfigError(f"{TEMPLATE[key][2]}: replace # in "
+                                      f"{left.group(0)} with a number")
+                bad = engine.check(v)
+                if bad:
+                    raise ConfigError(f"{TEMPLATE[key][2]}, "
+                                      f"{field}: {bad}")
+            if v != d[field]:
+                kept[field] = v
+        if kept:
+            out[key] = kept
+    return out
+
+
+def template(s: Dict[str, Any], key: str) -> Dict[str, Any]:
+    """A notification's template as it stands: its edits over the
+    default."""
+    t = template_default(key)
+    t.update((s.get("templates") or {}).get(key) or {})
+    return t
 
 
 def progress_marks(s: Dict[str, Any]) -> List[int]:
     return [m for m in PROGRESS_MARKS if str(m) in s["progress_marks"].split(",")]
-
-
-def row_data(s: Dict[str, Any], rid: str) -> str:
-    """The data text a row adds: the default, its own, or none."""
-    r = s["rows"].get(rid) or {}
-    mode = r.get("data_mode", "default")
-    if mode == "custom":
-        return r.get("data", "")
-    if mode == "none":
-        return ""
-    return s.get("data_default", "")
 
 
 def recipients(s: Dict[str, Any]) -> List[str]:
@@ -1120,13 +1246,32 @@ def enabled_rows(s: Dict[str, Any], env: Env) -> List[str]:
             or rid in hook]
 
 
-def image_kind(s: Dict[str, Any], rid: str, env: Env) -> str:
-    kind = ROW[rid][5]
-    if not s["rows"][rid]["image"] or kind is None:
+# The component's names for the images
+IMAGE_KIND = {"none": "none", "render": "render", "camera": "snapshot",
+              "graphic": "spool"}
+
+
+def image_kind(s: Dict[str, Any], name: str, env: Env) -> str:
+    """The image a notification (by the component's name for it) sends:
+    render, snapshot, spool or none."""
+    key = OPTION_KEYS.get(name, name)
+    if key not in TEMPLATE:
         return "none"
-    if kind == "snapshot" and not camera(s, env):
+    t = template(s, key)
+    kind = IMAGE_KIND.get(t["image"], "none")
+    if kind == "snapshot" and not template_camera(s, key, env):
         return "none"
     return kind
+
+
+def template_camera(s: Dict[str, Any], key: str,
+                    env: Env) -> Optional[Dict[str, Any]]:
+    """The camera a notification's snapshot comes from: its own, else the
+    one chosen for the printer."""
+    name = template(s, key)["camera"]
+    if name and name in env.cameras:
+        return env.cameras[name]
+    return camera(s, env)
 
 
 def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
@@ -1171,10 +1316,11 @@ def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
             out["camera_url"] = live
     if env.error_index_url:
         out["error_index_url"] = env.error_index_url
+    for key in TEMPLATE_KEYS:
+        cam = template_camera(s, key, env)
+        if cam and cam.get("snapshot") and template(s, key)["camera"]:
+            out[f"snapshot_url_{key}"] = cam["snapshot"]
     for rid in rows:
-        text = row_data(s, rid)
-        if text:
-            out[f"data_{rid}"] = text
         kind = image_kind(s, rid, env)
         if rid == "progress":
             # The component has a row per mark
@@ -1211,6 +1357,7 @@ def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
                      [rid, FILE_PAUSE_ROW] if rid == "paused" else
                      [rid, PREPRINT_ROW] if rid == "started"
                      and s["preprint_done"] and env.preprint else [rid]):
+            kind = image_kind(s, name, env)
             if rid in push:
                 url = row_url(s, rid, "max" if name == FILE_PAUSE_ROW
                               else s["rows"][rid]["priority"], env)
@@ -1351,8 +1498,11 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
         "progress_marks": list(PROGRESS_MARKS),
         "time_methods": env.time_methods,
         "time_default": env.time_default,
-        "data_modes": list(DATA_MODES),
-        "data_max": DATA_MAX,
+        "templates": [{"key": t[0], "row": t[1], "label": t[2],
+                       "images": list(t[4]),
+                       "default": template_default(t[0])}
+                      for t in TEMPLATES],
+        "title_max": TITLE_MAX, "contents_max": CONTENTS_MAX,
         "priorities": PRIORITIES,
         "providers": PROVIDERS,
         "cameras": {name: {"snapshot": bool(c.get("snapshot")),

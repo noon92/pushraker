@@ -1305,7 +1305,7 @@ async def test_file_mode():
     conf = open(os.path.join(WORK, "data", "config", "pushraker.conf")).read()
     check("...pushraker.conf written as INI",
           "[pushraker]" in conf and "server: https://ntfy.example.com" in conf
-          and "progress: on, low, image, no_email" in conf
+          and "progress: on, low, no_email" in conf
           and "progress_marks: 25,75" in conf, conf[:200])
     # Klipper restarts: its macro variables are back at their defaults
     GCODE.clear()
@@ -2425,9 +2425,9 @@ async def test_two_fixes():
     STATE["print_stats"] = ps("complete", filename="Done_job.gcode")
     c._job_active, c._job_filename = False, "Done_job.gcode"
     c._job_ended = time.monotonic() - 60
-    kept = await c._data_text("started", "{job.file}")
+    kept = await c._render_template("{{ job.file }}")
     c._job_ended = time.monotonic() - 400
-    gone = await c._data_text("started", "{job.file}")
+    gone = await c._render_template("{{ job.file }}")
     check("job values stay 5 minutes after the print job ends",
           kept == "Done_job" and gone == "n/a", (kept, gone))
     check("one duration style: hours, no days, seconds dropped",
@@ -2641,6 +2641,91 @@ async def test_template_variants():
           and "512 g left" in log[-1]["body"], log and log[-1])
 
 
+async def test_templates_sending():
+    """Notifications are written from their templates: an edited one is
+    sent; one that fails sends the default's text and says why; each
+    notification's image and camera; the spool picture without amounts."""
+    print("Templates: sending")
+    reset_world()
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    server, c = make({}, {"paused": [("ntfy", ntfy, False)],
+                          "resumed": [("ntfy", ntfy, False)],
+                          "filament_change": [("ntfy", ntfy, False)]})
+    c.settings = dict(c.settings, templates={
+        "paused": {"title": "⏸ {{ machine.name }} on hold",
+                   "contents": "{{ job.file }} paused\n"
+                   "{# not sent #}\n\nBed "
+                   "{{ printer.heater_bed.target|round|int }}°C"},
+        "resumed": {"contents": "{{ job.file }}\n{{ 1 / 0 }}"}})
+    STATE["heater_bed"] = {"temperature": 59.0, "target": 60.0}
+    await start_job(server)
+    STATE["print_stats"] = ps("paused")
+    STATE["virtual_sdcard"] = {"file_position": 6000, "progress": 0.5}
+    await server.handlers["job_state:state_changed"](
+        JobEvent.PAUSED, {}, STATE["print_stats"])
+    await asyncio.sleep(0.6)
+    check("an edited template is what's sent: its title, its text, its "
+          "blank line, no comment",
+          log and log[-1]["title"] == "⏸ U1 on hold"
+          and log[-1]["body"] == "Benchy paused\n\nBed 60°C", log and log[-1])
+    log.clear()
+    STATE["print_stats"] = ps("printing")
+    await server.handlers["job_state:state_changed"](
+        JobEvent.RESUMED, {}, STATE["print_stats"])
+    await asyncio.sleep(0.5)
+    body = log and log[-1]["body"]
+    check("an edited template that fails: the default's text, and why",
+          log and log[-1]["title"] == "▶️ U1 resumed"
+          and body.startswith("Benchy\n")
+          and "⚠️ Your template failed: line 2: ZeroDivisionError" in body,
+          log and log[-1])
+    # Images: the template's choice reaches the destinations
+    base = pn.cfgmod.defaults("U1")
+    opts = pn.cfgmod.render_options(dict(
+        base, enabled=True, provider="ntfy",
+        server="https://ntfy.example.com", topic="t",
+        rows=dict(base["rows"], paused=dict(
+            base["rows"]["paused"], enabled=True)),
+        templates={"paused": {"image": "render"},
+                   "file_pause": {"image": "none"}}),
+        pn.cfgmod.Env(cameras={"case": {"snapshot": "http://c/snap"},
+                               "nozzle": {"snapshot": "http://n/snap"}}))
+    check("each notification's image: Paused render, its file pause none",
+          opts.get("paused", "").startswith("render, ")
+          and opts.get("file_pause", "").startswith("none, "), opts)
+    opts = pn.cfgmod.render_options(dict(
+        base, enabled=True, provider="ntfy",
+        server="https://ntfy.example.com", topic="t", camera="case",
+        rows=dict(base["rows"], paused=dict(
+            base["rows"]["paused"], enabled=True)),
+        templates={"paused": {"camera": "nozzle"}}),
+        pn.cfgmod.Env(cameras={"case": {"snapshot": "http://c/snap"},
+                               "nozzle": {"snapshot": "http://n/snap"}}))
+    check("a notification's own camera", opts.get("snapshot_url_paused")
+          == "http://n/snap" and opts.get("snapshot_url") == "http://c/snap",
+          opts)
+    # G-code: RESPOND PREFIX=notify with Jinja in it (Klipper passed it on)
+    log.clear()
+    c.rows["macro_default"] = c.rows["paused"]
+    c._on_gcode_response("notify Bed {{ printer.heater_bed.target|round|int }}"
+                         " || {{ job.file }} at {% if job.file %}it{% endif %}")
+    await asyncio.sleep(0.5)
+    check("Jinja in a G-code notification is rendered",
+          log and log[-1]["title"] == "📣 U1 Bed 60"
+          and log[-1]["body"] == "Benchy at it", log and log[-1])
+    rows = [dict(toolhead="Toolhead 1", status="red", remaining=12.,
+                 full=1000., needs="Needs ~80 g", name="PLA",
+                 refills=[dict(toolhead="Toolhead 2", status="green",
+                               remaining=500., full=1000., name="PLA")])]
+    plain = pn.PushNotifications._no_amounts(rows)
+    check("filament remaining off: no amounts, no colours, no needs",
+          plain[0]["remaining"] is None and plain[0]["status"] == "ink"
+          and not plain[0]["needs"]
+          and plain[0]["refills"][0]["remaining"] is None
+          and rows[0]["remaining"] == 12., plain)
+
+
 async def test_data():
     """Notification data: {object.field|fmt} tokens from Klipper, job.*
     from pushraker, per-filament slicer settings, n/a for what's missing,
@@ -2678,26 +2763,36 @@ async def test_data():
                 b"; cool_plate_temp = 35,35,35\n"
                 b"; nozzle_diameter = 0.4\n"
                 b"; CONFIG_BLOCK_END\n")
-    text = ("Bed {heater_bed.temperature|0}/{heater_bed.target|0}°C · "
-            "Cavity {temperature_sensor cavity.temperature|0}°C\n"
-            "Filaments: {job.filaments} · {job.filaments.materials} · "
-            "{job.filaments.count} · {job.extruders} · "
-            "{job.filaments.total_grams|0} g\n"
-            "F1: {job.filament1.name}, {job.filament1.nozzle_temperature|0}°C, "
-            "bed {job.filament1.bed_temperature|0}°C, Ø{job.filament1.nozzle_diameter}, "
-            "{job.filament1.extruder}\n"
-            "F3 bed: {job.filament3.bed_temperature|0} · F2 colour: {job.filament2.color}\n"
-            "T2 loaded: {extruder2.filament.material}, {extruder2.filament.name}\n"
-            "Missing: {nope.x} {heater_bed.nope} {job.filament7.name} · "
-            "Power {heater_bed.power|pct} · {broken")
-    server, c = make({"data_started": text, "data_default": "Layer {job.layer}",
-                      "data_progress": "Progress {job.progress|0}% · "
-                                       "{job.time.remaining.default|H:MM} · "
-                                       "{job.time.remaining.file|M} · "
-                                       "{job.time.elapsed|HH:MM}"},
-                     {"started": [("ntfy", ntfy, False)],
-                      "paused": [("pushover", pover, False)],
-                      "progress_50": [("ntfy", ntfy, False)]})
+    text = ("Bed {{ printer.heater_bed.temperature|round|int }}/"
+            "{{ printer.heater_bed.target|round|int }}°C · "
+            "Cavity {{ printer['temperature_sensor cavity'].temperature"
+            "|round|int }}°C\n"
+            "Filaments: {{ job.filaments }} · {{ job.filaments.materials }} · "
+            "{{ job.filaments.count }} · {{ job.extruders }} · "
+            "{{ job.filaments.total_grams|round|int }} g\n"
+            "F1: {{ job.filament1.name }}, "
+            "{{ job.filament1.nozzle_temperature|round|int }}°C, "
+            "bed {{ job.filament1.bed_temperature|round|int }}°C, "
+            "Ø{{ job.filament1.nozzle_diameter }}, "
+            "{{ job.filament1.extruder }}\n"
+            "F3 bed: {{ job.filament3.bed_temperature|round|int }} · "
+            "F2 colour: {{ job.filament2.color }}\n"
+            "T2 loaded: {{ extruders.extruder2.filament.material }}, "
+            "{{ extruders.extruder2.filament.name }}\n"
+            "Missing: {{ printer.nope.x }} {{ printer.heater_bed.nope }} "
+            "{{ job.filament7.name }} · "
+            "Power {{ printer.heater_bed.power|pct }}")
+    server, c = make({}, {"started": [("ntfy", ntfy, False)],
+                          "paused": [("pushover", pover, False)],
+                          "progress_50": [("ntfy", ntfy, False)]})
+    # Edited templates (contents replace the whole text)
+    progress = pn.dflt.default("progress")[1] + (
+        "\nProgress {{ job.progress|round|int }}% · "
+        "{{ job.time.remaining.default|duration('H:MM') }} · "
+        "{{ job.time.remaining.file|duration('M') }} · "
+        "{{ job.time.elapsed|duration('HH:MM') }}")
+    c.settings = dict(c.settings, templates={
+        "started": {"contents": text}, "progress": {"contents": progress}})
     await start_job(server)
     await asyncio.sleep(0.5)
     body = log[0]["body"] if log else ""
@@ -2714,10 +2809,8 @@ async def test_data():
           "T2 loaded: PLA, Bambu PLA" in body, body)
     check("a filament the job doesn't use still has its slicer values",
           "F3 bed: 55 · F2 colour: #00FF00" in body, body)
-    check("unavailable values read n/a; an unparsable token is left alone",
-          "Missing: n/a n/a n/a · Power 30% · {broken" in body, body)
-    check("a print_stats layer from the default data isn't on a custom row",
-          "Layer" not in body, body)
+    check("unavailable values read n/a",
+          "Missing: n/a n/a n/a · Power 30%" in body, body)
     # Used: the slicer's per-filament usage, not every project filament
     # or every toolhead the printer mapped
     st = pn.tp.slicer_settings(b"; filament used [mm] = 4796.1, 0.00, 1073.2"
@@ -2732,13 +2825,13 @@ async def test_data():
           and [f["grams"] for f in fl] == [14.3, None, 3.2],
           [(f["index"], f["used"], f["grams"]) for f in fl])
     c._job_slicer, c._job_tools, c._job_weights = saved
-    out = await c._data_text("started", "{extruders.names} | "
-                             "{extruders.names|T#} | {extruders.count} | "
-                             "{extruders.materials} | "
-                             "{extruders.temperatures|0} | "
-                             "{job.extruders.names|Toolhead #} | "
-                             "{job.extruders.count} | "
-                             "{job.filament1.extruder|Tool #}")
+    out = await c._render_template(
+        "{{ extruders.names }} | {{ extruders.names|toolhead('T#') }} | "
+        "{{ extruders.count }} | {{ extruders.materials }} | "
+        "{{ extruders.temperatures|map('round')|map('int')|join(', ') }} | "
+        "{{ job.extruders.names|toolhead('Toolhead #') }} | "
+        "{{ job.extruders.count }} | "
+        "{{ job.filament1.extruder|toolhead('Tool #') }}")
     check("extruders.*: every toolhead (an empty one has no material); "
           "job.extruders: the ones the print job uses; toolhead name formats",
           out == "extruder, extruder1, extruder2, extruder3 | T1, T2, T3, T4 "
@@ -2783,8 +2876,8 @@ async def test_data():
                                                   "progress": .52}}, 0)
     await asyncio.sleep(0.4)
     body = log[0]["body"] if log else ""
-    check("progress_50 gets the Progress row's data, with job.progress "
-          "and job.time patterns",
+    check("progress_50 uses the Progress template, with job.progress and "
+          "job.time patterns",
           body.startswith("Benchy\n~") and "\nProgress 52% · " in body
           and re.search(r"Progress 52% · \d+:\d\d · \d+ · 00:30$", body), body)
     # The preview: the sample job when none is running, live values
@@ -2793,24 +2886,35 @@ async def test_data():
         JobEvent.COMPLETE, {}, ps("complete"))
     c._job_active = False
     c._status["print_stats"]["state"] = "complete"
-    out = await c._ep_preview(WebRequest("POST", {"row": "started", "text":
-        "{job.file} {job.filaments} {job.filament1.material} "
-        "{heater_bed.temperature|0} {job.extruders} {job.filament29.name} "
-        "{job.filament29.extruder} {job.time.remaining|H:MM} {job.filament#.name}"
-        " | {job.filaments.materials} | {job.time.remaining|D days H hours M minutes}"
-        " | {job.queue.remaining} {job.queue.next} {job.queue.2.time|H:MM}"
-        " {job.queue.meters} {job.queue.next.meters}"
-        " {job.queue.list|line}"}))
+    out = await c._ep_preview(WebRequest("POST", {
+        "key": "started", "title": "{{ machine.name }} started",
+        "contents":
+        "{{ job.file }} {{ job.filaments }} {{ job.filament1.material }} "
+        "{{ printer.heater_bed.temperature|round|int }} {{ job.extruders }} "
+        "{{ job.filament29.name }} {{ job.filament29.extruder }} "
+        "{{ job.time.remaining|duration('H:MM') }}"
+        " | {{ job.filaments.materials }} | "
+        "{{ job.time.remaining|duration('D days H hours M minutes') }}"
+        " | {{ job.queue.remaining }} {{ job.queue.next }} "
+        "{{ job.queue.job2.time|duration('H:MM') }}"
+        " {{ job.queue.meters }} {{ job.queue.next.meters }}"
+        " {{ job.queue.list|lines }}"}))
     check("preview: the sample Benchy for job values, any filament number, "
-          "the printer's live values for Klipper objects; # reads n/a",
+          "the printer's live values for Klipper objects",
+          out["title"] == "U1 started" and
           out["text"] == "3DBenchy_x40_4colour PLA Basic White, PETG HF Black, "
           "TPU 95A Orange, PLA Matte Grey PLA 60 extruder, extruder1, "
-          "extruder2, extruder3 PLA Basic White extruder 27:12 n/a"
+          "extruder2, extruder3 PLA Basic White extruder 27:12"
           " | PLA, PETG, TPU, PLA | 1 days 3 hours 12 minutes"
           " | 3 Cable_clips_x12_PETG 2:12 53.4 7.32 Cable_clips_x12_PETG\n"
           "Spool_holder_PLA\nPhone_stand_PLA_TPU"
-          and not out["live_job"] and out["placeholders"]
-          == ["{job.filament#.name}"], out)
+          and not out["live_job"] and not out["error"], out)
+    out = await c._ep_preview(WebRequest("POST", {
+        "key": "started", "title": "x",
+        "contents": "{{ job.filament#.name }}\n{% if x %}"}))
+    check("preview: a # left in a value is pointed out; a mistake says where",
+          out["placeholders"] == ["job.filament#.name"] and out["error"]
+          and out["error"]["field"] == "contents", out)
     cat = await c._ep_objects(WebRequest("GET"))
     cats = {x["id"]: x for x in cat["categories"]}
 
@@ -2878,16 +2982,19 @@ async def test_data():
         for n in leaves(catg["children"]):
             fmts = [f["fmt"] for f in n.get("formats") or []] or [""]
             for fmt in fmts:
+                filt = {f["fmt"]: f["filter"] for f in
+                        n.get("formats") or []}.get(fmt, "")
                 for num in ("1", "29"):
-                    tok = "{" + n["token"].replace("#", num) + \
-                        ("|" + fmt if fmt else "") + "}"
+                    tok = "{{ " + n["expr"].replace("#", num) + filt + " }}"
                     got = (await c._ep_preview(WebRequest(
-                        "POST", {"row": "started", "text": tok})))["text"]
+                        "POST", {"key": "started", "title": "",
+                                 "contents": tok})))["text"]
                     if got in ("", "n/a") or "n/a" in got:
                         bad.append((tok, got))
     check("every value in the tree previews to a real value", not bad, bad)
     # Pushover's 1024-character limit: the body is cut, the data last
-    c.data = {"paused": "x" * 2000}
+    c.settings = dict(c.settings, templates={"paused": {
+        "contents": "{{ job.file }}\n" + "x" * 2000}})
     STATE["print_stats"] = ps("paused")
     await server.handlers["job_state:state_changed"](
         JobEvent.PAUSED, {}, STATE["print_stats"])
@@ -2898,7 +3005,8 @@ async def test_data():
           and body.endswith("…"), len(body))
     # Rendering never blocks a notification: a query that fails
     log.clear()
-    c.data = {"paused": "{heater_bed.temperature}"}
+    c.settings = dict(c.settings, templates={"paused": {
+        "contents": "{{ job.file }}\n{{ printer.heater_bed.temperature }}"}})
 
     async def boom(*_a, **_k):
         raise RuntimeError("klippy gone")
@@ -2918,7 +3026,7 @@ async def run_component_tests():
               test_driver_hot,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
-              test_two_fixes, test_more_notifications, test_template_variants, test_data):
+              test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_data):
         try:
             await t()
         except Exception as e:  # report and carry on
