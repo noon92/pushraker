@@ -334,6 +334,8 @@ Remaining 1:12, ETA 21:52
   `heater_bed.temperature`, `temperature_sensor cavity.temperature`,
   `fan.speed`. Any object works, in the tree or not. Klipper calls
   toolheads `extruder`, `extruder1`, `extruder2`…
+- `job.*` values exist while a print job runs or is paused, and for 5
+  minutes after it ends.
 - A value that isn't available reads `n/a`. Data never delays or blocks
   a notification: everything is read in one query (5 seconds at most).
 - Long texts are cut to the service's limit (Pushover: 1024 characters).
@@ -352,7 +354,8 @@ examples; you can also type your own.
   double quotes is never read as a field. For 3 days 4 hours 5 minutes:
   `|M` → `4565`, `|H:MM` → `76:05`, `|D H:MM` → `3 4:05`,
   `|H"h" MM"m"` → `76h 05m`, `|D days H hours M minutes` →
-  `3 days 4 hours 5 minutes`. Without a format: `3d 4h 05m`.
+  `3 days 4 hours 5 minutes`. Without a format: `76h 05m` (as the
+  notifications write it). Seconds are dropped, never rounded up.
 - The ETA is a clock time in your time zone: `|HH:MM` → `09:05`, `|H:MM`
   → `9:05`, with `+1d ` in front when it's tomorrow.
 - Lists (filament names, the queue): `|comma` (the default) or `|line`,

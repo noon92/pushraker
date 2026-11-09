@@ -529,11 +529,11 @@ def fault_key(ex: Dict[str, Any]) -> FaultKey:
     return (ex.get("id"), ex.get("index"), ex.get("code"))
 
 
-def format_duration(seconds: float) -> str:
-    t = int(seconds or 0)
-    if t >= 3600:
-        return "%dh %02dm" % (t // 3600, (t % 3600) // 60)
-    return "%dm" % (t // 60)
+# job.* values: while a print job runs or is paused, and this long after it
+# ends, for the notifications sent just after it
+JOB_KEEP = 300.
+
+format_duration = tp.format_duration      # 57h 22m: one style everywhere
 
 
 class ChannelGate:
@@ -1526,7 +1526,10 @@ class PushNotifications:
         """A resolver for job.* paths: pushraker's values about the print
         job (not Klipper's). `sample`: the preview, with a sample Benchy
         when no print job is running."""
-        active = self._job_active or self._busy()
+        # The preview shows the sample unless a print job is running
+        active = self._job_active or self._busy() or (
+            not sample and bool(self._job_filename) and
+            time.monotonic() - self._job_ended < JOB_KEEP)
         if active:
             base = self._job_live()
         elif sample:

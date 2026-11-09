@@ -129,15 +129,12 @@ class Clock:
 
 
 def format_duration(seconds: float) -> str:
-    """1d 3h 12m, 3h 12m, 12m (the default for durations)."""
-    total = max(0, int(round(seconds / 60.)))
-    d, rest = divmod(total, 1440)
-    h, m = divmod(rest, 60)
-    if d:
-        return f"{d}d {h}h {m:02d}m"
-    if h:
-        return f"{h}h {m:02d}m"
-    return f"{m}m"
+    """57h 22m, 12m (the default for durations): hours, no days; whole
+    minutes, seconds dropped."""
+    t = max(0, int(seconds or 0))
+    if t >= 3600:
+        return "%dh %02dm" % (t // 3600, (t % 3600) // 60)
+    return "%dm" % (t // 60)
 
 
 # A pattern: "quoted text", words, and anything else. A word made only of
@@ -202,7 +199,7 @@ def fmt_value(value: Any, fmt: str) -> str:
     if isinstance(value, ToolName):
         return fmt.replace("#", str(value.num)) if "#" in fmt else str(value)
     if isinstance(value, Duration):
-        minutes = int(round(max(0., float(value)) / 60.))
+        minutes = int(max(0., float(value)) // 60)
         if fmt and is_pattern(fmt):
             return apply_pattern(fmt, minutes)
         return format_duration(float(value))
@@ -271,7 +268,7 @@ def format_options(value: Any, fraction: bool = False
                    ) -> List[Dict[str, str]]:
     """The formats the picker offers for a value, each with how it reads:
     [{"label": "219.8", "fmt": "1"}]. Empty: no choice to make. Time
-    formats read on a fixed example (1d 3h 12m; 09:05 tomorrow), so every
+    formats read on a fixed example (27h 12m; 09:05 tomorrow), so every
     field shows."""
     if isinstance(value, Duration):
         return [{"label": fmt_value(EXAMPLE_DURATION, f), "fmt": f}

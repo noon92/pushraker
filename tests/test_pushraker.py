@@ -2411,6 +2411,21 @@ async def test_two_fixes():
     it = dict(ch=0, name="X PLA", sid=10, rem=40., full=1000., need=0.,
               refill_on=False, exact=True, blockers=[],
               backups=[dict(ace=(0, 1), ch=0, name="X PLA")])
+    # job.* values: kept 5 minutes after the print job ends, then n/a
+    STATE["print_stats"] = ps("complete", filename="Done_job.gcode")
+    c._job_active, c._job_filename = False, "Done_job.gcode"
+    c._job_ended = time.monotonic() - 60
+    kept = await c._data_text("started", "{job.file}")
+    c._job_ended = time.monotonic() - 400
+    gone = await c._data_text("started", "{job.file}")
+    check("job values stay 5 minutes after the print job ends",
+          kept == "Done_job" and gone == "n/a", (kept, gone))
+    check("one duration style: hours, no days, seconds dropped",
+          pn.format_duration(27 * 3600 + 12 * 60 + 50) == "27h 12m"
+          and pn.tp.fmt_value(pn.tp.Duration(27 * 3600 + 12 * 60 + 50), "")
+          == "27h 12m"
+          and pn.tp.fmt_value(pn.tp.Duration(27 * 3600 + 12 * 60 + 50),
+                              'D"d" H"h" MM"m"') == "1d 3h 12m", "")
     text = c._low_text(it, None)
     check("spool running low: a multiACE backup is its ACE slot",
           "Quad Replenish is on: ACE 1 slot 2 (X PLA), is an exact match."
@@ -2598,7 +2613,7 @@ async def test_data():
           and names(rem["children"])[0] == "default"
           and names(rem["children"])[1:] == sorted(names(rem["children"])[1:])
           and [f["label"] for f in rem["children"][0]["formats"]]
-          == ["1d 3h 12m", "1 3:12", "27:12", "27:12", "1632", "1d 3h 12m"],
+          == ["27h 12m", "1 3:12", "27:12", "27:12", "1632", "1d 3h 12m"],
           [f["label"] for f in rem["children"][0]["formats"]])
     check("queue: remaining, list, next, by position, time, eta, grams",
           names(job["queue"]["children"]) == ["remaining", "list", "next",
