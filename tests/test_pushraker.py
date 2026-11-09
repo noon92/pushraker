@@ -2400,7 +2400,9 @@ async def test_data():
     STATE["fan"] = {"speed": 0.55, "rpm": None}
     STATE["purifier"] = {"exhaust_fan": {"speed": 0.4}, "inner_fan":
                          {"speed": 1.0}, "inner_fan_rpm": 3200}
-    STATE["some_addon"] = {"state": "idle", "count": 3, "nested": {"x": 1.5}}
+    STATE["some_addon"] = {"state": "idle", "count": 3, "nested": {"x": 1.5},
+                           "unknown": None}
+    STATE["tmc2209 stepper_z"] = {"temperature": None, "run_current": 0.8}
     STATE["temperature_sensor cavity"] = {"temperature": 31.0}
     STATE["print_task_config"] = {"extruder_map_table": [2, 0, 1, 3],
                                   "filament_type": ["PETG", "PLA", "PLA", "NONE"],
@@ -2482,11 +2484,18 @@ async def test_data():
     out = await c._ep_preview(WebRequest("POST", {"row": "started", "text":
         "{job.file} {job.filaments} {job.filament1.material} "
         "{heater_bed.temperature|0} {job.extruders} {job.filament29.name} "
-        "{job.filament29.extruder} {job.time.remaining|H:MM} {job.filament#.name}"}))
+        "{job.filament29.extruder} {job.time.remaining|H:MM} {job.filament#.name}"
+        " | {job.filaments.materials} | {job.time.remaining|D days H hours M minutes}"
+        " | {job.queue.remaining} {job.queue.next} {job.queue.2.time|H:MM}"
+        " {job.queue.list|line}"}))
     check("preview: the sample Benchy for job values, any filament number, "
           "the printer's live values for Klipper objects; # reads n/a",
-          out["text"] == "3DBenchy_PLA_1h12m PLA Basic White PLA 60 "
-          "extruder PLA Basic White extruder 0:41 n/a"
+          out["text"] == "3DBenchy_x40_4colour PLA Basic White, PETG HF Black, "
+          "TPU 95A Orange, PLA Matte Grey PLA 60 extruder, extruder1, "
+          "extruder2, extruder3 PLA Basic White extruder 27:12 n/a"
+          " | PLA, PETG, TPU, PLA | 1 days 3 hours 12 minutes"
+          " | 3 Cable_clips_x12_PETG 2:12 Cable_clips_x12_PETG\n"
+          "Spool_holder_PLA\nPhone_stand_PLA_TPU"
           and not out["live_job"] and out["placeholders"]
           == ["{job.filament#.name}"], out)
     cat = await c._ep_objects(WebRequest("GET"))
@@ -2512,8 +2521,21 @@ async def test_data():
           names(job["time"]["children"]) == ["remaining", "elapsed", "eta"]
           and names(rem["children"])[0] == "default"
           and names(rem["children"])[1:] == sorted(names(rem["children"])[1:])
-          and [f["fmt"] for f in rem["children"][0]["formats"]]
-          == ["", "H:MM", "HH:MM", "M"], names(rem["children"]))
+          and [f["label"] for f in rem["children"][0]["formats"]]
+          == ["1d 3h 12m", "1 3:12", "27:12", "27:12", "1632", "1d 3h 12m"],
+          [f["label"] for f in rem["children"][0]["formats"]])
+    check("queue: remaining, list, next, by position, time, eta, grams",
+          names(job["queue"]["children"]) == ["remaining", "list", "next",
+                                               "#", "time", "eta", "grams"],
+          names(job["queue"]["children"]))
+    check("a driver without a temperature isn't offered; nor a value "
+          "that isn't there",
+          "stepper_z" not in str(cat) and "some_addon.unknown" not in str(cat),
+          [c["id"] for c in cat["categories"]])
+    check("°C offered after the decimals of temperatures",
+          ext1["children"][0].get("degree")
+          and not [k for k in ext1["children"] if k["name"] == "power"][0]
+          .get("degree"), ext1["children"][0])
     check("filament#: the placeholder, every value as the slicer gives it",
           job["filament#"]["children"][0]["token"] == "job.filament#.name"
           and job["filament#"]["children"][0].get("placeholder"), job["filament#"])

@@ -347,12 +347,18 @@ examples; you can also type your own.
   speed, heater power) as a percentage.
 - Times: `D` days, `H` hours, `M` minutes, in any case. A doubled letter
   is two digits. The largest unit in the pattern carries the total, the
-  smaller ones what's left over. Anything else prints as typed, and text
-  in double quotes too. For 3 days 4 hours 5 minutes:
+  smaller ones what's left over. A word made only of those letters is a
+  field; other words, spaces and punctuation print as typed, and text in
+  double quotes is never read as a field. For 3 days 4 hours 5 minutes:
   `|M` → `4565`, `|H:MM` → `76:05`, `|D H:MM` → `3 4:05`,
-  `|H"h" MM"m"` → `76h 05m`. Without a format: `76h 05m`.
+  `|H"h" MM"m"` → `76h 05m`, `|D days H hours M minutes` →
+  `3 days 4 hours 5 minutes`. Without a format: `3d 4h 05m`.
 - The ETA is a clock time in your time zone: `|HH:MM` → `09:05`, `|H:MM`
-  → `9:05`, with `+1d` when it's tomorrow.
+  → `9:05`, with `+1d ` in front when it's tomorrow.
+- Lists (filament names, the queue): `|comma` (the default) or `|line`,
+  one per line.
+- Temperatures: the tree's °C button after the decimals inserts the token
+  followed by `°C`.
 
 ### Toolheads
 
@@ -378,8 +384,7 @@ tag or the screen.
 | `{job.file}` | the file name, without folder and extension |
 | `{job.progress}` | progress through the file, 0–100 |
 | `{job.layer}` `{job.layers}` | current layer, total layers |
-| `{job.plate}` | the plate type it was sliced for |
-| `{job.queue}` | print jobs waiting in Moonraker's job queue after this one |
+| `{job.plate}` | the plate type it was sliced for (Bambu Studio, OrcaSlicer and its forks; other slicers have none) |
 | `{job.time.remaining}` | time left, by the selected method (see Time left and ETA) |
 | `{job.time.remaining.blend}` … | time left by one method; `.default` for the selected one |
 | `{job.time.elapsed}` | print time so far (stops while paused) |
@@ -392,6 +397,11 @@ tag or the screen.
 | `{job.filament#.slot}` | multiACE: the slot feeding it |
 | `{job.filament#.nozzle_temperature}` `.nozzle_diameter` `.bed_temperature` | its slicer settings |
 | `{job.extruders}` | the toolheads the job uses (`extruder, extruder2`) |
+| `{job.queue.remaining}` | print jobs waiting in Moonraker's job queue after this one |
+| `{job.queue.list}` | their names |
+| `{job.queue.time}` `.eta` `.grams` | all of them: slicer time, when the last should finish, filament |
+| `{job.queue.next.name}` `.time` `.eta` `.grams` `.materials` | the next one |
+| `{job.queue.#.name}` … | one by position: replace `#` with 1, 2, 3… (same fields as `next`) |
 
 Per-filament values come from the slicer's settings at the end of the
 G-code file (OrcaSlicer, Snapmaker Orca, Bambu Studio, PrusaSlicer).

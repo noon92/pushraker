@@ -124,27 +124,19 @@ DATA_ALIAS = {"preprint_done": "started", "file_pause": "paused",
 DATA_QUERY_TIMEOUT = 5.
 # Time-left methods, id -> (label, help); see _left_seconds
 TIME_METHODS = {
-    "blend": ("Blend", "The slicer's estimate until 30 % of the file, then "
-              "a weighted mix of the slicer's estimate, filament used and "
-              "the pace so far, leaning on the pace as the print goes on "
-              "(KlipperScreen's method). The most accurate on tested prints."),
-    "slicer": ("Slicer", "The slicer's estimated print time minus the time "
-               "printed so far (Fluidd's and Mainsail's \"slicer\" "
-               "estimate). Early by the length of the printer's start "
-               "routine, which the slicer doesn't know about."),
-    "slicer_first_layer": ("Slicer from first layer", "The slicer's estimate "
-                    "counted from when layer 1 began, so the start routine "
-                    "(heating, bed scan, calibrations) doesn't count "
-                    "against it."),
-    "file": ("File", "Time printed so far divided by file progress, minus "
-             "the time printed: the pace so far, extrapolated (Fluidd's "
-             "and Mainsail's \"file\" estimate). Wild early in a print, "
-             "good near the end."),
-    "filament": ("Filament", "The same extrapolation by filament used "
-                 "against the file's filament total."),
-    "m73": ("M73", "The slicer's own time-left markers in the file (M73 R, "
-            "written by PrusaSlicer, OrcaSlicer and their forks), at the "
-            "current position. A file without them uses Blend."),
+    "blend": ("Blend", "Slicer estimate until 30 % of the file, then mixed "
+              "with the pace so far, more so as the print goes on "
+              "(KlipperScreen's auto). The most accurate on tested prints."),
+    "slicer": ("Slicer", "Slicer estimate minus time printed. Early by the "
+               "start routine's length."),
+    "slicer_first_layer": ("Slicer from first layer", "Slicer estimate "
+                           "minus time printed since layer 1, so the "
+                           "start routine doesn't count."),
+    "file": ("File", "Pace so far: time printed ÷ file progress. Wild "
+             "early, good late."),
+    "filament": ("Filament", "Pace so far by filament used."),
+    "m73": ("M73", "The slicer's own M73 R markers at the current point "
+            "of the file; Blend if it has none."),
 }
 # (see _left_seconds); the printer harness may add its
 # own and picks the default. KlipperScreen's blend hands over from the
@@ -160,7 +152,12 @@ SAMPLE_FILAMENTS = [
     ("TPU 95A Orange", "TPU", "Generic", "#F98C36", 230, 40),
     ("PLA Matte Grey", "PLA", "Generic", "#808080", 215, 55),
 ]
-SAMPLE_LEFT = 41 * 60          # the sample's time remaining, seconds
+SAMPLE_LEFT = (24 * 60 + 3 * 60 + 12) * 60    # 1d 3h 12m remaining
+SAMPLE_FILE = "3DBenchy_x40_4colour"
+# The sample's job queue: name, hours, grams, materials
+SAMPLE_QUEUE = [("Cable_clips_x12_PETG", 0.75, 22.4, ["PETG"]),
+                ("Spool_holder_PLA", 2.2, 96.0, ["PLA"]),
+                ("Phone_stand_PLA_TPU", 1.1, 41.5, ["PLA", "TPU"])]
 # Klipper's toolheads (extruder, extruder1, ...) and the fields pushraker
 # adds to them: the filament loaded, the MMU slot feeding it
 RX_EXTRUDER = re.compile(r"extruder(\d*)")
@@ -1518,6 +1515,21 @@ class PushNotifications:
                          "colors": "color", "vendors": "vendor",
                          "grams": "grams"}.get(key)
                 return [f.get(field) for f in fl] if field and fl else None
+            if head == "queue":
+                q = base.get("queue") or {}
+                items = q.get("items") or []
+                if not rest:
+                    return q.get("remaining")
+                key = rest[0]
+                if key == "next" or key.isdigit():
+                    n = 1 if key == "next" else int(key)
+                    it = items[n - 1] if 0 < n <= len(items) else (
+                        self._sample_queue_item(n) if sample and not active
+                        and n > 0 else None)
+                    if it is None:
+                        return None
+                    return tp.dig(it, rest[1:]) if rest[1:] else it["name"]
+                return tp.dig(q, rest)
             m = re.fullmatch(r"filament(\d+)", head)
             if m:
                 f = filament(int(m.group(1)))
@@ -1554,7 +1566,8 @@ class PushNotifications:
             "layer": info.get("current_layer"),
             "layers": info.get("total_layer"),
             "plate": self._job_slicer.get("curr_bed_type") or None,
-            "queue": self._queue_count(filename),
+            "queue": self._queue_values(
+                filename, self._left_seconds(self._time_method())),
             "time": self._times(
                 {m: self._left_seconds(m) for m in self._time_methods()},
                 self._left_seconds(self._time_method()), pd),
@@ -1566,16 +1579,76 @@ class PushNotifications:
         }
 
     def _sample_filament(self, n: int) -> Dict[str, Any]:
+        """The sample job's filament n: four in use, any number on demand."""
         name, mat, vendor, colour, nozzle, bed = \
             SAMPLE_FILAMENTS[(n - 1) % len(SAMPLE_FILAMENTS)]
         ch = (n - 1) % max(1, len(self.printer.extruders))
-        return {"index": n - 1, "used": n == 1, "name": name,
-                "material": mat, "vendor": vendor, "color": colour,
-                "grams": 14.3 if n == 1 else round(2. + n * 0.7, 1),
+        return {"index": n - 1, "used": n <= len(SAMPLE_FILAMENTS),
+                "name": name, "material": mat, "vendor": vendor,
+                "color": colour, "grams": round(38.5 - n * 6.3, 1)
+                if n <= len(SAMPLE_FILAMENTS) else round(2. + n * 0.7, 1),
                 "extruder": self._ext_name(ch),
                 "slot": f"ACE 1 slot {ch + 1}" if self._ace_on else None,
                 "nozzle_temperature": float(nozzle),
                 "nozzle_diameter": 0.4, "bed_temperature": float(bed)}
+
+    def _queue_item(self, name: str, seconds: float, grams: Optional[float],
+                    materials: List[str], start: float) -> Dict[str, Any]:
+        return {"name": name, "time": self._dur(seconds) if seconds
+                else None, "grams": grams, "materials": materials or None,
+                "eta": self._eta(start + seconds) if seconds else None}
+
+    def _sample_queue_item(self, n: int, start: float = 0.
+                           ) -> Dict[str, Any]:
+        name, hours, grams, mats = SAMPLE_QUEUE[(n - 1) % len(SAMPLE_QUEUE)]
+        if not start:
+            start = SAMPLE_LEFT + sum(
+                SAMPLE_QUEUE[(i - 1) % len(SAMPLE_QUEUE)][1] * 3600.
+                for i in range(1, n))
+        return self._queue_item(name, hours * 3600., grams, mats, start)
+
+    def _queue_summary(self, items: List[Dict[str, Any]],
+                       left: Optional[float]) -> Dict[str, Any]:
+        secs = sum(float(i["time"]) for i in items if i.get("time"))
+        grams = [i["grams"] for i in items if i.get("grams")]
+        return {"remaining": len(items), "items": items,
+                "list": [i["name"] for i in items] or None,
+                "time": self._dur(secs) if items else None,
+                "eta": self._eta((left or 0.) + secs) if items else None,
+                "grams": sum(grams) if grams else None}
+
+    def _queue_values(self, filename: str, left: Optional[float]
+                      ) -> Dict[str, Any]:
+        """Moonraker's job queue after the current print job: each file's
+        slicer estimate, filament and ETA (one after the other)."""
+        start = left or 0.
+        items = []
+        for f in self._queue_files(filename):
+            try:
+                fm = self.server.lookup_component("file_manager")
+                meta = fm.get_metadata_storage().get(f, {}) or {}
+            except Exception:
+                meta = {}
+            secs = float(meta.get("estimated_time") or 0.)
+            grams = meta.get("filament_weight_total")
+            mats = [m for m in tp.split_values(str(meta.get("filament_type")
+                                                   or "")) if m]
+            items.append(self._queue_item(shown(f), secs, float(grams)
+                                          if grams else None, mats, start))
+            start += secs
+        return self._queue_summary(items, left)
+
+    def _queue_files(self, filename: str) -> List[str]:
+        try:
+            jq = self.server.lookup_component("job_queue", None)
+            files = [str(j) for j in list(getattr(jq, "queued_jobs", {})
+                                          .values())] if jq else []
+        except Exception:
+            return []
+        # The queue starts its next job before taking it off the list
+        if files and files[0] == filename:
+            files = files[1:]
+        return files
 
     def _job_sample(self) -> Dict[str, Any]:
         methods = self._time_methods()
@@ -1585,25 +1658,21 @@ class PushNotifications:
         spread = {m: SAMPLE_LEFT + (i - 2 if i >= 2 else i - 3) * 60
                   for i, m in enumerate(others)}
         spread[default_m] = SAMPLE_LEFT
-        default = SAMPLE_LEFT
-        return {"file": "3DBenchy_PLA_1h12m", "progress": 42.3,
+        fils = [self._sample_filament(n)
+                for n in range(1, len(SAMPLE_FILAMENTS) + 1)]
+        queue = [self._sample_queue_item(n)
+                 for n in range(1, len(SAMPLE_QUEUE) + 1)]
+        return {"file": SAMPLE_FILE, "progress": 42.3,
                 "layer": 120, "layers": 285, "plate": "Textured PEI Plate",
-                "queue": 0, "time": self._times(spread, default, 31 * 60),
-                "filaments": [self._sample_filament(1)],
-                "extruders": ["extruder"]}
+                "queue": self._queue_summary(queue, SAMPLE_LEFT),
+                "time": self._times(spread, SAMPLE_LEFT, 18 * 3600 + 51 * 60),
+                "filaments": fils,
+                "extruders": sorted({f["extruder"] for f in fils},
+                                    key=lambda e: self._ext_index(e) or 0)}
 
     @staticmethod
     def _dur(seconds: Optional[float]) -> Optional[tp.Duration]:
         return tp.Duration(max(0., seconds)) if seconds is not None else None
-
-    def _queue_count(self, filename: str) -> Optional[int]:
-        try:
-            jq = self.server.lookup_component("job_queue", None)
-            files = [str(j) for j in list(getattr(jq, "queued_jobs", {})
-                                          .values())] if jq else []
-            return len([f for f in files if f != filename])
-        except Exception:
-            return None
 
     def _filaments(self) -> List[Dict[str, Any]]:
         """The job's filaments, in slicer order (index 0 = the slicer's
@@ -1695,11 +1764,17 @@ class PushNotifications:
         def fields(obj: str, spec: Sequence[Tuple[str, str, str, bool]]
                    ) -> List[Dict[str, Any]]:
             st = state.get(obj) or {}
-            return [tp.node(f, hint=h, info=i, token=f"{obj}.{f}",
-                            formats=None if f in tp.NO_FORMATS
-                            else tp.format_options(st.get(f), frac))
-                    for f, h, i, frac in spec
-                    if st.get(f) is not None or not st]
+            out = []
+            for f, h, i, frac in spec:
+                if st.get(f) is None and st:
+                    continue
+                node = tp.node(f, hint=h, info=i, token=f"{obj}.{f}",
+                               formats=None if f in tp.NO_FORMATS
+                               else tp.format_options(st.get(f), frac))
+                if f in tp.DEGREE_FIELDS:
+                    node["degree"] = True
+                out.append(node)
+            return out
 
         # Thermals
         thermals = []
@@ -1726,9 +1801,8 @@ class PushNotifications:
                     obj, bool(self.spoolman_url))
             except Exception as e:
                 logging.warning("[pushraker] harness catalogue: %s", e)
-            heads.append(tp.node(
-                obj, info=f"Toolhead {ch + 1}. Klipper calls toolheads "
-                "extruder, extruder1, extruder2…", children=kids))
+            heads.append(tp.node(obj, info=f"Toolhead {ch + 1}.",
+                                 children=kids))
             placed.add(obj)
         # Fans
         fans = []
@@ -1755,12 +1829,10 @@ class PushNotifications:
                 other.append(tp.node(obj, hint=hint(obj) or "",
                                      children=kids))
         cats = [
-            {"id": "thermals", "label": "🌡️ Thermals", "degree": True,
-             "children": thermals},
+            {"id": "thermals", "label": "🌡️ Thermals", "children": thermals},
             {"id": "toolheads", "label": "🔧 Toolheads",
              "info": "Klipper calls toolheads extruder, extruder1, "
-             "extruder2… Values marked generated are pushraker's.",
-             "children": heads},
+             "extruder2…", "children": heads},
             {"id": "fans", "label": "🌀 Fans", "children": fans},
             {"id": "job", "label": "🖨️ Print job",
              "info": "Generated by pushraker, not Klipper values.",
@@ -1777,53 +1849,60 @@ class PushNotifications:
         n = tp.node
 
         def leaf(path: str, hint: str = "", info: str = "",
-                 frac: bool = False) -> Dict[str, Any]:
+                 frac: bool = False, degree: bool = False) -> Dict[str, Any]:
             v = job(path.replace("#", "1").split("."))
             last = path.rsplit(".", 1)[-1]
-            return n(last, hint=hint, info=info, token=f"job.{path}",
-                     formats=None if last in tp.NO_FORMATS
-                     else tp.format_options(v, frac))
+            out = n(last, hint=hint, info=info, token=f"job.{path}",
+                    formats=None if last in tp.NO_FORMATS
+                    else tp.format_options(v, frac))
+            if "#" in path:
+                out["placeholder"] = True
+            if degree:
+                out["degree"] = True
+            return out
 
         default_label = methods[self._time_method()][0]
         remaining = [leaf("time.remaining.default", hint=default_label,
-                          info="Uses the method selected in Print time "
-                          "remaining estimation method (current: "
-                          f"{default_label}).")]
+                          info="The method selected in Print time remaining "
+                          f"estimation method (now: {default_label}).")]
         remaining += [leaf(f"time.remaining.{m}", info=methods[m][1])
                       for m in sorted(methods)]
         fil = [
             leaf("filament#.name"), leaf("filament#.material"),
             leaf("filament#.color"), leaf("filament#.vendor"),
-            leaf("filament#.grams", info="Filament the slicer says this "
-                 "filament uses."),
-            leaf("filament#.extruder", info="The toolhead it prints with, "
-                 "by Klipper's name (extruder, extruder1…)."),
-        ] + ([leaf("filament#.slot", info="With an MMU (multiACE): the "
-                    "slot feeding its toolhead.")] if self._ace_on else []) + [
-            leaf("filament#.nozzle_temperature", info="As sliced. The "
-                 "temperature in effect is whatever the G-code sets."),
+            leaf("filament#.grams", info="As sliced."),
+            leaf("filament#.extruder", info="The toolhead it prints with."),
+        ] + ([leaf("filament#.slot", info="multiACE slot feeding it.")]
+             if self._ace_on else []) + [
+            leaf("filament#.nozzle_temperature", info="As sliced; the "
+                 "G-code sets what's in effect.", degree=True),
             leaf("filament#.nozzle_diameter", info="As sliced."),
             leaf("filament#.bed_temperature", info="As sliced for the "
                  "plate type. In a multi-material print one filament's bed "
-                 "temperature wins, so the heated bed may run at another."),
+                 "temperature wins, so the heated bed may run at another.",
+                 degree=True),
         ]
-        for f in fil:
-            f["placeholder"] = True      # the user types the number
+        queued = [leaf("queue.#.name"),
+                  leaf("queue.#.time", info="Slicer estimate."),
+                  leaf("queue.#.eta", info="If printed one after another."),
+                  leaf("queue.#.grams"), leaf("queue.#.materials")]
+        nxt = [leaf("queue.next.name"),
+               leaf("queue.next.time", info="Slicer estimate."),
+               leaf("queue.next.eta", info="When it should finish, after "
+                    "this print job."),
+               leaf("queue.next.grams"), leaf("queue.next.materials")]
         return [
             leaf("file"),
-            leaf("progress", info="Through the G-code file, 0-100."),
+            leaf("progress", info="Through the file, 0-100."),
             leaf("layer"), leaf("layers"),
-            leaf("plate", hint="plate type", info="As sliced (OrcaSlicer "
-                 "and its forks)."),
-            leaf("queue", info="Print jobs waiting in Moonraker's job "
-                 "queue after this one."),
+            leaf("plate", hint="plate type", info="Bambu Studio and "
+                 "OrcaSlicer (and its forks) only; other slicers have no "
+                 "plate types."),
             n("time", children=[
                 n("remaining", children=remaining),
-                leaf("time.elapsed", info="Print time so far (stops while "
-                     "paused)."),
-                leaf("time.eta", info="When the print job should finish, by "
-                     "the selected method, in your time zone; +1d when "
-                     "it's tomorrow."),
+                leaf("time.elapsed", info="Print time; stops while "
+                     "paused."),
+                leaf("time.eta", info="Your time zone; +1d tomorrow."),
             ]),
             n("filaments", hint="all filaments", children=[
                 leaf("filaments.names"), leaf("filaments.materials"),
@@ -1831,11 +1910,20 @@ class PushNotifications:
                 leaf("filaments.grams"),
                 leaf("filaments.total_grams")]),
             n("filament#", hint="specific filament",
-              info="One of the job's filaments, by the slicer's number (1, "
-              "2, 3…). Clicking a value inserts it with # selected: type "
-              "the number.", children=fil),
-            leaf("extruders", hint="toolheads this print job uses",
-                 info="By Klipper's name (extruder, extruder1…)."),
+              info="Replace # with the slicer's number.", children=fil),
+            leaf("extruders", hint="toolheads used"),
+            n("queue", hint="Moonraker's job queue", children=[
+                leaf("queue.remaining", info="Print jobs waiting after "
+                     "this one."),
+                leaf("queue.list"),
+                n("next", children=nxt),
+                n("#", hint="by position", info="Replace # with the "
+                  "position in the queue (1 = next).", children=queued),
+                leaf("queue.time", info="All waiting print jobs, slicer "
+                     "estimates."),
+                leaf("queue.eta", info="When the last one should finish."),
+                leaf("queue.grams"),
+            ]),
         ]
 
     async def _ep_preview(self, web_request: Any) -> Dict[str, Any]:

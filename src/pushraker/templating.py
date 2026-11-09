@@ -28,7 +28,7 @@ notification.
 from __future__ import annotations
 import datetime
 import re
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 NA = "n/a"
 # {object.field}, {object with space.field.sub}, {job.filament2.name|fmt}
@@ -113,15 +113,37 @@ class Clock:
 
 
 def format_duration(seconds: float) -> str:
-    seconds = max(0, int(round(seconds)))
-    h, m = divmod(seconds // 60, 60)
+    """1d 3h 12m, 3h 12m, 12m (the default for durations)."""
+    total = max(0, int(round(seconds / 60.)))
+    d, rest = divmod(total, 1440)
+    h, m = divmod(rest, 60)
+    if d:
+        return f"{d}d {h}h {m:02d}m"
     if h:
         return f"{h}h {m:02d}m"
-    return f"{m}m" if m else f"{seconds}s"
+    return f"{m}m"
 
 
-RX_PATTERN = re.compile(r'"([^"]*)"|([dD]+|[hH]+|[mM]+)|(.)', re.S)
+# A pattern: "quoted text", words, and anything else. A word made only of
+# D, H and M letters is a field (DD, H, HHMM...); any other word ("days",
+# "min") prints as typed.
+RX_PATTERN = re.compile(r'"([^"]*)"|([A-Za-z]+)|(.)', re.S)
+RX_FIELDS = re.compile(r"[dD]+|[hH]+|[mM]+")
 UNIT_MINUTES = {"d": 1440, "h": 60, "m": 1}
+
+
+def _pattern_parts(pattern: str) -> List[Tuple[str, str]]:
+    """[(kind, text)]: kind "unit" (a run of one letter) or "text"."""
+    out: List[Tuple[str, str]] = []
+    for m in RX_PATTERN.finditer(pattern):
+        quoted, word, other = m.group(1), m.group(2), m.group(3)
+        if quoted is not None:
+            out.append(("text", quoted))
+        elif word is not None and re.fullmatch(r"[dDhHmM]+", word):
+            out += [("unit", r.group(0)) for r in RX_FIELDS.finditer(word)]
+        else:
+            out.append(("text", word if word is not None else other))
+    return out
 
 
 def apply_pattern(pattern: str, minutes: int,
@@ -129,33 +151,30 @@ def apply_pattern(pattern: str, minutes: int,
     """D/H/M pattern over a number of minutes. units_total: the largest
     unit in the pattern carries the total (durations); otherwise each
     unit is the clock's own field (hours 0-23, minutes 0-59)."""
-    parts = [(m.group(1), m.group(2), m.group(3))
-             for m in RX_PATTERN.finditer(pattern)]
-    present = [u[0].lower() for _, u, _ in parts if u]
-    order = [u for u in ("d", "h", "m") if u in present]
+    parts = _pattern_parts(pattern)
+    present = {t[0].lower() for k, t in parts if k == "unit"}
     values: Dict[str, int] = {}
     if units_total:
         left = minutes
-        for u in order:
-            values[u] = left // UNIT_MINUTES[u]
-            left -= values[u] * UNIT_MINUTES[u]
+        for u in ("d", "h", "m"):
+            if u in present:
+                values[u] = left // UNIT_MINUTES[u]
+                left -= values[u] * UNIT_MINUTES[u]
     else:
         values = {"d": minutes // 1440, "h": (minutes // 60) % 24,
                   "m": minutes % 60}
     out = []
-    for quoted, unit, other in parts:
-        if quoted is not None:
-            out.append(quoted)
-        elif unit:
-            v = values.get(unit[0].lower(), 0)
-            out.append(f"{v:02d}" if len(unit) >= 2 else str(v))
+    for kind, text in parts:
+        if kind == "unit":
+            v = values.get(text[0].lower(), 0)
+            out.append(f"{v:02d}" if len(text) >= 2 else str(v))
         else:
-            out.append(other)
+            out.append(text)
     return "".join(out)
 
 
 def is_pattern(fmt: str) -> bool:
-    return bool(re.search(r"[dDhHmM]", re.sub(r'"[^"]*"', "", fmt)))
+    return any(k == "unit" for k, _ in _pattern_parts(fmt))
 
 
 def fmt_value(value: Any, fmt: str) -> str:
@@ -175,8 +194,10 @@ def fmt_value(value: Any, fmt: str) -> str:
             if fmt and is_pattern(fmt) else value.at.strftime("%H:%M")
         return (f"+{value.days}d " if value.days > 0 else "") + text
     if isinstance(value, (list, tuple)):
-        items = [fmt_value(v, fmt) for v in value]
-        return ", ".join(i for i in items if i != NA) or NA
+        sep = "\n" if low == "line" else ", "
+        inner = "" if low in ("line", "comma") else fmt
+        items = [fmt_value(v, inner) for v in value]
+        return sep.join(i for i in items if i != NA) or NA
     if isinstance(value, dict):
         return ", ".join(f"{k}: {fmt_value(v, fmt)}" for k, v in value.items()
                          ) or NA
@@ -222,16 +243,28 @@ def render(text: str, resolve: Callable[[Token], Any]) -> str:
 
 # ---- the picker's tree ------------------------------------------------------
 
+# The examples the picker shows for time formats: every field filled
+EXAMPLE_DURATION = Duration((24 * 60 + 3 * 60 + 12) * 60.)    # 1d 3h 12m
+TIME_FORMATS = ("", "D H:MM", "H:MM", "HH:MM", "M", 'D"d" H"h" MM"m"')
+CLOCK_FORMATS = ("", "H:MM")
+
+
 def format_options(value: Any, fraction: bool = False
                    ) -> List[Dict[str, str]]:
     """The formats the picker offers for a value, each with how it reads:
-    [{"label": "219.8", "fmt": "1"}]. Empty: no choice to make."""
+    [{"label": "219.8", "fmt": "1"}]. Empty: no choice to make. Time
+    formats read on a fixed example (1d 3h 12m; 09:05 tomorrow), so every
+    field shows."""
     if isinstance(value, Duration):
-        return [{"label": fmt_value(value, f), "fmt": f}
-                for f in ("", "H:MM", "HH:MM", "M")]
+        return [{"label": fmt_value(EXAMPLE_DURATION, f), "fmt": f}
+                for f in TIME_FORMATS]
     if isinstance(value, Clock):
-        return [{"label": fmt_value(value, f), "fmt": f}
-                for f in ("", "H:MM")]
+        example = Clock(datetime.datetime(2026, 1, 2, 9, 5), 1)
+        return [{"label": fmt_value(example, f), "fmt": f}
+                for f in CLOCK_FORMATS]
+    if isinstance(value, (list, tuple)):
+        return [{"label": "a, b, c", "fmt": ""},
+                {"label": "one per line", "fmt": "line"}]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return []
     if fraction:
@@ -269,23 +302,22 @@ def node(name: str, hint: str = "", info: str = "",
 # info, the value is a 0-1 fraction)
 HEATER_FIELDS = [
     ("temperature", "now", "", False),
-    ("target", "set", "The temperature it is set to; 0 when off.", False),
-    ("power", "heater power", "How hard the heater is working, 0-100 %.",
-     True)]
+    ("target", "set", "0 when off.", False),
+    ("power", "heater power", "", True)]
 EXTRUDER_FIELDS = [
     ("temperature", "nozzle, now", "", False),
-    ("target", "nozzle, set", "The nozzle temperature it is set to; 0 when "
-     "off.", False),
-    ("power", "heater power", "How hard the nozzle heater is working, "
-     "0-100 %.", True),
+    ("target", "nozzle, set", "0 when off.", False),
+    ("power", "heater power", "", True),
     ("nozzle_diameter", "mm", "", False)]
 # Values whose decimals aren't a choice (a 0.4 nozzle is never "0")
 NO_FORMATS = {"nozzle_diameter"}
+# Temperatures: the picker offers °C after their decimals
+DEGREE_FIELDS = {"temperature", "target", "nozzle_temperature",
+                 "bed_temperature"}
 SENSOR_FIELDS = [("temperature", "now", "", False)]
 FAN_FIELDS = [
-    ("speed", "", "Fan speed, 0-100 %.", True),
-    ("rpm", "", "Measured speed; n/a for a fan without a tachometer.",
-     False)]
+    ("speed", "", "", True),
+    ("rpm", "", "Fans with a tachometer only.", False)]
 THERMAL_TYPES = {"heater_bed": HEATER_FIELDS, "heater_generic": HEATER_FIELDS,
                  "temperature_sensor": SENSOR_FIELDS,
                  "temperature_host": SENSOR_FIELDS,
@@ -298,9 +330,9 @@ FAN_TYPES = {"fan": FAN_FIELDS, "fan_generic": FAN_FIELDS,
 GENERIC_HINTS = {"heater_bed": "heated bed", "fan": "part cooling fan",
                  "temperature_host": "host computer"}
 FIELD_INFO = {
-    "filament_detected": "yes when the filament sensor sees filament.",
-    "enabled": "yes when the sensor is switched on.",
-    "value": "The pin's value, 0-1 (1 = fully on).",
+    "filament_detected": "yes / no.",
+    "enabled": "Sensor switched on: yes / no.",
+    "value": "0-1 (1 = fully on).",
 }
 # Klipper's and Moonraker's internals: never offered (typing a token for
 # one still works)
@@ -315,7 +347,7 @@ HIDDEN = {
     "stepper_enable", "menu", "board_pins", "gcode_arcs", "pid_calibrate",
     "garbage_collection", "heaters",
 }
-HIDDEN_PREFIXES = ("gcode_macro ", "mcu", "stepper_", "extruder_stepper ",
+HIDDEN_PREFIXES = ("gcode_macro ", "mcu", "stepper_", "tmc", "extruder_stepper ",
                    "manual_stepper ", "gcode_button ", "delayed_gcode ",
                    "duplicate_pin_override", "verify_heater ", "bed_mesh ",
                    "adxl345", "lis2dw", "display", "endstop_phase",
@@ -344,7 +376,7 @@ def fields_tree(obj: str, values: Dict[str, Any], prefix: str = "",
                 kids = fields_tree(obj, v, f"{path}.", depth + 1)
                 if kids:
                     out.append(node(k, children=kids))
-        elif isinstance(v, (int, float, str, bool)) or v is None:
+        elif isinstance(v, (int, float, str, bool)):
             out.append(node(k, info=FIELD_INFO.get(k, ""),
                             token=f"{obj}.{path}",
                             formats=format_options(v)))

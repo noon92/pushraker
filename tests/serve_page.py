@@ -33,6 +33,7 @@ def u1_state():
         "temperature_host host": {"temperature": 48.0},
         "tmc2240 stepper_x": {"temperature": 48.1},
         "tmc2240 stepper_y": {"temperature": 46.3},
+        "tmc2209 stepper_z": {"temperature": None, "run_current": 0.8},
         "fan": {"speed": 0.55, "rpm": None},
         "heater_fan e0_nozzle_fan": {"speed": 1.0, "rpm": 6100},
         "fan_generic cavity_fan": {"speed": 0.3, "rpm": None},

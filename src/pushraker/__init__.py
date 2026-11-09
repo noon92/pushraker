@@ -4,4 +4,4 @@
 
 """Push notifications for Klipper printers, as a Moonraker component."""
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"

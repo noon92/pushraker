@@ -198,18 +198,20 @@
     .pr-row { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-top: 1px solid #2a2a2a; color: #ddd; cursor: pointer; flex-wrap: wrap; }
     .pr-pick > .pr-row:first-child { border-top: none; }
     .pr-row:hover { background: #262626; }
-    .pr-row .pr-ar { color: var(--muted); font-size: 11px; width: 10px; flex: none; }
+    .pr-row .pr-ar { color: var(--muted); font-size: 15px; width: 16px; flex: none; line-height: 1; text-align: center; }
     .pr-row code { font-family: monospace; font-size: 12px; color: var(--text); }
     .pr-row.pr-leaf code { color: var(--accent); }
     .pr-row small { color: var(--muted); font-size: 11px; }
     .pr-row.pr-cat { color: #fff; font-weight: 600; border-top: 1px solid #333; }
     .pr-row.pr-cat a { font-size: 12px; font-weight: normal; }
     .pr-row.pr-sel { background: #263238; }
-    .pr-deg { background: #555; color: #fff; border: none; border-radius: 5px; font-size: 12px; font-weight: 600; padding: 2px 8px; font-family: inherit; cursor: pointer; margin-left: 14px; }
+    .pr-deg { background: #555; color: #fff; border: none; border-radius: 5px; font-size: 12px; font-weight: 600; padding: 3px 9px; font-family: inherit; cursor: pointer; margin: 0 0 4px 14px; }
     .pr-deg:hover { background: #666; }
-    .pr-row .nt-i { width: 15px; height: 15px; font-size: 10px; }
-    .pr-tipline { background: #1e1e1e; border: 1px solid #555; border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.4; margin: 2px 10px 6px; color: var(--text); white-space: normal; font-weight: normal; cursor: auto; }
-    .pr-tipline code { color: var(--accent); font-family: monospace; }
+    .pr-row .nt-i, .pr-fmt .nt-i { width: 17px; height: 17px; font-size: 12px; }
+    /* The (i) explanations: a tooltip (hover on a computer; a click or tap
+       keeps it open until the next click or tap anywhere) */
+    .pr-tip { display: none; position: fixed; z-index: 30; max-width: 320px; background: #1e1e1e; border: 1px solid #555; border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.4; color: var(--text); box-shadow: 0 6px 20px rgba(0,0,0,0.5); }
+    .pr-tip a { margin-left: 4px; }
     .pr-fmt { padding: 6px 10px 8px; border-top: 1px solid #2a2a2a; background: #181818; }
     .pr-fmt .pr-lbl { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .pr-fmt button.pr-f { background: #2a2a2a; color: var(--accent); border: 1px solid #555; border-radius: 5px; font-size: 12px; padding: 3px 9px; margin: 0 4px 4px 0; font-family: monospace; cursor: pointer; }
@@ -835,12 +837,13 @@
         return catalogue;
     }
     const FMT_INFO = {
-        decimals: 'How many decimal places: |0 rounds to a whole number.',
-        percent: '|pct shows a 0-1 value as a percentage.',
-        time: 'D days, H hours, M minutes, in any case. A doubled letter is two digits (HH:MM reads 01:05). The largest unit carries the total (M alone: all the minutes). Anything else prints as typed; text in double quotes too ("h"). Type your own after the |.'
+        decimals: 'Decimal places.',
+        percent: '|pct: a 0-1 value as a percentage.',
+        time: 'D days, H hours, M minutes, any case; doubled = two digits. The largest one carries the total. Other words print as typed. Type your own after the |.'
     };
     function fmtKind(formats) {
         if (formats.some(f => /[hm]/i.test(f.fmt))) return 'time';
+        if (formats.some(f => f.fmt === 'line')) return 'list';
         if (formats.some(f => f.fmt === 'pct')) return 'percent';
         return 'decimals';
     }
@@ -859,8 +862,9 @@
             if (n.children) html += n.children.map(k => nodeHtml(k, depth + 1)).join('');
             if (n.formats) {
                 const kind = fmtKind(n.formats);
-                html += `<div class="pr-fmt" style="padding-left:${pad + 16}px"><div class="pr-lbl">${kind === 'time' ? 'Format' : kind === 'percent' ? 'Shown as' : 'Decimals'}${infoButton(FMT_INFO[kind])}</div>` +
-                    n.formats.map(f => `<button type="button" class="pr-f" data-token="${esc(n.token)}" data-fmt="${esc(f.fmt)}"${n.placeholder ? ' data-ph="1"' : ''}>${esc(f.label)}<small>${f.fmt ? '|' + esc(f.fmt) : 'default'}</small></button>`).join('') + '</div>';
+                html += `<div class="pr-fmt" style="padding-left:${pad + 16}px"><div class="pr-lbl">${kind === 'decimals' ? 'Decimals' : kind === 'percent' ? 'Shown as' : 'Format'}${infoButton(FMT_INFO[kind])}</div>` +
+                    n.formats.map(f => `<button type="button" class="pr-f" data-token="${esc(n.token)}" data-fmt="${esc(f.fmt)}"${n.placeholder ? ' data-ph="1"' : ''}>${esc(f.label)}<small>${f.fmt ? '|' + esc(f.fmt) : 'default'}</small></button>`).join('') +
+                    (n.degree ? '<button type="button" class="pr-deg">°C</button>' : '') + '</div>';
             }
             html += '</div>';
         }
@@ -873,15 +877,13 @@
             return;
         }
         pick.innerHTML = cats.map(c =>
-            `<div class="pr-row pr-cat" data-node><span class="pr-ar">▸</span>${esc(c.label)}${infoButton(c.info, c.guide)}` +
-            (c.degree ? '<button type="button" class="pr-deg" data-insert="°C">°C</button>' : '') + '</div>' +
+            `<div class="pr-row pr-cat" data-node><span class="pr-ar">▸</span>${esc(c.label)}${infoButton(c.info, c.guide)}</div>` +
             `<div class="pr-kids" style="display:none">${c.children.map(n => nodeHtml(n, 1)).join('')}</div>`).join('') +
             '<div class="pr-any">Or type any <code>{object.field}</code>: <a href="https://www.klipper3d.org/Status_Reference.html" target="_blank">Klipper status reference</a> · <a href="' + GUIDE + '#adding-data" target="_blank">Guide</a></div>';
         pick.querySelectorAll('[data-node]').forEach(row => {
             row.onclick = e => {
                 if (e.target.closest('a')) return;
-                if (e.target.closest('.pr-info')) { toggleInfo(e.target.closest('.pr-info'), row); return; }
-                if (e.target.closest('.pr-deg')) { insertText('°C'); return; }
+                if (e.target.closest('.pr-info')) return;
                 if (row.dataset.token) { insertToken(row.dataset.token, '', !!row.dataset.ph); return; }
                 const kids = row.nextElementSibling;
                 if (!kids || !kids.classList.contains('pr-kids')) return;
@@ -891,34 +893,55 @@
                 row.classList.toggle('pr-sel', open && !!kids.querySelector(':scope > .pr-fmt'));
             };
         });
-        pick.querySelectorAll('.pr-fmt .pr-info').forEach(b => {
-            b.onclick = e => { e.stopPropagation(); toggleInfo(b, b.closest('.pr-lbl')); };
-        });
+        wireTips(pick);
+        pick.onscroll = hideTip;
+        pick.querySelectorAll('.pr-deg').forEach(b => { b.onclick = () => insertText('°C'); });
         pick.querySelectorAll('.pr-f').forEach(b => {
             b.onclick = () => insertToken(b.dataset.token, b.dataset.fmt, !!b.dataset.ph);
         });
     }
-    // An (i) opens its explanation under its row; another click closes it
-    function toggleInfo(btn, row) {
-        const next = row.nextElementSibling;
-        if (next && next.classList.contains('pr-tipline')) {
-            next.remove();
-            btn.classList.remove('on');
-            return;
-        }
-        const tip = document.createElement('div');
-        tip.className = 'pr-tipline';
-        tip.textContent = btn.dataset.info;
+    // (i): a tooltip on hover (computer); a click or tap keeps it open,
+    // and the next click or tap anywhere closes it and does what it does
+    const tipBox = document.createElement('div');
+    tipBox.className = 'pr-tip';
+    document.body.append(tipBox);
+    let tipPinned = null, tipShown = null;
+    function showTip(btn) {
+        tipBox.textContent = btn.dataset.info;
         if (btn.dataset.guide) {
             const a = document.createElement('a');
             a.href = `${GUIDE}#${btn.dataset.guide}`;
             a.target = '_blank';
-            a.textContent = ' Guide';
-            tip.append(a);
+            a.textContent = 'Guide';
+            tipBox.append(a);
         }
-        tip.onclick = e => e.stopPropagation();
-        row.after(tip);
+        tipBox.style.display = 'block';
+        const r = btn.getBoundingClientRect(), w = tipBox.offsetWidth, h = tipBox.offsetHeight;
+        tipBox.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + 'px';
+        tipBox.style.top = (r.bottom + 6 + h > innerHeight ? r.top - h - 6 : r.bottom + 6) + 'px';
+        if (tipShown) tipShown.classList.remove('on');
+        tipShown = btn;
         btn.classList.add('on');
+    }
+    function hideTip() {
+        tipBox.style.display = 'none';
+        if (tipShown) tipShown.classList.remove('on');
+        tipShown = tipPinned = null;
+    }
+    document.addEventListener('click', e => {
+        if (!e.target.closest('.pr-info') && !e.target.closest('.pr-tip')) hideTip();
+    }, true);
+    function wireTips(root) {
+        root.querySelectorAll('.pr-info').forEach(b => {
+            b.onmouseenter = () => { if (matchMedia('(hover: hover)').matches && !tipPinned) showTip(b); };
+            b.onmouseleave = () => { if (!tipPinned) hideTip(); };
+            b.onclick = e => {
+                e.stopPropagation();
+                if (tipPinned === b) { hideTip(); return; }
+                showTip(b);
+                tipPinned = b;
+            };
+        });
     }
     function insertText(text, selectFrom, selectLen) {
         const ta = el('pr-data-text');
@@ -977,13 +1000,13 @@
             try {
                 const r = await api('/server/pushraker/preview', 'POST', { row: rid, text });
                 rendered = (r && r.text) || '';
-                note = r && r.live_job ? 'The current print job with the printer\'s current values.' : 'Sample print job (a Benchy in PLA) with the printer\'s current values.';
+                note = r && r.live_job ? 'The current print job and the printer\'s current values.' : 'A sample print job (40 Benchies, four filaments) and the printer\'s current values.';
             } catch (e) {
                 note = 'Preview unavailable: ' + e.message;
             }
         }
-        box.innerHTML = `<div class="pr-pt">${esc(title)}</div>3DBenchy_PLA_1h12m\n` +
-            (rid === 'started' ? 'Estimated print time 1h 12m, ETA 21:52\n' : rid === 'complete' ? 'Print time: 1h 09m\n' : '') +
+        box.innerHTML = `<div class="pr-pt">${esc(title)}</div>3DBenchy_x40_4colour\n` +
+            (rid === 'started' ? 'Estimated print time 1d 22h 03m\n' : rid === 'complete' ? 'Print time: 1d 21h 40m\n' : '') +
             (rendered ? `<span class="pr-px">${esc(rendered)}</span>` : '<span class="pr-pn">(no data added)</span>');
         el('pr-note').textContent = note;
     }
