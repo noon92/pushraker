@@ -1681,6 +1681,16 @@ class PushNotifications:
     def _dur(seconds: Optional[float]) -> Optional[tp.Duration]:
         return tp.Duration(max(0., seconds)) if seconds is not None else None
 
+    def _used_filaments(self, st: Dict[str, str]) -> Set[int]:
+        """The slicer filaments the job prints with: the slicer's own
+        per-filament usage (0 for one in the project but not printed),
+        else what the printer was told to load."""
+        for key in ("filament used [g]", "filament used [mm]"):
+            vals = [tp.number(v) for v in tp.split_values(st.get(key, ""))]
+            if vals:
+                return {i for i, v in enumerate(vals) if v and v > 0}
+        return set(self._job_tools)
+
     def _filaments(self) -> List[Dict[str, Any]]:
         """The job's filaments, in slicer order (index 0 = the slicer's
         filament 1), each as the slicer reported it, with the extruder
@@ -1689,7 +1699,7 @@ class PushNotifications:
         temperature wins."""
         st = self._job_slicer
         ptc = self._job_ptc or {}
-        used = set(self._job_tools)
+        used = self._used_filaments(st)
         count = max([len(tp.split_values(st.get("filament_type", ""))),
                      len(self._job_weights)] + [t + 1 for t in used])
         ctx = dict(self._printer_context(), ptc=ptc)
@@ -1715,7 +1725,8 @@ class PushNotifications:
                 "name": name, "material": material, "vendor": vendor,
                 "color": tp.per_filament(st, ("filament_colour",
                                               "filament_color"), t),
-                "grams": self._job_weights.get(t),
+                "grams": self._job_weights.get(t) or tp.number(
+                    tp.per_filament(st, ("filament used [g]",), t)) or None,
                 "extruder": self._ext_name(ch) if ch is not None else None,
                 "slot": slot,
                 "nozzle_temperature": tp.number(tp.per_filament(
@@ -1808,7 +1819,7 @@ class PushNotifications:
                     obj, bool(self.spoolman_url))
             except Exception as e:
                 logging.warning("[pushraker] harness catalogue: %s", e)
-            heads.append(tp.node(obj, info=f"Toolhead {ch + 1}.",
+            heads.append(tp.node(obj, hint=f"toolhead {ch + 1}",
                                  children=kids))
             placed.add(obj)
         # Fans

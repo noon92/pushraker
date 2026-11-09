@@ -75,8 +75,7 @@ class SnapmakerU1(Printer):
         "Snapmaker", "What the touchscreen shows: slicer estimate × share "
         "of the file left. Ignores the actual pace.")}
     time_default = "snapmaker"
-    HINTS = {"temperature_sensor cavity": "cavity",
-             "dragonbreath": "chamber heater"}
+    HINTS = {"dragonbreath": "chamber heater"}
 
     @classmethod
     def matches(cls, objects: Sequence[str]) -> bool:

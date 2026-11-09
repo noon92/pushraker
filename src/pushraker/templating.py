@@ -398,9 +398,15 @@ BED_TYPES = {
 }
 
 
+RX_USED = re.compile(rb"^; *(filament used \[(?:g|mm)\]) *= *(.*?)\s*$", re.M)
+
+
 def slicer_settings(tail: bytes) -> Dict[str, str]:
-    """The "; key = value" settings in the end of a G-code file."""
+    """The "; key = value" settings in the end of a G-code file, and the
+    slicer's per-filament usage ("filament used [g]", "[mm]")."""
     out: Dict[str, str] = {}
+    for m in RX_USED.finditer(tail or b""):
+        out[m.group(1).decode()] = m.group(2).decode("utf-8", "replace")
     for m in RX_SETTING.finditer(tail or b""):
         try:
             out[m.group(1).decode()] = m.group(2).decode("utf-8", "replace")

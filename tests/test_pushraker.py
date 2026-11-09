@@ -2462,6 +2462,20 @@ async def test_data():
           "Missing: n/a n/a n/a · Power 30% · {broken" in body, body)
     check("a print_stats layer from the default data isn't on a custom row",
           "Layer" not in body, body)
+    # Used: the slicer's per-filament usage, not every project filament
+    # or every toolhead the printer mapped
+    st = pn.tp.slicer_settings(b"; filament used [mm] = 4796.1, 0.00, 1073.2"
+                               b"\n; filament used [g] = 14.30, 0.00, 3.20\n"
+                               b"; filament_type = PLA;PETG;PLA\n")
+    saved = (c._job_slicer, c._job_tools, c._job_weights)
+    c._job_slicer, c._job_tools, c._job_weights = st, {0, 1, 2, 3}, {}
+    fl = c._filaments()
+    check("filaments in the project but not printed aren't used (slicer's "
+          "filament used [g])",
+          [f["index"] for f in fl if f["used"]] == [0, 2]
+          and [f["grams"] for f in fl] == [14.3, None, 3.2],
+          [(f["index"], f["used"], f["grams"]) for f in fl])
+    c._job_slicer, c._job_tools, c._job_weights = saved
     # Progress rows share the Progress row's data
     log.clear()
     META["gcode_start_byte"], META["gcode_end_byte"] = 0, 10000

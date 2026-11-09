@@ -856,7 +856,7 @@
         const leaf = !opens && n.token;
         const hint = n.hint ? ` <small>${esc(n.hint)}</small>` : '';
         let html = `<div class="pr-row${leaf ? ' pr-leaf' : ''}" style="padding-left:${pad}px" data-node>` +
-            `<span class="pr-ar">${opens ? '▸' : ''}</span><code>${esc(n.name)}</code>${infoButton(n.info)}${hint}</div>`;
+            `<span class="pr-ar">${opens ? '▸' : ''}</span><code>${esc(n.name)}</code>${hint}${infoButton(n.info)}</div>`;
         if (opens) {
             html += `<div class="pr-kids" style="display:none">`;
             if (n.children) html += n.children.map(k => nodeHtml(k, depth + 1)).join('');
