@@ -74,6 +74,20 @@ async def make():
     return server, c
 
 
+def local_codemirror(self):
+    """CodeMirror from this checkout's codemirror/ folder (no download)."""
+    import shutil as sh
+    js, info = self._cm_paths()
+    os.makedirs(self._cm_dir, exist_ok=True)
+    sh.copy(os.path.join(HERE, "..", "codemirror", T.pn.CODEMIRROR["file"]),
+            js)
+    with open(info, "w") as f:
+        json.dump({"version": T.pn.CODEMIRROR["version"],
+                   "sha256": T.pn.CODEMIRROR["sha256"]}, f)
+
+
+T.pn.PushNotifications._cm_download_sync = local_codemirror
+
 LOOP = asyncio.new_event_loop()
 threading.Thread(target=LOOP.run_forever, daemon=True).start()
 SERVER, COMP = asyncio.run_coroutine_threadsafe(make(), LOOP).result()
@@ -107,7 +121,9 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         if path.startswith("/server/") or path.startswith("/machine/"):
-            return self._send(*call(path, "GET", {}))
+            from urllib.parse import parse_qsl, urlsplit
+            args = dict(parse_qsl(urlsplit(self.path).query))
+            return self._send(*call(path, "GET", args))
         self._send(200, open(WEB, "rb").read(), "text/html")
 
     def do_POST(self):

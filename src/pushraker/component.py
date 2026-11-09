@@ -2167,7 +2167,53 @@ class PushNotifications:
              "guide": "print-job-values", "children": self._job_tree()},
             {"id": "other", "label": "❔ Other", "children": other},
         ]
+        key = str(dict(web_request.get_args()).get("key") or "")
+        if key in cfgmod.TEMPLATE:
+            event = jj.prune(self._sample_event(key))
+            cats.insert(0, {"id": "event", "label": "⚡ This notification",
+                            "hint": "event", "info": "What this notification is about. The "
+                            "preview shows a sample.", "guide": "event",
+                            "children": self._value_tree("event", event)})
+        cats.insert(len(cats) - 1, {"id": "machine", "label": "🖥️ Machine",
+                     "children": self._value_tree(
+                         "machine", jj.prune(self._machine()))})
         return {"categories": [c for c in cats if c["children"]]}
+
+    def _value_tree(self, prefix: str, value: Dict[str, Any]
+                    ) -> List[Dict[str, Any]]:
+        """The picker's entries for a dict of values (event.*, machine.*):
+        a dict opens, a value inserts; a list of dicts inserts the list
+        (to loop over), with what each item has in "item"."""
+        out: List[Dict[str, Any]] = []
+        for k, v in value.items():
+            expr = f"{prefix}.{k}" if re.fullmatch(r"[A-Za-z_]\w*", k) \
+                else f"{prefix}[{k!r}]"
+            if isinstance(v, dict):
+                kids = self._value_tree(expr, v)
+                if kids:
+                    out.append({"name": k, "children": kids})
+                continue
+            node: Dict[str, Any] = {"name": k, "expr": expr}
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                node["hint"] = "list: use for each"
+                node["item"] = self._item_fields(v[0])
+            else:
+                fmts = tp.format_options(v)
+                if fmts:
+                    node["formats"] = fmts
+            out.append(node)
+        return out
+
+    def _item_fields(self, item: Dict[str, Any], base: str = ""
+                     ) -> List[str]:
+        """A list item's values, as paths (together.grams)."""
+        out: List[str] = []
+        for k, v in item.items():
+            if isinstance(v, dict):
+                out += self._item_fields(v, f"{base}{k}.")
+            else:
+                out.append(base + k)
+        return out
 
     def _extruders_node(self, exts: Sequence[str], state: Dict[str, Any],
                         heads: List[Dict[str, Any]]) -> Dict[str, Any]:
