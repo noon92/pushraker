@@ -398,10 +398,15 @@ A list prints comma-separated (`extruders.names` → `extruder, extruder1`);
 
 Under **Image**, by thumbnail: **None**, **Render** (the slicer's
 picture of the model; print job notifications only), **Camera** (a
-snapshot; pick the camera, or the printer's, set as **Camera** on the
+snapshot; pick the camera, or the printer's, set as **Default camera** on the
 page), **Graphic** (the spool picture, for filament notifications), with
 **Show filament remaining** for the amounts on it. Colours follow the
 running-low threshold (orange at or under it, green above).
+
+A template can change the image for one notification, like the priority:
+`{% set image = "render" %}` (`none`, `render`, `camera`, `graphic`;
+`graphic` only where the notification draws a spool picture). With no
+camera picked, **Camera** uses the **Default camera** set on the page.
 
 ### CodeMirror
 

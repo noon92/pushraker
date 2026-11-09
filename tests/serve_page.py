@@ -66,6 +66,11 @@ def u1_state():
 async def make():
     u1_state()
     server = T.Server()
+    # Two webcams, their snapshots served by this server (the sample
+    # render and a grey frame)
+    server.extra_components = {"webcam": T.Webcams([
+        T.Webcam("case", f"http://127.0.0.1:{PORT}/webcam/case.jpg", "/webcam/webrtc"),
+        T.Webcam("nozzle", f"http://127.0.0.1:{PORT}/webcam/nozzle.jpg", "/webcam2/webrtc")])}
     data = os.path.join(T.WORK, "data")
     os.makedirs(os.path.join(data, "config"), exist_ok=True)
     c = T.pn.PushNotifications(T.Config(server, dict(name="U1-martha")))
@@ -122,6 +127,10 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        if path.startswith("/webcam/"):
+            return self._send(200, open(os.path.join(
+                HERE, "..", "src", "pushraker", "web", "sample-render.jpg"),
+                "rb").read(), "image/jpeg")
         if path.startswith("/server/") or path.startswith("/machine/"):
             from urllib.parse import parse_qsl, urlsplit
             args = dict(parse_qsl(urlsplit(self.path).query))

@@ -153,7 +153,7 @@
     .nt-eta-opts label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #fff; white-space: nowrap; position: relative; font-size: 14px; }
     .nt-eta-opts input[type=radio] { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; cursor: pointer; }
     .nt-eta-opts .nt-eta-def { color: var(--muted); font-size: 12px; }
-    .nt-i { display: inline-flex; width: 16px; height: 16px; border: 1px solid #777; border-radius: 50%; color: #aaa; font-size: 11px; font-style: italic; font-family: Georgia, serif; align-items: center; justify-content: center; cursor: help; line-height: 1; background: none; padding: 0; }
+    .nt-i { display: inline-flex; width: 16px; height: 16px; border: 1px solid #777; border-radius: 50%; color: #aaa; font-size: 11px; font-weight: 700; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; align-items: center; justify-content: center; cursor: help; line-height: 1; background: none; padding: 0; }
     .nt-i.on, .nt-i:hover { border-color: var(--accent); color: var(--accent); }
     .nt-tip { display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 6; background: #1e1e1e; border: 1px solid #555; border-radius: 8px; padding: 10px 12px; width: 340px; font-size: 12px; color: var(--text); line-height: 1.45; white-space: normal; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-weight: normal; cursor: auto; }
     .nt-tip.open { display: block; }
@@ -161,7 +161,7 @@
     .nt-tip code { font-family: monospace; color: var(--accent); }
     .nt-eta.nt-chg { box-shadow: inset 3px 0 0 var(--accent); }
     @media (max-width: 600px) {
-        .nt-eta-opts { gap: 6px 14px; }
+        .nt-eta-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
         .nt-eta-opts label { position: static; }
         .nt-tip { left: 12px; right: 12px; width: auto; top: calc(100% - 4px); }
     }
@@ -175,8 +175,11 @@
     /* On a phone the Data button is the row's last line instead of a column */
     .nt-data-inline { display: none; }
     .pr-data .pr-modal-box { max-width: min(1600px, 96vw); border-radius: 12px; padding: 20px 24px; max-height: 94vh; overflow-y: auto; }
-    .pr-data-grid { grid-template-areas: "ed side" "prev img"; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) !important; }
-    .pr-ed { grid-area: ed; } .pr-side { grid-area: side; } .pr-imgwrap { grid-area: img; } .pr-prevwrap { grid-area: prev; }
+    .pr-data-grid { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) !important; }
+    .pr-prevwrap { margin-top: 12px; }
+    .pr-imgwrap { margin-top: 12px; }
+    /* Values: no taller than the contents box starts out */
+    .pr-data .pr-pick { max-height: 260px; }
     #pr-t-title { height: auto; min-height: 0; resize: none; overflow: hidden; line-height: 1.4; margin-bottom: 10px; }
     .pr-rec { font-size: 12px; color: var(--muted); }
     .pr-cm .pr-console { height: auto; min-height: 0; max-height: 200px; margin: 12px 0 0; display: none; }
@@ -188,8 +191,8 @@
     .pr-data input.pr-code, .pr-data textarea.nt-input { font-family: monospace; }
     .pr-data input.pr-code { font-size: 13px; margin-bottom: 10px; }
     #pr-data-text { min-height: 220px; }
-    #pr-cm-host .cm-editor { min-height: 220px !important; }
-    #pr-cm-host .cm-editor { border: 1px solid #555; border-radius: 6px; font-size: 13px; min-height: 150px; max-height: 360px; }
+    #pr-cm-host .cm-editor { border: 1px solid #555; border-radius: 6px; font-size: 13px; height: 260px; min-height: 120px; resize: vertical; overflow: hidden; }
+    #pr-cm-host .cm-scroller { overflow: auto; }
     #pr-cm-host .cm-scroller { font-family: monospace; }
     .pr-imgs { display: grid; grid-template-columns: repeat(4, minmax(0, 84px)); gap: 8px; margin: 2px 0 6px; }
     .pr-img { text-align: center; font-size: 11px; color: #ccc; cursor: pointer; min-width: 0; background: none; border: none; padding: 0; font-family: inherit; }
@@ -265,7 +268,9 @@
     .pr-data .pr-buttons .pr-gap { width: 30px; }
     .pr-data .pr-buttons .btn-save { margin-left: 0; }
     @media (max-width: 600px) {
-        .pr-data-grid { grid-template-columns: minmax(0, 1fr) !important; grid-template-areas: "side" "ed" "img" "prev"; }
+        .pr-data-grid { grid-template-columns: minmax(0, 1fr) !important; }
+        .pr-col-l, .pr-col-r { display: contents; }
+        .pr-side { order: 1; } .pr-ed { order: 2; } .pr-imgwrap { order: 3; } .pr-prevwrap { order: 4; }
         .pr-pick { max-height: 260px; }
         .pr-data .pr-modal-box { padding: 12px 10px; max-width: 100%; }
         .pr-modal { padding: 6px; }
@@ -511,7 +516,7 @@
                 <div class="nt-hint" id="nt-name-hint">Shown in every title, e.g. "✅ U1 complete".</div>
             </div>
             <div class="nt-field">
-                <label for="nt-camera">Camera</label>
+                <label for="nt-camera">Default camera</label>
                 <select class="nt-input" id="nt-camera"></select>
                 <div class="nt-warn" id="nt-camera-warn"></div>
             </div>
@@ -612,6 +617,7 @@
     <div class="pr-modal-box">
         <h3 id="pr-data-title"></h3>
         <div class="pr-data-grid">
+            <div class="pr-col-l">
             <div class="pr-ed">
                 <div class="pr-lbl">Title</div>
                 <textarea class="nt-input pr-code" id="pr-t-title" rows="1" spellcheck="false" autocomplete="off"></textarea>
@@ -620,6 +626,12 @@
                 <div id="pr-cm-host"></div>
                 <div class="pr-data-err" id="pr-data-err" style="display:none"></div>
             </div>
+            <div class="pr-prevwrap">
+                <div class="pr-lbl">Preview</div>
+                <div class="pr-prev" id="pr-prev"></div>
+            </div>
+            </div>
+            <div class="pr-col-r">
             <div class="pr-side">
                 <div class="pr-lbl">Jinja <a href="https://github.com/noon92/pushraker/blob/main/docs/guide.md#templates" target="_blank">Guide</a></div>
                 <div class="pr-jj" id="pr-jj">
@@ -633,13 +645,10 @@
                 <div class="pr-pick" id="pr-pick"><div class="pr-any">Loading the printer's objects…</div></div>
             </div>
             <div class="pr-imgwrap">
-                <div class="pr-lbl">Image</div>
+                <div class="pr-lbl">Image <button type="button" class="nt-i pr-info" data-info="The image sent. A template can change it for one notification: {% set image = &quot;render&quot; %} (none, render, camera, graphic)." data-guide="images" aria-label="About">?</button></div>
                 <div class="pr-imgs" id="pr-imgs"></div>
                 <div class="pr-imgopts" id="pr-imgopts"></div>
             </div>
-            <div class="pr-prevwrap">
-                <div class="pr-lbl">Preview</div>
-                <div class="pr-prev" id="pr-prev"></div>
             </div>
         </div>
         <div class="pr-buttons">
@@ -845,7 +854,7 @@
         methods.sort((a, b) => (a.id === def ? -1 : b.id === def ? 1 : a.label.localeCompare(b.label)));
         const chosen = state.time_left || def;
         el('nt-eta-opts').innerHTML = methods.map(m =>
-            `<label><input type="radio" name="nt-time" value="${esc(m.id)}"${m.id === chosen ? ' checked' : ''}> ${esc(m.label)}${m.id === def ? ' <span class="nt-eta-def">(default)</span>' : ''} <button type="button" class="nt-i" data-tip="${esc(m.id)}" aria-label="About ${esc(m.label)}">i</button><div class="nt-tip" data-tip-for="${esc(m.id)}"><b>${esc(m.label)}</b> — ${esc(m.help)} <code>{{ job.time.remaining.${esc(m.id)} }}</code></div></label>`).join('');
+            `<label><input type="radio" name="nt-time" value="${esc(m.id)}"${m.id === chosen ? ' checked' : ''}> ${esc(m.label)}${m.id === def ? ' <span class="nt-eta-def">(default)</span>' : ''} <button type="button" class="nt-i" data-tip="${esc(m.id)}" aria-label="About ${esc(m.label)}">?</button><div class="nt-tip" data-tip-for="${esc(m.id)}"><b>${esc(m.label)}</b> — ${esc(m.help)} <code>{{ job.time.remaining.${esc(m.id)} }}</code></div></label>`).join('');
         const tips = el('nt-eta-opts');
         const closeTips = () => { tips.querySelectorAll('.nt-tip.open').forEach(t => t.classList.remove('open')); tips.querySelectorAll('.nt-i.on').forEach(i => i.classList.remove('on')); };
         tips.querySelectorAll('.nt-i').forEach(b => {
@@ -926,7 +935,7 @@
         return 'decimals';
     }
     function infoButton(text, guide) {
-        return text ? ` <button type="button" class="nt-i pr-info" data-info="${esc(text)}"${guide ? ` data-guide="${esc(guide)}"` : ''} aria-label="About">i</button>` : '';
+        return text ? ` <button type="button" class="nt-i pr-info" data-info="${esc(text)}"${guide ? ` data-guide="${esc(guide)}"` : ''} aria-label="About">?</button>` : '';
     }
     function nodeHtml(n, depth) {
         const pad = 10 + depth * 16;
@@ -1069,6 +1078,7 @@
             };
         });
     }
+    wireTips(document.querySelector('.pr-imgwrap'));
 
     // -- the two text fields: the title (a line) and the contents (a text
     // box, or CodeMirror when installed); values go to the one last used
@@ -1227,10 +1237,13 @@
     async function imageFor(t, kind) {
         kind = kind || t.image;
         if (kind === 'none') return null;
-        const id = kind === 'render' ? 'render' : kind === 'camera' ? 'camera:' + (t.camera || '') : `graphic:${t.key}:${t.remaining}`;
+        // The notification's camera, or the page's default camera
+        const cam = t.camera || el('nt-camera').value;
+        if (kind === 'camera' && !cam) return null;
+        const id = kind === 'render' ? 'render' : kind === 'camera' ? 'camera:' + cam : `graphic:${t.key}:${t.remaining}`;
         if (!(id in imgCache)) {
             imgCache[id] = api('/server/pushraker/preview_image', 'POST',
-                { key: t.key, image: kind, camera: t.camera || '', remaining: t.remaining ? 'true' : 'false' })
+                { key: t.key, image: kind, camera: cam || '', remaining: t.remaining ? 'true' : 'false' })
                 .then(r => (r && r.image) || null).catch(() => null);
         }
         return imgCache[id];
@@ -1247,7 +1260,7 @@
         const cams = Object.keys(state.meta.cameras || {});
         const def = el('nt-camera').value;
         el('pr-imgopts').innerHTML =
-            (t.image === 'camera' ? `<label>Camera <select id="pr-cam">${[['', `Printer's camera${def ? ` (${esc(def)})` : ''}`]].concat(cams.map(c => [c, c])).map(([v, l]) =>
+            (t.image === 'camera' ? `<label>Camera <select id="pr-cam">${[['', `Default camera (${esc(def || 'none')})`]].concat(cams.map(c => [c, c])).map(([v, l]) =>
                 `<option value="${esc(v)}"${v === (t.camera || '') ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>` : '') +
             (t.image === 'graphic' ? `<label><input type="checkbox" id="pr-remaining"${t.remaining ? ' checked' : ''}> Show filament remaining</label>` : '');
         if (el('pr-cam')) el('pr-cam').onchange = () => { editing.camera = el('pr-cam').value; renderImages(); preview(); };
@@ -1257,7 +1270,7 @@
             const src = await imageFor(t, k);
             const th = box.querySelector(`[data-img="${k}"] .pr-th`);
             if (th && src) th.style.backgroundImage = `url(${src})`;
-            else if (th) th.textContent = '—';
+            else if (th) th.innerHTML = k === 'camera' && !(t.camera || el('nt-camera').value) ? '<small>No camera</small>' : '—';
         }
     }
     function fillEditor() {

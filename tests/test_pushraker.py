@@ -2657,6 +2657,17 @@ async def test_templates_sending():
     server, c = make({}, {"paused": [("ntfy", ntfy, False)],
                           "resumed": [("ntfy", ntfy, False)],
                           "filament_change": [("ntfy", ntfy, False)]})
+    t, b, sets = await c._render_pair(
+        "{% if 1 %}\nA\n{% endif %}\nB",
+        '{% if 1 %}\n{% set priority = "MAX" %}\n{% set image = "render" %}'
+        '\n{% endif %}{% set image2 = "x" %}text', {})
+    check("a template sets the priority and the image; the title is one "
+          "line", (t, b, sets) == ("A B", "text", {"priority": "max",
+                                                    "image": "render"}),
+          (t, b, sets))
+    t, b, sets = await c._render_pair(
+        "", '{% set priority = "urgent" %}{% set image = "photo" %}x', {})
+    check("...only to what exists", sets == {}, sets)
     c.settings = dict(c.settings, templates={
         "paused": {"title": "⏸ {{ machine.name }} on hold",
                    "contents": "{{ job.file }} paused\n"

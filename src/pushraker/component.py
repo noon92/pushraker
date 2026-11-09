@@ -751,6 +751,9 @@ class AppriseLog(logging.Handler):
 
 
 PRIORITY_NAMES = ("min", "low", "default", "high", "max")
+# {% set image = ... %} in a template: the page's names to the component's
+IMAGE_SET = {"none": "none", "render": "render", "camera": "snapshot",
+             "graphic": "spool"}
 
 
 class Destination(NamedTuple):
@@ -1663,15 +1666,19 @@ class PushNotifications:
 
     async def _render_pair(self, title: str, contents: str,
                            ctx: Dict[str, Any]
-                           ) -> Tuple[str, str, Optional[str]]:
-        """Title and contents, and the priority either set (None: the
-        row's)."""
+                           ) -> Tuple[str, str, Dict[str, str]]:
+        """Title and contents, and what either set for this notification:
+        {% set priority = "max" %}, {% set image = "render" %} (left out:
+        the row's)."""
         t, tv = await self._render_vars(title, ctx)
         c, cv = await self._render_vars(contents, ctx)
-        prio = str(cv.get("priority", tv.get("priority", "")) or "")
-        prio = prio.strip().lower()
-        return self._one_line(t), c, prio if prio in PRIORITY_NAMES \
-            else None
+        sets: Dict[str, str] = {}
+        for name, allowed in (("priority", PRIORITY_NAMES),
+                              ("image", tuple(IMAGE_SET))):
+            v = str(cv.get(name, tv.get(name, "")) or "").strip().lower()
+            if v in allowed:
+                sets[name] = v
+        return self._one_line(t), c, sets
 
     async def _resolver(self, tokens: Sequence[tp.Token],
                         state: Dict[str, Any], sample: bool) -> Any:
@@ -2868,9 +2875,13 @@ class PushNotifications:
         try:
             if delay:
                 await asyncio.sleep(delay)
-            title, body, prio = await self._compose(key, title, body, event)
-            if prio:
-                dests = self._at_priority(rid, dests, prio)
+            title, body, sets = await self._compose(key, title, body, event)
+            if sets.get("priority"):
+                dests = self._at_priority(rid, dests, sets["priority"])
+            # The image a template set (a spool picture only where the
+            # notification draws one)
+            if sets.get("image") and IMAGE_SET[sets["image"]] != "spool":
+                image = IMAGE_SET[sets["image"]]
             if camera_wait and image == "snapshot" and not snapshot_ready:
                 path = await self._wait_for_snapshot(camera_wait, key)
             else:
@@ -3491,14 +3502,14 @@ class PushNotifications:
 
     async def _compose(self, key: str, title: str, body: str,
                        event: Optional[Dict[str, Any]]
-                       ) -> Tuple[str, str, Optional[str]]:
+                       ) -> Tuple[str, str, Dict[str, str]]:
         """The notification's title and text from its template. An edited
         template that fails sends the default's text, with what went
         wrong; the default failing (it shouldn't) sends what was built
         here."""
         tpl = self._template(key)
         if not tpl:
-            return title, body, None
+            return title, body, {}
         d = dflt.default(key)
         try:
             ctx = await self._template_context(
@@ -3509,15 +3520,15 @@ class PushNotifications:
             edited = d is None or (tpl["title"], tpl["contents"]) != d
             logging.warning("[pushraker] %s template: %s", key, e)
             if not edited:
-                return title, body, None
+                return title, body, {}
             try:
                 ctx = await self._template_context(list(d), False, event)
-                t, c, prio = await self._render_pair(d[0], d[1], ctx)
+                t, c, sets = await self._render_pair(d[0], d[1], ctx)
                 return t, self._lines(c, f"⚠️ Your template failed: {e}"), \
-                    prio
+                    sets
             except jj.TemplateError:
                 return title, self._lines(
-                    body, f"⚠️ Your template failed: {e}"), None
+                    body, f"⚠️ Your template failed: {e}"), {}
 
     async def _parity(self, key: str, title: str, body: str,
                       event: Optional[Dict[str, Any]]) -> None:
@@ -6190,23 +6201,29 @@ class PushNotifications:
         kind, dests = row
         tickets = [self._reserve(d.channel, rid) for d in dests]
         paths: Dict[Tuple[int, ...], Optional[str]] = {}
-        shared: Optional[str] = None
-        try:
-            if kind in ("render", "snapshot"):
-                shared = await self._image(
-                    kind, self._job_filename if self._job_active else "",
+        shared_by: Dict[str, Optional[str]] = {}
+
+        async def shared(k: str) -> Optional[str]:
+            """The render or snapshot, once for all destinations."""
+            if k not in shared_by:
+                shared_by[k] = await self._image(
+                    k, self._job_filename if self._job_active else "",
                     None, False, rid)
+            return shared_by[k]
+        try:
             remaining = self._template(rid).get("remaining", True)
             per_dest: List[List[Tuple[str, str, Optional[str]]]] = []
             sent_to: List[Destination] = []
             for d in dests:
                 prio: Optional[str] = None
+                d_kind = kind
                 if packer is None:
                     msgs = []
                     for t, b, rows in messages or []:
                         await self._parity(rid, t, b, event)
-                        t, b, p = await self._compose(rid, t, b, event)
-                        prio = prio or p
+                        t, b, sets = await self._compose(rid, t, b, event)
+                        prio = prio or sets.get("priority")
+                        d_kind = IMAGE_SET.get(sets.get("image", ""), d_kind)
                         msgs.append((t, b, rows))
                     keyed = [((k,), m) for k, m in enumerate(msgs)]
                 else:
@@ -6224,14 +6241,18 @@ class PushNotifications:
                                 [caps[i] for i in idx], head,
                                 n if len(parts) > 1 else None, len(parts))
                             await self._parity(rid, t, body, ev)
-                            t, body, p = await self._compose(rid, t, body, ev)
-                            prio = prio or p
+                            t, body, sets = await self._compose(
+                                rid, t, body, ev)
+                            prio = prio or sets.get("priority")
+                            d_kind = IMAGE_SET.get(sets.get("image", ""),
+                                                   d_kind)
                         keyed.append((tuple(idx), (
                             t, body, [row_fn(issues[i]) for i in idx])))
                 out = []
                 for key, (t, b, rows) in keyed:
-                    path = shared
-                    if kind == "spool":
+                    path = await shared(d_kind) if d_kind in (
+                        "render", "snapshot") else None
+                    if d_kind == "spool":
                         if key not in paths:
                             if not remaining:
                                 rows = self._no_amounts(rows)
@@ -6257,7 +6278,8 @@ class PushNotifications:
             for t in tickets:
                 await t.gate.done(t.ticket)
             for p in list(paths.values()) + (
-                    [shared] if kind == "snapshot" else []):
+                    [shared_by["snapshot"]] if "snapshot" in shared_by
+                    else []):
                 if p:
                     shutil.rmtree(os.path.dirname(p), ignore_errors=True)
         return all(results)
