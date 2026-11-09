@@ -2485,6 +2485,162 @@ async def test_more_notifications():
     STATE.pop("webhooks", None)
 
 
+async def test_template_variants():
+    """Each notification's variants, so the default templates are checked
+    against all of them (the other tests reach most; these the rest)."""
+    print("Template variants")
+    reset_world()
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    rows = ("started", "resumed", "paused", "file_pause", "complete",
+            "cancelled", "error", "filament_short", "filament_low",
+            "spool_switch", "slot_empty", "filament_change")
+    server, c = make({}, {r: [("ntfy", ntfy, False)] for r in rows})
+
+    class Job:
+        def __init__(self, f):
+            self.f = f
+
+        def __str__(self):
+            return self.f
+
+    class Queue:
+        queue_state = "ready"
+        queued_jobs = {"2": Job("A.gcode"), "3": Job("B.gcode")}
+    server.extra_components = {"job_queue": Queue()}
+    c.tz = datetime.timezone.utc
+    # Started: the queue line, one pause, an ETA
+    with open(os.path.join(GCODES, "One.gcode"), "wb") as f:
+        f.write(b";LAYER_CHANGE\n;Z:0.2\nG1 X1\n" * 5
+                + b"M600\n" + b"G1 X1\n" * 100)
+    await start_job(server, "One.gcode")
+    await asyncio.sleep(0.3)
+    body = log and log[-1]["body"]
+    check("started: queue line, one pause, ETA",
+          body and "Print 1/3 remaining in queue" in body
+          and "contains a pause" in body and ", ETA " in body, body)
+    # The file's pause, one of several
+    with open(os.path.join(GCODES, "Two.gcode"), "wb") as f:
+        f.write(b"G1 X1\n" * 10 + b"PAUSE\n" + b"G1 X1\n" * 1000
+                + b"M600\n" + b"G1 X1\n" * 1000)
+    await start_job(server, "Two.gcode")
+    await asyncio.sleep(0.3)
+    log.clear()
+    pos = c._job_pauses[0]["offset"] + 10
+    STATE["virtual_sdcard"] = {"file_position": pos}
+    STATE["print_stats"] = ps("paused", "Two.gcode")
+    await server.handlers["job_state:state_changed"](
+        JobEvent.PAUSED, {}, STATE["print_stats"])
+    await asyncio.sleep(0.5)
+    check("file pause: 1 of 2", log and "Pause 1 of 2" in log[-1]["body"],
+          log and log[-1])
+    # Complete with the queue still holding print jobs
+    log.clear()
+    STATE["print_stats"] = ps("printing", "Two.gcode")
+    await server.remote["pushraker"](event="complete")
+    await asyncio.sleep(0.3)
+    check("complete: what's left in the queue", log
+          and "2 prints remaining in queue" in log[-1]["body"],
+          log and log[-1])
+    # Errors: ending the job (coded, and Klipper's message), a fault-cancel
+    for ex, msg in ((dict(level=2, id=532, index=0, code=9,
+                          message="noodle"), ""),
+                    (None, "Move out of range")):
+        log.clear()
+        c._job_done_sent = False
+        c._faults_sent.clear()
+        await start_job(server)
+        st = ps("error", message=msg, **({"exception": ex} if ex else {}))
+        STATE["print_stats"] = st
+        await server.handlers["job_state:state_changed"](
+            JobEvent.ERROR, {}, st)
+        await asyncio.sleep(0.3)
+        check(f"error ending the job ({'coded' if ex else 'message'})",
+              any(e["title"] == "⚠️ U1 Error: error" for e in log),
+              [e["title"] for e in log])
+    log.clear()
+    c._job_done_sent = False
+    c._faults_sent.clear()
+    ex = dict(level=2, id=532, index=0, code=11, message="clog")
+    STATE["print_stats"] = ps("cancelled", exception=ex)
+    await c._report_end("cancelled", STATE["print_stats"], from_hook=True)
+    check("error: cancelled by a fault", log
+          and log[-1]["title"] == "⚠️ U1 Error: cancelled", log and log[-1])
+    log.clear()
+    STATE["print_stats"] = ps("printing")
+    ex = dict(level=2, id=523, index=0, code=12, message="heater")
+    await server.handlers["snapmaker:exception_notification"](ex)
+    await asyncio.sleep(0.5)
+    check("error: a fault", log and log[-1]["title"] == "⚠️ U1 Error: fault",
+          log and log[-1])
+    # Resumed after power loss
+    log.clear()
+    c.printer.power_loss_env_paths = ["/nonexistent"]
+    STATE["print_stats"] = ps("printing", print_duration=4000)
+    STATE["virtual_sdcard"] = {"file_position": 6000, "progress": 0.5}
+    await server.handlers["job_state:state_changed"](
+        JobEvent.STARTED, {}, STATE["print_stats"])
+    await asyncio.sleep(0.3)
+    check("resumed after power loss", log
+          and log[0]["title"] == "▶️ U1 resumed after power loss", log)
+    c.printer.power_loss_env_paths = []
+    # Not enough filament / running low: the less common lines
+    def issue(ch, **kw):
+        it = dict(ch=ch, name="Elegoo PETG", sid=10 + ch, rem=40., full=1000.,
+                  need=120., colour=None, status="red", backups=[],
+                  refill_on=True, exact=True, blockers=[],
+                  together="red", unknown_backup=False, total=40.)
+        it.update(kw)
+        return it
+    back = dict(ch=2, sid=22, name="Elegoo PETG", rem=0., full=1000.,
+                colour=None, own=0., exact=True)
+    STATE["ace"] = ace_state([("ready", "PLA", BROWN)] * 4, head=1,
+                             src_slot=1, quad=False)
+    c._status["ace"] = STATE["ace"]
+    c._ace_on = True
+    log.clear()
+    await c._short_alert("Big.gcode", [
+        issue(0, backups=[back], unknown_backup=True, together="orange"),
+        issue(1, refill_on=True, exact=False,
+              blockers=[(3, "nozzle 0.4 vs 0.6 mm")]),
+        issue(2, refill_on=False)])
+    STATE["ace"]["quad_replenish"] = True
+    c._status["ace"] = STATE["ace"]
+    await c._short_alert("Big.gcode", [issue(1, refill_on=False)])
+    await c._low_alert([issue(0, need=0., backups=[dict(back, ace=(0, 2),
+                                                        rem=None)]),
+                        issue(1, need=0.)])
+    check("filament: unknown together, blockers, Quad Replenish off and "
+          "on, several running low with an ACE backup", len(log) == 3,
+          [e["title"] for e in log])
+    # Quad Replenish switch with nothing next; from an empty slot
+    log.clear()
+    STATE["ace"] = ace_state([("ready", "PLA", BROWN)] * 4, head=1,
+                             src_slot=1)
+    c._status["ace"] = STATE["ace"]
+    await c._ace_switch_alert(1, None, (0, 1))
+    check("switch: from an empty slot, nothing next", log
+          and "an empty slot" in log[-1]["body"]
+          and "pause when it runs out" in log[-1]["body"], log and log[-1])
+    # Filament loaded, with Spoolman's weight left
+    log.clear()
+    c._job_active = False
+    SPOOLS[33] = {"id": 33, "remaining_weight": 512.,
+                  "filament": {"name": "PLA Basic", "material": "PLA",
+                               "vendor": {"name": "Bambu"}}}
+    c.spoolman_url = "http://spoolman"
+    STATE["print_task_config"] = {"filament_spool_id": [33, 0, 0, 0],
+                                  "filament_exist": [True, False, False,
+                                                     False]}
+    c._status["print_task_config"] = STATE["print_task_config"]
+    c._exist_seen = [False, False, False, False]
+    c._exist_gen += 1
+    pn.FILAMENT_CHANGE_SETTLE = 0.
+    await c._filament_change(0, True, c._exist_gen)
+    check("filament loaded with grams left", log
+          and "512 g left" in log[-1]["body"], log and log[-1])
+
+
 async def test_data():
     """Notification data: {object.field|fmt} tokens from Klipper, job.*
     from pushraker, per-filament slicer settings, n/a for what's missing,
@@ -2762,7 +2918,7 @@ async def run_component_tests():
               test_driver_hot,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
-              test_two_fixes, test_more_notifications, test_data):
+              test_two_fixes, test_more_notifications, test_template_variants, test_data):
         try:
             await t()
         except Exception as e:  # report and carry on
