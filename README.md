@@ -15,7 +15,7 @@ It grew out of the Push Notifications feature of the
 where it is built in. User documentation: the
 [Push Notifications guide](docs/guide.md).
 
-**Status: 0.4.** The component has been in
+**Status: 0.3.** The component has been in
 use on the Snapmaker U1 for a while; the page, the settings file and the
 installer are new. Other printers: the generic parts work (Klipper's
 standard objects: print_stats, exclude_object, heater_generic, tmc
