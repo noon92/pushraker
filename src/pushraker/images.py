@@ -254,14 +254,14 @@ def _columns(row: Dict[str, Any]) -> int:
 
 
 def _shape(cols: int, w: int, h: int) -> Tuple[int, int]:
-    """The image's size for its content: one spool about square, two
-    spools 4:3, three in a row as wide as they are."""
-    if cols >= 3:
-        return w, h
+    """The image's size for its content: one spool square, two spools
+    4:3, three in a row as wide as they are; never taller than wide."""
+    w = max(w, h)
+    if cols == 1:
+        return w, w
     if cols == 2:
         return w, max(h, round(w * 3 / 4))
-    side = max(w, h)
-    return side, side
+    return w, h
 
 
 def _layout(row: Dict[str, Any]) -> List[Tuple[int, int]]:
