@@ -654,7 +654,7 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
         if left:
             what = "Default data" if rid == "default" else ROW[rid][1]
             raise ConfigError(f"{what}: replace # in {left[0]} with a "
-                              "filament number")
+                              "number")
     if s["time_left"] and env is not None and env.time_methods and \
             s["time_left"] not in {m["id"] for m in env.time_methods}:
         raise ConfigError("Unknown time-left method")

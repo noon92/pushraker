@@ -33,10 +33,12 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 NA = "n/a"
 # {object.field}, {object with space.field.sub}, {job.filament2.name|fmt}
 RX_TOKEN = re.compile(r"\{([A-Za-z_][^{}|]*?)(?:\|([^{}|]*))?\}")
-# A token still holding the # placeholder (job.filament#.name)
-RX_PLACEHOLDER = re.compile(r"\{[^{}]*#[^{}]*\}")
+# A token still holding the # placeholder in its name (job.filament#.name);
+# a # in the format is a toolhead number (|Toolhead #)
+RX_PLACEHOLDER = re.compile(r"\{[^{}|]*#[^{}|]*(?:\|[^{}]*)?\}")
 MAX_DATA = 1500      # characters of rendered data per notification
 JOB = "job"
+EXTRUDERS = "extruders"     # every toolhead (pushraker's)
 DECIMALS = ("0", "1", "2", "3")
 
 
@@ -74,7 +76,7 @@ def objects_needed(tokens: Sequence[Token]) -> Dict[str, List[str]]:
     excluded): one Moonraker query fills them all."""
     need: Dict[str, List[str]] = {}
     for t in tokens:
-        if t.obj == JOB:
+        if t.obj in (JOB, EXTRUDERS):
             continue
         fields = need.setdefault(t.obj, [])
         if t.path[0] not in fields:
@@ -98,6 +100,20 @@ def dig(value: Any, path: Sequence[str]) -> Any:
         else:
             return None
     return value
+
+
+class ToolName(str):
+    """A toolhead's Klipper name (extruder, extruder1...) that formats by
+    number: |Toolhead # -> Toolhead 1, |T# -> T1."""
+    num: int
+
+    def __new__(cls, name: str, num: int) -> "ToolName":
+        out = str.__new__(cls, name)
+        out.num = num
+        return out
+
+
+NAME_FORMATS = ("", "Toolhead #", "Tool #", "T#")
 
 
 class Duration(float):
@@ -183,6 +199,8 @@ def fmt_value(value: Any, fmt: str) -> str:
     low = fmt.lower()
     if isinstance(value, bool):
         return "yes" if value else "no"
+    if isinstance(value, ToolName):
+        return fmt.replace("#", str(value.num)) if "#" in fmt else str(value)
     if isinstance(value, Duration):
         minutes = int(round(max(0., float(value)) / 60.))
         if fmt and is_pattern(fmt):
@@ -228,7 +246,7 @@ def render(text: str, resolve: Callable[[Token], Any]) -> str:
         toks = parse(m.group(0))
         if not toks:
             return m.group(0)
-        if "#" in m.group(0):
+        if "#" in toks[0].obj or any("#" in p for p in toks[0].path):
             return NA
         try:
             value = resolve(toks[0])
@@ -262,6 +280,22 @@ def format_options(value: Any, fraction: bool = False
         example = Clock(datetime.datetime(2026, 1, 2, 9, 5), 1)
         return [{"label": fmt_value(example, f), "fmt": f}
                 for f in CLOCK_FORMATS]
+    names = [v for v in value if isinstance(v, ToolName)] \
+        if isinstance(value, (list, tuple)) else \
+        [value] if isinstance(value, ToolName) else []
+    if names:
+        out = [{"label": fmt_value(names, f) if isinstance(value, (list,
+                tuple)) else fmt_value(names[0], f), "fmt": f}
+               for f in NAME_FORMATS]
+        if isinstance(value, (list, tuple)):
+            out.append({"label": "one per line", "fmt": "line"})
+        return out
+    if isinstance(value, (list, tuple)) and any(
+            isinstance(v, float) for v in value) and all(
+            v is None or isinstance(v, (int, float)) for v in value):
+        return [{"label": fmt_value(value, f), "fmt": f}
+                for f in (("pct", "2") if fraction else ("", "0", "1"))] + \
+            [{"label": "one per line", "fmt": "line"}]
     if isinstance(value, (list, tuple)):
         return [{"label": "a, b, c", "fmt": ""},
                 {"label": "one per line", "fmt": "line"}]

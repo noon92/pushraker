@@ -356,7 +356,11 @@ examples; you can also type your own.
 - The ETA is a clock time in your time zone: `|HH:MM` → `09:05`, `|H:MM`
   → `9:05`, with `+1d ` in front when it's tomorrow.
 - Lists (filament names, the queue): `|comma` (the default) or `|line`,
-  one per line.
+  one per line. A number format applies to each item
+  (`{extruders.temperatures|0}` → `220, 219, 25`).
+- Toolhead names: `#` is the toolhead's number, from 1. `|Toolhead #` →
+  `Toolhead 1`, `|Tool #`, `|T#` → `T1`, or any text with `#` in it.
+  Without a format: Klipper's name (`extruder`, `extruder1`).
 - Temperatures: the tree's °C button after the decimals inserts the token
   followed by `°C`.
 
@@ -374,6 +378,13 @@ knows them:
 
 On the Snapmaker U1 the printer knows the loaded filament from its RFID
 tag or the screen.
+
+`extruders.*` lists every toolhead, used by the print job or not, in
+toolhead order: `{extruders.names}`, `.count`, Klipper's `.temperatures`
+`.targets` `.powers` `.nozzle_diameters`, and the filament loaded:
+`.filaments` (names) `.materials` `.vendors` `.colors` `.grams_left`
+`.slots`. A toolhead with nothing loaded is left out of the filament
+lists.
 
 ### Print job values
 
@@ -396,7 +407,8 @@ tag or the screen.
 | `{job.filament#.extruder}` | the toolhead it prints with (`extruder2`) |
 | `{job.filament#.slot}` | multiACE: the slot feeding it |
 | `{job.filament#.nozzle_temperature}` `.nozzle_diameter` `.bed_temperature` | its slicer settings |
-| `{job.extruders}` | the toolheads the job uses (`extruder, extruder2`) |
+| `{job.extruders.names}` | the toolheads the job uses (`extruder, extruder2`; `\|Toolhead #` → `Toolhead 1, Toolhead 3`) |
+| `{job.extruders.count}` | how many |
 | `{job.queue.remaining}` | print jobs waiting in Moonraker's job queue after this one |
 | `{job.queue.list}` | their names |
 | `{job.queue.time}` `.eta` `.grams` `.meters` | all of them: slicer time, when the last should finish, filament |

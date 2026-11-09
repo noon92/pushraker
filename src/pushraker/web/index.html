@@ -982,8 +982,8 @@
     }
     function checkPlaceholders() {
         const ta = el('pr-data-text'), err = el('pr-data-err');
-        const left = ta.readOnly ? [] : (ta.value.match(/\{[^{}]*#[^{}]*\}/g) || []);
-        err.innerHTML = left.length ? `Replace # in <code>${esc(left[0])}</code> with a filament number.` : '';
+        const left = ta.readOnly ? [] : (ta.value.match(/\{[^{}|]*#[^{}|]*(\|[^{}]*)?\}/g) || []);
+        err.innerHTML = left.length ? `Replace # in <code>${esc(left[0])}</code> with a number.` : '';
         err.style.display = left.length ? '' : 'none';
         return !left.length;
     }

@@ -2476,6 +2476,22 @@ async def test_data():
           and [f["grams"] for f in fl] == [14.3, None, 3.2],
           [(f["index"], f["used"], f["grams"]) for f in fl])
     c._job_slicer, c._job_tools, c._job_weights = saved
+    out = await c._data_text("started", "{extruders.names} | "
+                             "{extruders.names|T#} | {extruders.count} | "
+                             "{extruders.materials} | "
+                             "{extruders.temperatures|0} | "
+                             "{job.extruders.names|Toolhead #} | "
+                             "{job.extruders.count} | "
+                             "{job.filament1.extruder|Tool #}")
+    check("extruders.*: every toolhead (an empty one has no material); "
+          "job.extruders: the ones the print job uses; toolhead name formats",
+          out == "extruder, extruder1, extruder2, extruder3 | T1, T2, T3, T4 "
+          "| 4 | PETG, PLA, PLA | 220, 220, 220, 220 | Toolhead 2, Toolhead 3 "
+          "| 2 | Tool 3", out)
+    check("a # in the format isn't a placeholder; one in the name is",
+          pn.tp.placeholders("{job.extruders.names|Toolhead #}") == []
+          and pn.tp.placeholders("{job.filament#.extruder|T#}")
+          == ["{job.filament#.extruder|T#}"])
     # Progress rows share the Progress row's data
     log.clear()
     META["gcode_start_byte"], META["gcode_end_byte"] = 0, 10000
@@ -2522,10 +2538,22 @@ async def test_data():
           "heater_bed" in names(cats["thermals"]["children"])
           and "temperature_sensor cavity" in names(cats["thermals"]["children"])
           and "extruder" not in names(cats["thermals"]["children"])
-          and names(cats["toolheads"]["children"])[:2] == ["extruder",
-                                                          "extruder1"]
+          and names(cats["toolheads"]["children"])[:3] == [
+              "extruders", "extruder", "extruder1"]
           and "print_task_config" not in str(cat), cats.keys())
-    ext1 = cats["toolheads"]["children"][1]
+    every = cats["toolheads"]["children"][0]
+    check("extruders (every toolhead) first under Toolheads: names, count, "
+          "Klipper's fields and the filament loaded, as lists",
+          names(every["children"])[:2] == ["names", "count"]
+          and {"temperatures", "targets", "powers", "nozzle_diameters",
+               "filaments", "materials", "vendors", "colors"}
+          <= set(names(every["children"]))
+          and [f["fmt"] for f in every["children"][0]["formats"]]
+          == ["", "Toolhead #", "Tool #", "T#", "line"]
+          and every["children"][0]["formats"][1]["label"].startswith(
+              "Toolhead 1, Toolhead 2"),
+          every)
+    ext1 = cats["toolheads"]["children"][2]
     check("an extruder: Klipper's fields, then the filament loaded",
           names(ext1["children"])[-1] == "filament"
           and {"temperature", "target", "power"} <= set(names(ext1["children"]))

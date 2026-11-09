@@ -162,6 +162,17 @@ SAMPLE_QUEUE = [("Cable_clips_x12_PETG", 0.75, 22.4, 7.32, ["PETG"]),
 # adds to them: the filament loaded, the MMU slot feeding it
 RX_EXTRUDER = re.compile(r"extruder(\d*)")
 EXTRUDER_ADDED = ("filament", "slot")
+# extruders.<list>: every toolhead's value, as a list. Klipper's fields...
+EXTRUDERS_KLIPPER = {"temperatures": "temperature", "targets": "target",
+                     "powers": "power",
+                     "nozzle_diameters": "nozzle_diameter"}
+# ...and pushraker's (the filament loaded, the slot)
+EXTRUDERS_ADDED = {"filaments": ("filament", "name"),
+                   "materials": ("filament", "material"),
+                   "vendors": ("filament", "vendor"),
+                   "colors": ("filament", "color"),
+                   "grams_left": ("filament", "grams_left"),
+                   "slots": ("slot",)}
 TITLES = {
     "started": "▶️ {name} started",
     "preprint_done": "📐 {name} pre-print calibrations complete",
@@ -1390,8 +1401,9 @@ class PushNotifications:
         return int(m.group(1) or 0) if m else None
 
     @staticmethod
-    def _ext_name(ch: int) -> str:
-        return "extruder" if ch == 0 else f"extruder{ch}"
+    def _ext_name(ch: int) -> tp.ToolName:
+        return tp.ToolName("extruder" if ch == 0 else f"extruder{ch}",
+                           ch + 1)
 
     async def _data_text(self, rid: str, text: Optional[str] = None,
                          sample: bool = False) -> str:
@@ -1405,6 +1417,12 @@ class PushNotifications:
         try:
             tokens = tp.parse(text)
             need = tp.objects_needed(tokens)
+            for t in tokens:
+                f = EXTRUDERS_KLIPPER.get(t.path[0]) \
+                    if t.obj == tp.EXTRUDERS else None
+                for ext in self.printer.extruders if f else ():
+                    if f not in need.setdefault(ext, []):
+                        need[ext].append(f)
             state: Dict[str, Any] = {}
             if need:
                 try:
@@ -1424,17 +1442,43 @@ class PushNotifications:
         adds to an extruder (filament, slot) computed here."""
         job = self._job_values(sample)
         spools: Dict[int, Optional[Dict[str, Any]]] = {}
+        exts = list(self.printer.extruders)
         for t in tokens:
-            ch = self._ext_index(t.obj)
-            if ch is not None and t.path[0] in EXTRUDER_ADDED and \
-                    ch not in spools:
+            if t.obj == tp.EXTRUDERS and t.path[0] in EXTRUDERS_ADDED:
+                chans = range(len(exts))
+            else:
+                ch = self._ext_index(t.obj)
+                chans = [ch] if ch is not None and \
+                    t.path[0] in EXTRUDER_ADDED else []
+            for ch in chans:
+                if ch in spools:
+                    continue
                 sid = self._extruder_added(ch).get("spool_id")
                 spools[ch] = await self._spool(int(sid)) \
                     if sid and self.spoolman_url else None
 
+        def every(t: tp.Token) -> Any:
+            """extruders.*: one value per toolhead, in toolhead order."""
+            key = t.path[0]
+            if key == "names":
+                return [self._ext_name(ch) for ch in range(len(exts))] \
+                    or None
+            if key == "count":
+                return len(exts)
+            if key in EXTRUDERS_KLIPPER:
+                return [(state.get(e) or {}).get(EXTRUDERS_KLIPPER[key])
+                        for e in exts] or None
+            if key in EXTRUDERS_ADDED:
+                return [tp.dig(self._extruder_values(
+                    ch, spools.get(ch), sample), EXTRUDERS_ADDED[key])
+                    for ch in range(len(exts))] or None
+            return None
+
         def resolve(t: tp.Token) -> Any:
             if t.obj == tp.JOB:
                 return job(t.path)
+            if t.obj == tp.EXTRUDERS:
+                return every(t)
             ch = self._ext_index(t.obj)
             if ch is not None and t.path[0] in EXTRUDER_ADDED:
                 return tp.dig(self._extruder_values(ch, spools.get(ch),
@@ -1530,6 +1574,11 @@ class PushNotifications:
                         return None
                     return tp.dig(it, rest[1:]) if rest[1:] else it["name"]
                 return tp.dig(q, rest)
+            if head == "extruders":
+                names = base.get("extruders")
+                if rest == ["count"]:
+                    return len(names or []) if base else None
+                return names if rest in ([], ["names"]) else None
             m = re.fullmatch(r"filament(\d+)", head)
             if m:
                 f = filament(int(m.group(1)))
@@ -1822,6 +1871,8 @@ class PushNotifications:
             heads.append(tp.node(obj, hint=f"toolhead {ch + 1}",
                                  children=kids))
             placed.add(obj)
+        if heads:
+            heads.insert(0, self._extruders_node(exts, state, heads))
         # Fans
         fans = []
         for obj in objs:
@@ -1858,6 +1909,33 @@ class PushNotifications:
             {"id": "other", "label": "❔ Other", "children": other},
         ]
         return {"categories": [c for c in cats if c["children"]]}
+
+    def _extruders_node(self, exts: Sequence[str], state: Dict[str, Any],
+                        heads: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """extruders.*: every toolhead's value as a list, for whatever the
+        toolheads offer (Klipper's fields, the filament, the slot)."""
+        n = tp.node
+        names = [self._ext_name(self._ext_index(e) or 0) for e in exts]
+        kids = [n("names", token="extruders.names",
+                  formats=tp.format_options(names)),
+                n("count", token="extruders.count")]
+        for key, f in EXTRUDERS_KLIPPER.items():
+            vals = [(state.get(e) or {}).get(f) for e in exts]
+            if all(v is None for v in vals):
+                continue
+            kids.append(n(key, token=f"extruders.{key}",
+                          formats=None if f in tp.NO_FORMATS
+                          else tp.format_options(vals, key == "powers")))
+        offered = {k["name"]: k for k in heads[0].get("children") or []}
+        fil = {k["name"] for k in offered.get("filament", {}).get(
+            "children") or []}
+        for key, path in EXTRUDERS_ADDED.items():
+            if path[0] == "filament" and path[1] not in fil or \
+                    path[0] == "slot" and "slot" not in offered:
+                continue
+            kids.append(n(key, hint="loaded" if key == "filaments" else "",
+                          token=f"extruders.{key}"))
+        return n("extruders", hint="all toolheads", children=kids)
 
     def _job_tree(self) -> List[Dict[str, Any]]:
         """job.*, with format examples from the current print job, or the
@@ -1931,7 +2009,8 @@ class PushNotifications:
                 leaf("filaments.total_grams")]),
             n("filament#", hint="specific filament",
               info="Replace # with the slicer's number.", children=fil),
-            leaf("extruders", hint="toolheads used"),
+            n("extruders", hint="toolheads used", children=[
+                leaf("extruders.names"), leaf("extruders.count")]),
             n("queue", hint="Moonraker's job queue", children=[
                 leaf("queue.remaining", info="Print jobs waiting after "
                      "this one."),
