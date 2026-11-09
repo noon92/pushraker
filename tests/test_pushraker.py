@@ -2536,6 +2536,32 @@ async def test_data():
           out == "extruder, extruder1, extruder2, extruder3 | T1, T2, T3, T4 "
           "| 4 | PETG, PLA, PLA | 220, 220, 220, 220 | Toolhead 2, Toolhead 3 "
           "| 2 | Tool 3", out)
+    # Jinja templates: printer.* (Klipper), job, extruders, machine
+    tpl = ("{{ machine.name }} {{ machine.model }}\n"
+           "{{ printer.extruder1.temperature|round(0) }} "
+           "{{ printer.heater_bed.target }}\n"
+           "{% if job.filaments.count > 1 %}{{ job.filaments.count }} "
+           "filaments: {{ job.filaments.names }}{% endif %}\n"
+           "{% for f in job.filaments %}{{ f.extruder|toolhead('T#') }} "
+           "{{ f.material }}{% if not loop.last %}, {% endif %}{% endfor %}\n"
+           "{{ extruders.names|toolhead('T#') }} | {{ extruders.count }} | "
+           "{{ extruders.extruder1.filament.material }}\n"
+           "{% for e in extruders %}{{ e.name }}={{ e.temperature|round(0) }}"
+           " {% endfor %}\n"
+           "{{ job.nothing }} {{ printer.nothing.x }}{# a comment #}")
+    out = await c._render_template(tpl)
+    check("Jinja: printer.* from Klipper, job, extruders, machine; loops, "
+          "ifs, filters; a missing value reads n/a; comments print nothing",
+          out == "U1 Snapmaker U1\n220 60\n2 filaments: PLA Basic @U1, PLA "
+          "Matte\nT3 PLA, T2 PLA\nT1, T2, T3, T4 | 4 | PLA\nextruder=220 "
+          "extruder1=220 extruder2=220 extruder3=220 \nn/a n/a", out)
+    bad = None
+    try:
+        await c._render_template("{% if job.file %}\n{{ job.file + }}")
+    except pn.jj.TemplateError as e:
+        bad = str(e)
+    check("a mistake says which line", bad is not None
+          and bad.startswith("line 2:"), bad)
     check("a # in the format isn't a placeholder; one in the name is",
           pn.tp.placeholders("{job.extruders.names|Toolhead #}") == []
           and pn.tp.placeholders("{job.filament#.extruder|T#}")

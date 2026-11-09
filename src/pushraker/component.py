@@ -89,6 +89,7 @@ from moonraker.common import JobEvent, KlippyState
 from . import settings as cfgmod
 from . import printers
 from . import templating as tp
+from . import engine as jj
 from . import __version__
 
 if TYPE_CHECKING:
@@ -529,6 +530,12 @@ def fault_key(ex: Dict[str, Any]) -> FaultKey:
     return (ex.get("id"), ex.get("index"), ex.get("code"))
 
 
+# job.* paths that have values under them (a View in a template); some
+# are values themselves too ({{ job.time.remaining }})
+JOB_BRANCHES = [re.compile(p) for p in (
+    r"time", r"time\.remaining", r"filaments", r"filament\d+",
+    r"queue", r"queue\.next", r"queue\.(?:job)?\d+", r"extruders")]
+
 # job.* values: while a print job runs or is paused, and this long after it
 # ends, for the notifications sent just after it
 JOB_KEEP = 300.
@@ -943,6 +950,7 @@ class PushNotifications:
         # restarts so a power-loss recovery continues the same thread
         self._thread: Optional[Dict[str, str]] = None
         self._job_ended = -1e9   # monotonic time the last job finished
+        self._klipper_version: Optional[str] = None
         # Bumped when a job starts or ends: an await that outlives its job
         # (seeding, the filament watch) checks it and gives up
         self._job_gen = 0
@@ -1436,6 +1444,167 @@ class PushNotifications:
             logging.warning("[pushraker] notification data: %s", e)
             return ""
 
+    # ---- templates (Jinja) ----------------------------------------------
+
+    async def _template_context(
+            self, texts: Sequence[str], sample: bool = False,
+            event: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """What a template reads: printer.* (one Moonraker query for the
+        Klipper objects the templates name), job, extruders, event and
+        machine. pushraker's values are looked up when read."""
+        tokens: List[tp.Token] = []
+        need: Dict[str, Any] = {}
+        all_exts = False
+        for text in texts:
+            for obj, fields in jj.printer_needs(text).items():
+                if obj == "*":
+                    continue        # printer itself: what was asked for
+                if fields is None or need.get(obj, []) is None:
+                    need[obj] = None
+                else:
+                    cur = need.setdefault(obj, [])
+                    cur.extend(f for f in fields if f not in cur)
+            for root, path in jj.chains(text):
+                if root == "job" and path:
+                    tokens.append(tp.Token("", tp.JOB, list(path), ""))
+                elif root == "extruders":
+                    if not path:
+                        all_exts = True
+                    elif RX_EXTRUDER.fullmatch(path[0]):
+                        if len(path) > 1:
+                            tokens.append(tp.Token("", path[0], path[1:], ""))
+                        else:
+                            all_exts = True
+                    else:
+                        tokens.append(tp.Token("", tp.EXTRUDERS, path, ""))
+        exts = list(self.printer.extruders)
+        for t in tokens:
+            f = EXTRUDERS_KLIPPER.get(t.path[0]) \
+                if t.obj == tp.EXTRUDERS else None
+            for ext in exts if f else ():
+                cur = need.setdefault(ext, [])
+                if cur is not None and f not in cur:
+                    cur.append(f)
+        if all_exts:
+            for ext in exts:
+                need[ext] = None
+            tokens += [tp.Token("", ext, ["filament", "name"], "")
+                       for ext in exts]
+        state: Dict[str, Any] = {}
+        if need:
+            try:
+                state = await asyncio.wait_for(self._query(need),
+                                               DATA_QUERY_TIMEOUT)
+            except Exception as e:
+                logging.warning("[pushraker] template query: %s", e)
+        resolve = await self._resolver(tokens, state, sample)
+        return {"printer": state,
+                "job": self._job_view(resolve, sample),
+                "extruders": self._extruders_view(resolve, state, sample),
+                "event": event or {},
+                "machine": self._machine()}
+
+    def _job_view(self, resolve: Any, sample: bool) -> jj.View:
+        def look(path: List[str]) -> Any:
+            if not path:
+                return None
+            return resolve(tp.Token("", tp.JOB, self._job_path(path), ""))
+
+        def branch(path: List[str]) -> bool:
+            key = ".".join(path)
+            return any(r.fullmatch(key) for r in JOB_BRANCHES)
+
+        base = None
+
+        def items(path: List[str]) -> Optional[list]:
+            nonlocal base
+            if path not in (["filaments"], ["queue"], ["extruders"]):
+                return None
+            if base is None:
+                base = self._job_base(sample)
+            if path == ["filaments"]:
+                return [dict(f) for f in base.get("filaments") or []
+                        if f.get("used", True)]
+            if path == ["queue"]:
+                return list((base.get("queue") or {}).get("items") or [])
+            return list(base.get("extruders") or [])
+        return jj.View(look, branch, items, [], "job")
+
+    @staticmethod
+    def _job_path(path: List[str]) -> List[str]:
+        """Template names to the resolver's: job.queue.job2 -> queue.2."""
+        if len(path) > 1 and path[0] == "queue":
+            m = re.fullmatch(r"job(\d+)", path[1])
+            if m:
+                return ["queue", m.group(1)] + path[2:]
+        return list(path)
+
+    def _extruders_view(self, resolve: Any, state: Dict[str, Any],
+                        sample: bool) -> jj.View:
+        exts = list(self.printer.extruders)
+
+        def look(path: List[str]) -> Any:
+            if not path:
+                return None
+            if RX_EXTRUDER.fullmatch(path[0]):
+                return resolve(tp.Token("", path[0], path[1:], "")) \
+                    if len(path) > 1 else self._ext_name(
+                        self._ext_index(path[0]) or 0)
+            return resolve(tp.Token("", tp.EXTRUDERS, path, ""))
+
+        def branch(path: List[str]) -> bool:
+            return bool(path) and RX_EXTRUDER.fullmatch(path[0]) is not None \
+                and (len(path) == 1 or path[1:] == ["filament"])
+
+        def items(path: List[str]) -> Optional[list]:
+            if path:
+                return None
+            out = []
+            for e in exts:
+                ch = self._ext_index(e) or 0
+                d = dict(state.get(e) or {})
+                d.update(resolve(tp.Token("", e, ["filament"], "")) and
+                         {"filament": resolve(tp.Token("", e, ["filament"], ""))}
+                         or {})
+                d["slot"] = resolve(tp.Token("", e, ["slot"], ""))
+                d["name"] = self._ext_name(ch)
+                out.append(d)
+            return out
+        return jj.View(look, branch, items, [], "extruders")
+
+    def _machine(self) -> Dict[str, Any]:
+        import socket
+        from urllib.parse import urlparse
+        host = ""
+        try:
+            host = urlparse(self.web_ui_url).hostname or ""
+        except Exception:
+            pass
+        try:
+            hostname = socket.gethostname()
+        except Exception:
+            hostname = ""
+        try:
+            moonraker = self.server.get_app_args().get("software_version")
+        except Exception:
+            moonraker = None
+        out = {"name": self.name, "model": self.printer.name,
+               "hostname": hostname or None, "ip": host or None,
+               "pushraker_version": __version__,
+               "moonraker_version": moonraker,
+               "klipper_version": self._klipper_version,
+               "links": {"web_ui": self.web_ui_url or None,
+                         "camera": self.camera_url or None,
+                         "errors": self.error_index_url or None}}
+        return out
+
+    async def _render_template(self, text: str, sample: bool = False,
+                               event: Optional[Dict[str, Any]] = None
+                               ) -> str:
+        """A template's text. Raises jj.TemplateError on a mistake."""
+        ctx = await self._template_context([text], sample, event)
+        return jj.render(text, ctx)
+
     async def _resolver(self, tokens: Sequence[tp.Token],
                         state: Dict[str, Any], sample: bool) -> Any:
         """Klipper's values from `state`; job.* and the values pushraker
@@ -1522,20 +1691,25 @@ class PushNotifications:
                 "map": self._job_map, "ace": self._ace() if self._ace_on
                 else {}}
 
+    def _job_on(self, sample: bool) -> bool:
+        """job.* has the live print job: running or paused, or ended in the
+        last JOB_KEEP seconds. The preview shows the sample unless a print
+        job is running."""
+        return self._job_active or self._busy() or (
+            not sample and bool(self._job_filename) and
+            time.monotonic() - self._job_ended < JOB_KEEP)
+
+    def _job_base(self, sample: bool) -> Dict[str, Any]:
+        if self._job_on(sample):
+            return self._job_live()
+        return self._job_sample() if sample else {}
+
     def _job_values(self, sample: bool = False) -> Any:
         """A resolver for job.* paths: pushraker's values about the print
         job (not Klipper's). `sample`: the preview, with a sample Benchy
         when no print job is running."""
-        # The preview shows the sample unless a print job is running
-        active = self._job_active or self._busy() or (
-            not sample and bool(self._job_filename) and
-            time.monotonic() - self._job_ended < JOB_KEEP)
-        if active:
-            base = self._job_live()
-        elif sample:
-            base = self._job_sample()
-        else:
-            base = {}
+        active = self._job_on(sample)
+        base = self._job_base(sample)
 
         def filament(n: int) -> Optional[Dict[str, Any]]:
             for f in base.get("filaments") or []:
@@ -3445,6 +3619,11 @@ class PushNotifications:
         except Exception:
             objs = []
         self.printer = printers.detect(objs)
+        try:
+            info = await kapis.get_klippy_info()
+            self._klipper_version = (info or {}).get("software_version")
+        except Exception:
+            self._klipper_version = None
         if first_ready:
             logging.info("[pushraker] printer: %s (drivers: %s, "
                          "extruders: %d)", self.printer.name,
