@@ -1,0 +1,20 @@
+{{ event.file }}
+{# event.ace: multiACE Quad Replenish loaded another slot; otherwise the printer refilled from another toolhead #}
+{% if event.ace %}
+From {{ event.from.label|default("an empty slot") }} on {{ event.extruder|toolhead("Toolhead #") }}.
+To {{ event.to.label }}.
+{# multiACE: the slots Quad Replenish would load next, or why there are none #}
+{% if event.next %}
+{% for n in event.next %}
+Next: {{ n.label }}, an exact match.
+{% endfor %}
+{% elif event.quad_replenish.on %}
+Quad Replenish is on.
+No matching slot on {{ event.quad_replenish.where }}: the print job will pause when it runs out.
+{% elif event.quad_replenish %}
+Quad Replenish is off: the print job will pause when it runs out.
+{% endif %}
+{% else %}
+From {{ event.from.label }}.
+To {{ event.to.label }}{% if event.to.grams_left is defined %}, {{ event.to.grams_left|round|int }} g left{% endif %}.
+{% endif %}

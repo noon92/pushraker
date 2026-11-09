@@ -1,0 +1,1 @@
+🧵 {{ machine.name }} {% if event.count > 1 %}filament problems on {{ event.count }} toolheads{% elif event.issues[0].status == "red" %}not enough filament{% elif event.issues[0].status == "orange" %}filament may be insufficient{% else %}filament amount unknown{% endif %}{% if event.part %} ({{ event.part }}/{{ event.parts }}){% endif %}

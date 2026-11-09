@@ -1,0 +1,43 @@
+{{ event.file }}
+{# One block per toolhead at risk. status: red (not enough), orange (may not be enough), unknown #}
+{% for i in event.issues %}
+{% if not loop.first %}
+
+{% endif %}
+{% if i.status == "unknown" %}
+{{ i.label }}: amount of filament left is unknown (Spoolman shows {{ i.grams_left|round|int }} g). Needs ~{{ i.grams_needed|round|int }} g.
+{% else %}
+{{ i.label }}: {% if i.status == "red" %}not enough filament.{% else %}remaining filament may be insufficient.{% endif %} Needs ~{{ i.grams_needed|round|int }} g, {{ i.grams_left|round|int }} g left.
+{% endif %}
+{# The spools the printer would refill from, in the order it would use them #}
+{% for b in i.backups %}
+{% if b.ace %}
+Quad Replenish is on: {{ b.label }}, is an exact match.
+{% else %}
+Refill is on: {{ b.label }}{% if b.grams_left > 0 %}, {{ b.grams_left|round|int }} g left{% else %}, amount left unknown{% endif %}, is {% if b.exact %}an exact match{% else %}an inexact match (same filament, different colour){% endif %}.{% if b.also_needed %} This print also needs ~{{ b.also_needed|round|int }} g from it.{% endif %}
+{% endif %}
+{% endfor %}
+{% if i.backups %}
+{% if i.together.unknown and i.together.status == "green" %}
+Together at least {{ i.together.grams|round|int }} g: enough for this print.
+{% elif i.together.unknown %}
+Together {{ i.together.grams|round|int }} g plus an unknown amount: may be insufficient.
+{% else %}
+Together {{ i.together.grams|round|int }} g: {% if i.together.status == "green" %}enough for this print.{% elif i.together.status == "orange" %}may be insufficient.{% else %}still not enough.{% endif %}
+{% endif %}
+{% endif %}
+{% if not i.backups and i.refill %}
+Refill is on. No {% if i.refill_exact %}exact match{% else %}compatible{% endif %} spool for refill found on printer.
+{% endif %}
+{# multiACE: why Quad Replenish has no slot for this toolhead #}
+{% if i.quad_replenish.on %}
+Quad Replenish is on.
+No matching slot on {{ i.quad_replenish.where }}.
+{% elif i.quad_replenish %}
+Quad Replenish is off.
+{% endif %}
+{# Toolheads with the same filament that the printer won't refill from #}
+{% for b in i.blockers %}
+Won't refill from {{ b.extruder|toolhead("Toolhead #") }}: {{ b.reason }}.
+{% endfor %}
+{% endfor %}

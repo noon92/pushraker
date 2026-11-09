@@ -974,6 +974,7 @@ class PushNotifications:
         # restarts so a power-loss recovery continues the same thread
         self._thread: Optional[Dict[str, str]] = None
         self._job_ended = -1e9   # monotonic time the last job finished
+        self._pack_used: List[Tuple[str, Dict[int, Optional[int]]]] = []
         self._klipper_version: Optional[str] = None
         # Bumped when a job starts or ends: an await that outlives its job
         # (seeding, the filament watch) checks it and gives up
@@ -3276,6 +3277,9 @@ class PushNotifications:
         self._job_done_sent = True
         filename = ps.get("filename") or ""
         ex = self._live_fault(ps)
+        # The print time as the hook saw it (job.time.elapsed)
+        self._status["print_stats"].update(
+            {k: ps[k] for k in ("print_duration",) if k in ps})
         if event == "complete":
             rid, title = "complete", self._title("complete")
             body = self._lines(
@@ -3679,7 +3683,15 @@ class PushNotifications:
         row = dict(toolhead=self._toolhead(ch), word="", status="ink",
                    needs="", remaining=remaining, full=self._full_weight(spool),
                    colour=self._spool_colour(spool, ch), name=name)
-        await self._send_parts("filament_change", [(title, body, [row])])
+        await self._send_parts("filament_change", [(title, body, [row])],
+                               event={"loaded": now,
+                                      "extruder": self._ext_name(ch),
+                                      "filament": {
+                                          "name": name or None,
+                                          "grams_left": remaining
+                                          if remaining and remaining > 0
+                                          else None,
+                                          "spool_id": sid or None}})
 
     async def _intervention_hold(self, hold: int, what: str) -> None:
         start = time.monotonic()
@@ -4849,7 +4861,8 @@ class PushNotifications:
         title = self._title("filament_low") if len(lows) == 1 else \
             self._title("filament_lows", n=len(lows))
         await self._send_parts("filament_low", None, packer=(
-            title, "", lows, self._low_text, self._low_row))
+            title, "", lows, self._low_text, self._low_row),
+            event_fn=self._issues_event("", len(lows)))
 
     # -- not enough filament --
 
@@ -4986,6 +4999,49 @@ class PushNotifications:
             row["note"] = self._ace_none_lines(it["ch"])
         return row
 
+    def _issue_event(self, it: Dict[str, Any],
+                     cap: Optional[int]) -> Dict[str, Any]:
+        """One toolhead in event.issues: the spool, what the print job
+        needs, the backups the printer would refill from (in order) and
+        what together they hold. label: as the notification writes it."""
+        return {
+            "label": self._desc(it["ch"], it["name"], it["sid"], cap),
+            "extruder": self._ext_name(it["ch"]),
+            "name": it["name"] or None, "spool_id": it["sid"] or None,
+            "status": it["status"], "grams_left": it["rem"],
+            "grams_full": it.get("full"), "grams_needed": it.get("need"),
+            "enough": self._enough(it) if it.get("need") else None,
+            "refill": bool(it.get("refill_on")),
+            "refill_exact": bool(it.get("exact")),
+            "backups": [{
+                "label": self._bdesc(b, cap), "ace": bool(b.get("ace")),
+                "extruder": None if b.get("ace") else self._ext_name(b["ch"]),
+                "slot": self._ace_label(*b["ace"]) if b.get("ace") else None,
+                "name": b["name"] or None, "spool_id": b.get("sid") or None,
+                "grams_left": b["rem"], "grams_full": b.get("full"),
+                "also_needed": b["own"] if b.get("own") and b["rem"]
+                and b["rem"] > 0 else None,
+                "exact": bool(b.get("exact"))}
+                for b in it.get("backups") or []],
+            "together": {
+                "grams": it.get("total"), "status": it.get("together"),
+                "unknown": bool(it.get("unknown_backup")
+                                or it["status"] == "unknown")},
+            "quad_replenish": self._qr_event(it["ch"])
+            if not it.get("backups") else None,
+            "blockers": [{"extruder": self._ext_name(c), "reason": why}
+                         for c, why in it.get("blockers") or []]}
+
+    def _issues_event(self, file: str, count: int) -> Any:
+        def make(items: List[Dict[str, Any]], caps: List[Optional[int]],
+                 head: str, part: Optional[int], parts: int
+                 ) -> Dict[str, Any]:
+            return {"file": head or file or None, "count": count,
+                    "issues": [self._issue_event(it, cap)
+                               for it, cap in zip(items, caps)],
+                    "part": part, "parts": parts if part else None}
+        return make
+
     def _short_title(self, issues: List[Dict[str, Any]]) -> str:
         if len(issues) == 1:
             return self._title({"red": "filament_short",
@@ -5003,7 +5059,8 @@ class PushNotifications:
         title = self._short_title(issues)
         await self._send_parts("filament_short", None, packer=(
             title, shown(filename), issues, self._issue_text,
-            self._issue_row))
+            self._issue_row), event_fn=self._issues_event(
+                shown(filename), len(issues)))
 
     async def _filament_watch(
         self, job: int, filename: str, progress: float, check_start: bool
@@ -5256,7 +5313,15 @@ class PushNotifications:
                        status=(self._status_of(t_rem, need)
                                if need and t_rem is not None else "ink"))])
         await self._send_parts("spool_switch", [(
-            self._title("spool_switch"), body, [row])])
+            self._title("spool_switch"), body, [row])], event={
+                "ace": False, "file": shown(filename),
+                "from": {"label": self._desc(frm, f_name, f_sid),
+                         "extruder": self._ext_name(frm),
+                         "name": f_name or None, "spool_id": f_sid or None},
+                "to": {"label": self._desc(to, t_name, t_sid),
+                       "extruder": self._ext_name(to),
+                       "name": t_name or None, "spool_id": t_sid or None,
+                       "grams_left": t_rem}})
 
     # -- multiACE --
     #
@@ -5399,6 +5464,23 @@ class PushNotifications:
         return ["Quad Replenish is on.",
                 f"No matching slot on {where}."]
 
+    def _qr_event(self, ch: int) -> Optional[Dict[str, Any]]:
+        """event.*.quad_replenish for an ACE-fed head: on, and where it
+        looks for a matching slot ("ACE 1", or "the other ACEs")."""
+        src = self._ace_head(ch)
+        if src is None:
+            return None
+        return {"on": bool(self._ace().get("quad_replenish")),
+                "where": f"ACE {src[0] + 1}"
+                if self._ace().get("mode") == "head" else "the other ACEs"}
+
+    def _next_event(self, ch: int) -> List[Dict[str, Any]]:
+        """The slots Quad Replenish would load next for head `ch`."""
+        return [{"label": self._bdesc(b), "slot": self._ace_label(*b["ace"]),
+                 "name": b["name"] or None}
+                for b in self._ace_backups(ch)] \
+            if self._ace_candidates(ch) else []
+
     def _blabel(self, b: Dict[str, Any]) -> str:
         return self._ace_label(*b["ace"]) if b.get("ace") \
             else self._toolhead(b["ch"])
@@ -5485,7 +5567,12 @@ class PushNotifications:
         row = self._ace_row(ch, a, s, "Ran empty.", 0., "red",
                             self._ace_backups(ch))
         await self._send_parts("slot_empty", [(
-            self._title("slot_empty"), body, [row])])
+            self._title("slot_empty"), body, [row])], event={
+                "file": shown(filename), "extruder": self._ext_name(ch),
+                "slot": {"label": self._ace_label(a, s),
+                         "name": self._ace_name(a, s, ch) or None},
+                "next": self._next_event(ch),
+                "quad_replenish": self._qr_event(ch)})
 
     async def _ace_switch_alert(self, ch: int, old: Optional[Tuple[int, int]],
                                 new: Tuple[int, int]) -> None:
@@ -5504,7 +5591,18 @@ class PushNotifications:
                                          colour=self._ace_colour(*new, ch))]
                             + self._ace_backups(ch))
         await self._send_parts("spool_switch", [(
-            self._title("spool_switch"), body, [row])])
+            self._title("spool_switch"), body, [row])], event={
+                "ace": True, "file": shown(filename),
+                "extruder": self._ext_name(ch),
+                "from": {"label": frm if old else None,
+                         "slot": self._ace_label(*old) if old else None,
+                         "name": self._ace_name(*old, ch) if old else None},
+                "to": {"label": f"{self._ace_label(*new)} "
+                                f"({self._ace_name(*new, ch)})",
+                       "slot": self._ace_label(*new),
+                       "name": self._ace_name(*new, ch) or None},
+                "next": self._next_event(ch),
+                "quad_replenish": self._qr_event(ch)})
 
     # -- sending, split to fit the service --
 
@@ -5523,12 +5621,16 @@ class PushNotifications:
         """Split the issues into as few messages as fit the channel. One
         toolhead's text is never split: if it doesn't fit on its own, the
         file name and then the spool names are shortened (all names to the
-        same length, just enough)."""
+        same length, just enough). self._pack_used: per part, the header
+        and each issue's name cap."""
         def body(head: str, blocks: List[str]) -> str:
             return "\n\n".join([head + "\n" + blocks[0]] + blocks[1:]) \
                 if head else "\n\n".join(blocks)
 
+        caps: Dict[int, Optional[int]] = {}
+
         def fitted(i: int) -> Tuple[str, str]:
+            caps[i] = None
             for head in (header, self._cap(header, FILE_CAP)):
                 block = text_fn(issues[i], None)
                 if self._fits(channel, body(head, [block])):
@@ -5543,9 +5645,11 @@ class PushNotifications:
                     lo = mid
                 else:
                     hi = mid - 1
+            caps[i] = lo
             return head, text_fn(issues[i], lo)
 
         out: List[Tuple[List[int], str]] = []
+        used: List[Tuple[str, Dict[int, Optional[int]]]] = []
         idx: List[int] = []
         blocks: List[str] = []
         head_cur = header
@@ -5560,11 +5664,14 @@ class PushNotifications:
                         break
                 else:
                     out.append((idx, body(head_cur, blocks)))
+                    used.append((head_cur, {j: caps[j] for j in idx}))
                     idx, blocks, head_cur = [i], [block], head
             else:
                 idx, blocks, head_cur = [i], [block], head
         if idx:
             out.append((idx, body(head_cur, blocks)))
+            used.append((head_cur, {j: caps[j] for j in idx}))
+        self._pack_used = used
         return out
 
     def _render_rows(self, rows: List[Dict[str, Any]]) -> Optional[str]:
@@ -5581,7 +5688,9 @@ class PushNotifications:
     async def _send_parts(
         self, rid: str,
         messages: Optional[List[Tuple[str, str, List[Dict[str, Any]]]]],
-        packer: Optional[Tuple[Any, ...]] = None
+        packer: Optional[Tuple[Any, ...]] = None,
+        event: Optional[Dict[str, Any]] = None,
+        event_fn: Any = None,
     ) -> bool:
         """Send one or more messages, each with its own spool picture, to
         each of the row's destinations, in their channels' turn. Either
@@ -5598,16 +5707,25 @@ class PushNotifications:
             per_dest: List[List[Tuple[str, str, Optional[str]]]] = []
             for d in dests:
                 if packer is None:
+                    for t, b, _rows in messages or []:
+                        await self._parity(rid, t, b, event)
                     msgs = [(t, self._lines(b, extra), rows)
                             for t, b, rows in messages or []]
                     keyed = [((k,), m) for k, m in enumerate(msgs)]
                 else:
                     title, header, issues, text_fn, row_fn = packer
                     parts = self._pack(d.channel, header, issues, text_fn)
+                    used = self._pack_used
                     keyed = []
                     for n, (idx, body) in enumerate(parts, 1):
                         t = title if len(parts) == 1 \
                             else f"{title} ({n}/{len(parts)})"
+                        if event_fn is not None:
+                            head, caps = used[n - 1]
+                            await self._parity(rid, t, body, event_fn(
+                                [issues[i] for i in idx],
+                                [caps[i] for i in idx], head,
+                                n if len(parts) > 1 else None, len(parts)))
                         keyed.append((tuple(idx), (
                             t, self._lines(body, extra),
                             [row_fn(issues[i]) for i in idx])))

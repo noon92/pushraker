@@ -1,0 +1,31 @@
+{# One block per spool that went below the running-low threshold #}
+{% for i in event.issues %}
+{% if not loop.first %}
+
+{% endif %}
+{{ i.label }}: {{ i.grams_left|round|int }}{% if i.grams_full %} of {{ i.grams_full|round|int }}{% endif %} g left.
+{% if i.grams_needed %}
+This print needs ~{{ i.grams_needed|round|int }} g: {% if i.enough %}enough is left for it.{% else %}more than is left.{% endif %}
+{% endif %}
+{% for b in i.backups %}
+{% if b.ace %}
+Quad Replenish is on: {{ b.label }}, is an exact match.
+{% else %}
+Refill is on: {{ b.label }}{% if b.grams_left > 0 %}, {{ b.grams_left|round|int }} g left{% else %}, amount left unknown{% endif %}, is {% if b.exact %}an exact match{% else %}an inexact match (same filament, different colour){% endif %}.
+{% endif %}
+{% endfor %}
+{% if not i.backups and i.refill %}
+Refill is on. No {% if i.refill_exact %}exact match{% else %}compatible{% endif %} spool for refill found on printer.
+{% endif %}
+{# multiACE: why Quad Replenish has no slot for this toolhead #}
+{% if i.quad_replenish.on %}
+Quad Replenish is on.
+No matching slot on {{ i.quad_replenish.where }}.
+{% elif i.quad_replenish %}
+Quad Replenish is off.
+{% endif %}
+{# Toolheads with the same filament that the printer won't refill from #}
+{% for b in i.blockers %}
+Won't refill from {{ b.extruder|toolhead("Toolhead #") }}: {{ b.reason }}.
+{% endfor %}
+{% endfor %}

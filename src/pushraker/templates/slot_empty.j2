@@ -1,0 +1,13 @@
+{{ event.file }}
+{{ event.slot.label }} ({{ event.slot.name }}), feeding {{ event.extruder|toolhead("Toolhead #") }}, has run out. {{ event.extruder|toolhead("Toolhead #") }} is printing what is left in the filament path.
+{# multiACE: the slots Quad Replenish would load next, or why there are none #}
+{% if event.next %}
+{% for n in event.next %}
+Next: {{ n.label }}, an exact match.
+{% endfor %}
+{% elif event.quad_replenish.on %}
+Quad Replenish is on.
+No matching slot on {{ event.quad_replenish.where }}: the print job will pause when {{ event.extruder|toolhead("Toolhead #") }} runs out.
+{% elif event.quad_replenish %}
+Quad Replenish is off: the print job will pause when {{ event.extruder|toolhead("Toolhead #") }} runs out.
+{% endif %}

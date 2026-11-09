@@ -1519,8 +1519,10 @@ async def test_status_report():
 async def test_time_left():
     print("Time left: the methods, the setting, the job.time tokens")
     reset_world()
-    server, c = make({}, {"first_layer": [("ntfy", FakeService([], "ntfy"),
-                                           False)]})
+    # A row that this test never triggers (it moves the clock between a
+    # notification being built and sent)
+    server, c = make({}, {"paused": [("ntfy", FakeService([], "ntfy"),
+                                      False)]})
     with open(os.path.join(GCODES, "Benchy.gcode"), "wb") as f:
         # M73 markers: 60 min left at the start, 30 at the middle, 0 at the end
         body = b"G1 X1\n" * 1000
@@ -2441,6 +2443,48 @@ async def test_two_fixes():
           text)
 
 
+async def test_more_notifications():
+    """Print complete (from the print hook), a warning, power loss: sent
+    the way the printer sends them, so each default template is checked
+    against them too."""
+    print("Complete, warning, power loss")
+    reset_world()
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    server, c = make({}, {r: [("ntfy", ntfy, False)] for r in (
+        "complete", "warning", "power_loss", "error")})
+    await start_job(server)
+    STATE["print_stats"] = ps("printing", print_duration=5400)
+    await server.remote["pushraker"](event="complete")
+    await asyncio.sleep(0.3)
+    check("complete from the print hook", log and log[-1]["title"]
+          == "✅ U1 complete" and "Print time: 1h 30m" in log[-1]["body"],
+          log and log[-1])
+    # A level-1 fault: a warning, with the file while printing
+    log.clear()
+    STATE["webhooks"] = {"state": "ready"}
+    ex = {"level": 1, "id": 523, "index": 0, "code": 7,
+          "message": "nozzle wipe"}
+    await server.handlers["snapmaker:exception_notification"](ex)
+    await asyncio.sleep(0.5)
+    check("a warning", log and log[-1]["title"] == "⚠️ U1 Warning",
+          log and log[-1])
+    # Power loss: the interrupted file from the printer's env file
+    log.clear()
+    env = os.path.join(WORK, "pl_env.json")
+    with open(env, "w") as f:
+        json.dump({"file_path": "/home/lava/gcodes/Big_part.gcode"}, f)
+    c.printer.power_loss_env_paths = [env]
+    STATE["virtual_sdcard"] = {"pl_env_valid": True}
+    pn.PL_CAMERA_WAIT = 0.
+    await c._check_power_loss()
+    check("power loss names the interrupted print job",
+          log and log[-1]["title"] == "⚡ U1 power loss"
+          and log[-1]["body"].startswith("Big_part\nPrint interrupted"),
+          log and log[-1])
+    STATE.pop("webhooks", None)
+
+
 async def test_data():
     """Notification data: {object.field|fmt} tokens from Klipper, job.*
     from pushraker, per-filament slicer settings, n/a for what's missing,
@@ -2718,7 +2762,7 @@ async def run_component_tests():
               test_driver_hot,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
-              test_two_fixes, test_data):
+              test_two_fixes, test_more_notifications, test_data):
         try:
             await t()
         except Exception as e:  # report and carry on
@@ -2742,6 +2786,9 @@ def parity_report():
     done = [k for k in keys if k not in first_bad]
     print(f"\n  templates: {len(done)} of {len(keys)} notifications match"
           f" ({', '.join(done) or 'none'})")
+    check("every notification the tests send: its default template "
+          "gives exactly the same title and text", not first_bad and keys,
+          sorted(first_bad))
     for k, (how, want, got) in sorted(first_bad.items()):
         if how == "missing":
             print(f"    {k}: no template yet")
