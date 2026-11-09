@@ -1259,7 +1259,8 @@ async def test_file_mode():
     check("file mode: endpoints registered, no rows yet",
           set(server.endpoints) == {f"/server/{b}/{p}" for b in (
               "pushraker", "push_notifications")
-              for p in ("config", "test", "objects", "preview", "status")}
+              for p in ("config", "test", "objects", "preview",
+                        "preview_image", "status")}
           and c.rows == {} and c.store is not None)
     STATE["print_stats"] = ps("standby")
     await server.handlers["server:klippy_ready"]()
@@ -2992,6 +2993,25 @@ async def test_data():
                     if got in ("", "n/a") or "n/a" in got:
                         bad.append((tok, got))
     check("every value in the tree previews to a real value", not bad, bad)
+    # Every notification's default template previews (its sample event),
+    # without a mistake or a missing value; its images
+    bad, imgs = [], []
+    for key in pn.cfgmod.TEMPLATE_KEYS:
+        title, contents = pn.dflt.default(key)
+        out = await c._ep_preview(WebRequest("POST", {
+            "key": key, "title": title, "contents": contents}))
+        if out["error"] or not out["title"] or "n/a" in out["title"] + \
+                out["text"]:
+            bad.append((key, out))
+        for kind in pn.cfgmod.TEMPLATE[key][4]:
+            if kind in ("render", "graphic"):
+                im = await c._ep_preview_image(WebRequest("POST", {
+                    "key": key, "image": kind}))
+                if not (im["image"] or "").startswith("data:image/jpeg"):
+                    imgs.append((key, kind))
+    check("every default template previews, with its sample, no n/a",
+          not bad, bad)
+    check("...and its render and spool picture", not imgs, imgs)
     # Pushover's 1024-character limit: the body is cut, the data last
     c.settings = dict(c.settings, templates={"paused": {
         "contents": "{{ job.file }}\n" + "x" * 2000}})

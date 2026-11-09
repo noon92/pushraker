@@ -159,7 +159,7 @@ TEMPLATES = [
 TEMPLATE_KEYS = [t[0] for t in TEMPLATES]
 TEMPLATE = {t[0]: t for t in TEMPLATES}
 TEMPLATE_FIELDS = ("title", "contents", "image", "camera", "remaining")
-TITLE_MAX = 300
+TITLE_MAX = 1000          # the template, not the title it writes
 CONTENTS_MAX = 5000
 # The component's names for a row's notifications, to their templates
 OPTION_KEYS = dict({f"progress_{m}": "progress" for m in (25, 50, 75)},

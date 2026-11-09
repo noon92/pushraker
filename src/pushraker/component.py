@@ -47,6 +47,7 @@
 
 from __future__ import annotations
 import asyncio
+import base64
 import datetime
 import html
 import http
@@ -542,8 +543,16 @@ def fault_key(ex: Dict[str, Any]) -> FaultKey:
 
 TEMPLATE_TIMEOUT = 2.       # seconds a template may take to render
 
-# event.* in the editor's preview, per notification
-SAMPLE_EVENTS: Dict[str, Dict[str, Any]] = {}
+# The preview's render: the sample print job (four 3DBenchy, public
+# domain since 2025, drawn from the official model)
+SAMPLE_RENDER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "web", "sample-render.jpg")
+
+# The preview's sample spools: (name, spool id, grams left, colour)
+SAMPLE_SPOOLS = [("Bambu PLA Basic White", 7, 780., (245, 245, 245)),
+                 ("Elegoo PETG HF Black", 12, 95., (28, 28, 28)),
+                 ("eSun TPU 95A Orange", 18, 410., (249, 140, 54)),
+                 ("Elegoo PETG HF Black", 14, 640., (28, 28, 28))]
 
 # Moving to templates: what each notification's default template gave
 # against what was sent (see _parity)
@@ -808,6 +817,8 @@ class PushNotifications:
                         ("test", ["POST"], self._ep_test),
                         ("objects", ["GET"], self._ep_objects),
                         ("preview", ["POST"], self._ep_preview),
+                        ("preview_image", ["POST"],
+                         self._ep_preview_image),
                         ("status", ["GET"], self._ep_status)):
                     try:
                         self.server.register_endpoint(
@@ -1941,6 +1952,10 @@ class PushNotifications:
         return {"file": SAMPLE_FILE, "progress": 42.3,
                 "layer": 120, "layers": 285, "plate": "Textured PEI Plate",
                 "queue": self._queue_summary(queue, SAMPLE_LEFT, sample=True),
+                "preprint": ["Bed levelling", "Flow calibration"],
+                "pauses": self._pauses_values([
+                    {"layer": 42, "message": "Insert the magnets",
+                     "kind": "filament change"}]),
                 "time": dict(self._times(spread, SAMPLE_LEFT,
                                          18 * 3600 + 51 * 60, sample=True),
                              estimated=self._dur(46 * 3600 + 3 * 60)),
@@ -2273,10 +2288,179 @@ class PushNotifications:
                                 else "contents", "message": str(e)}
         return out
 
+    def _sample_issue(self, low: bool = False) -> Dict[str, Any]:
+        """A sample toolhead at risk (Toolhead 2, its refill on Toolhead
+        4), as the filament checks build them."""
+        name, sid, rem, col = SAMPLE_SPOOLS[1]
+        bname, bsid, brem, bcol = SAMPLE_SPOOLS[3]
+        need = 30. if low else 120.
+        return dict(ch=1, name=name, sid=sid, rem=rem, full=1000.,
+                    need=need, colour=col,
+                    status="orange", refill_on=True, exact=True,
+                    blockers=[], together="green", unknown_backup=False,
+                    total=rem + brem,
+                    backups=[dict(ch=3, sid=bsid, name=bname, rem=brem,
+                                  full=1000., colour=bcol, own=0.,
+                                  exact=True)])
+
     def _sample_event(self, key: str) -> Dict[str, Any]:
-        """What the preview shows for event.* (the sample of what the
-        notification is about)."""
-        return dict(SAMPLE_EVENTS.get(key) or {})
+        """What the preview shows for event.*: a sample of what the
+        notification is about."""
+        file = SAMPLE_FILE
+        fault = {"code": "0003-0521", "emoji": "🟠",
+                 "title": "Nozzle clog detected",
+                 "details": "Check the nozzle of Toolhead 2 and clear it.",
+                 "message": "nozzle clog", "level": 2,
+                 "text": "🟠 0003-0521: Nozzle clog detected\nCheck the "
+                         "nozzle of Toolhead 2 and clear it."}
+        if key in ("error", "warning", "shutdown"):
+            return {"kind": {"error": "paused", "warning": "fault",
+                             "shutdown": "shutdown"}[key],
+                    "file": file, "fault": fault}
+        if key == "cancelled":
+            return {"kind": "cancelled", "file": file}
+        if key == "power_loss":
+            return {"file": file}
+        if key == "resumed":
+            return {"recovered": False}
+        if key == "first_layer":
+            return {"layer": 2}
+        if key == "progress":
+            return {"progress": 50}
+        if key == "object_complete":
+            return {"object": {"name": "3DBenchy #3", "number": 3,
+                               "count": 40}}
+        if key == "file_pause":
+            return {"pause": {"number": 1, "layer": 42,
+                              "kind": "filament change",
+                              "message": "Insert the magnets"}}
+        if key == "macro":
+            return {"title": "Bed ready", "message": "60 °C, levelled",
+                    "priority": "default"}
+        if key == "calibration":
+            return {"calibration": {"name": "Bed levelling",
+                                    "result": "complete",
+                                    "next": "Flow calibration"}}
+        if key == "driver_hot":
+            return {"limit": 105, "drivers": [
+                {"name": "X", "temperature": 108., "hot": True},
+                {"name": "Y", "temperature": 96., "hot": False}]}
+        if key in ("chamber_waiting", "chamber_reached"):
+            return {"file": file, "chamber": {"temperature": 38.,
+                                              "target": 45.}}
+        if key == "chamber_fault":
+            return {"file": file, "chamber": {
+                "kind": "stalled", "temperature": 38., "target": 45.,
+                "stalled_minutes": 10, "waiting": True}}
+        if key == "filament_change":
+            name, sid, rem, _col = SAMPLE_SPOOLS[0]
+            return {"loaded": True, "extruder": self._ext_name(0),
+                    "filament": {"name": name, "grams_left": rem,
+                                 "spool_id": sid}}
+        if key in ("filament_short", "filament_low"):
+            it = self._sample_issue(low=key == "filament_low")
+            return {"file": file if key == "filament_short" else None,
+                    "count": 1, "issues": [self._issue_event(it, None)]}
+        if key == "spool_switch":
+            f_name, f_sid, _r, _c = SAMPLE_SPOOLS[1]
+            t_name, t_sid, t_rem, _c = SAMPLE_SPOOLS[3]
+            return {"ace": False, "file": file,
+                    "from": {"label": self._desc(1, f_name, f_sid),
+                             "extruder": self._ext_name(1), "name": f_name,
+                             "spool_id": f_sid},
+                    "to": {"label": self._desc(3, t_name, t_sid),
+                           "extruder": self._ext_name(3), "name": t_name,
+                           "spool_id": t_sid, "grams_left": t_rem}}
+        if key == "slot_empty":
+            return {"file": file, "extruder": self._ext_name(1),
+                    "slot": {"label": "ACE 1 slot 2",
+                             "name": "Elegoo PETG HF Black"},
+                    "next": [{"label": "ACE 1 slot 4 (Elegoo PETG HF "
+                                       "Black)", "slot": "ACE 1 slot 4",
+                              "name": "Elegoo PETG HF Black"}],
+                    "quad_replenish": {"on": True, "where": "ACE 1"}}
+        return {}
+
+    def _sample_rows(self, key: str) -> List[Dict[str, Any]]:
+        """The preview's spool picture for a notification."""
+        if key == "filament_short":
+            return [self._issue_row(self._sample_issue())]
+        if key == "filament_low":
+            return [self._low_row(self._sample_issue(low=True))]
+        if key == "filament_change":
+            name, _sid, rem, col = SAMPLE_SPOOLS[0]
+            return [dict(toolhead=self._toolhead(0), word="",
+                         status=self._loaded_status(rem, 1000.), needs="",
+                         remaining=rem, full=1000., colour=col, name=name)]
+        if key == "spool_switch":
+            f_name, _s, f_rem, f_col = SAMPLE_SPOOLS[1]
+            t_name, _s, t_rem, t_col = SAMPLE_SPOOLS[3]
+            return [dict(toolhead=self._toolhead(1), word="", status="red",
+                         needs="", remaining=0., full=1000., colour=f_col,
+                         name=f_name, refills=[dict(
+                             toolhead=self._toolhead(3), remaining=t_rem,
+                             full=1000., colour=t_col, name=t_name,
+                             status="green")])]
+        if key == "slot_empty":
+            _n, _s, _r, col = SAMPLE_SPOOLS[1]
+            return [dict(toolhead="ACE 1 slot 2", word="", status="red",
+                         needs="", remaining=None, full=None, colour=col,
+                         name="Elegoo PETG HF Black", refills=[dict(
+                             toolhead="ACE 1 slot 4", remaining=None,
+                             full=None, colour=col,
+                             name="Elegoo PETG HF Black", status="ink",
+                             match="Exact match")])]
+        return []
+
+    def _loaded_status(self, remaining: Optional[float],
+                       full: Optional[float]) -> str:
+        """A loaded spool's colour: orange at or under the running-low
+        threshold, green above it; no colour when the amount isn't
+        known."""
+        if remaining is None or remaining <= 0:
+            return "ink"
+        return "orange" if remaining <= self._low_threshold(full) \
+            else "green"
+
+    async def _ep_preview_image(self, web_request: Any) -> Dict[str, Any]:
+        """The editor's image: what a notification would send (the
+        sample print job's render, a snapshot from the camera, the spool
+        picture of the sample), as a data: URL. None when there's
+        nothing to show."""
+        args = dict(web_request.get_args())
+        key = str(args.get("key") or "")
+        kind = str(args.get("image") or "none")
+        path: Optional[str] = None
+        tmp: Optional[str] = None
+        if kind == "render":
+            path = SAMPLE_RENDER
+        elif kind == "camera":
+            name = str(args.get("camera") or "")
+            cams = self.env.cameras if self.env else {}
+            url = (cams.get(name) or {}).get("snapshot") or \
+                self.snapshot_url
+            if url:
+                tmp = await self.eventloop.run_in_thread(
+                    self._fetch_snapshot_sync, True, url)
+                path = tmp
+        elif kind == "graphic" and key in cfgmod.TEMPLATE:
+            rows = self._sample_rows(key)
+            if rows and str(args.get("remaining", "true")).lower() \
+                    == "false":
+                rows = self._no_amounts(rows)
+            if rows:
+                tmp = await self.eventloop.run_in_thread(
+                    self._render_rows, rows)
+                path = tmp
+        if not path or not os.path.isfile(path):
+            return {"image": None}
+        try:
+            with open(path, "rb") as f:
+                data = base64.b64encode(f.read()).decode()
+        finally:
+            if tmp:
+                shutil.rmtree(os.path.dirname(tmp), ignore_errors=True)
+        return {"image": "data:image/jpeg;base64," + data}
 
     @staticmethod
     def _email_hint(why: str) -> List[str]:
@@ -3718,7 +3902,9 @@ class PushNotifications:
             and remaining > 0 else "")
         # The spool picture: its colour from Spoolman or the printer, the
         # amount only when Spoolman knows it
-        row = dict(toolhead=self._toolhead(ch), word="", status="ink",
+        row = dict(toolhead=self._toolhead(ch), word="",
+                   status=self._loaded_status(remaining,
+                                              self._full_weight(spool)),
                    needs="", remaining=remaining, full=self._full_weight(spool),
                    colour=self._spool_colour(spool, ch), name=name)
         await self._send_parts("filament_change", [(title, body, [row])],
