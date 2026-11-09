@@ -154,10 +154,10 @@ SAMPLE_FILAMENTS = [
 ]
 SAMPLE_LEFT = (24 * 60 + 3 * 60 + 12) * 60    # 1d 3h 12m remaining
 SAMPLE_FILE = "3DBenchy_x40_4colour"
-# The sample's job queue: name, hours, grams, materials
-SAMPLE_QUEUE = [("Cable_clips_x12_PETG", 0.75, 22.4, ["PETG"]),
-                ("Spool_holder_PLA", 2.2, 96.0, ["PLA"]),
-                ("Phone_stand_PLA_TPU", 1.1, 41.5, ["PLA", "TPU"])]
+# The sample's job queue: name, hours, grams, meters, materials
+SAMPLE_QUEUE = [("Cable_clips_x12_PETG", 0.75, 22.4, 7.32, ["PETG"]),
+                ("Spool_holder_PLA", 2.2, 96.0, 32.21, ["PLA"]),
+                ("Phone_stand_PLA_TPU", 1.1, 41.5, 13.87, ["PLA", "TPU"])]
 # Klipper's toolheads (extruder, extruder1, ...) and the fields pushraker
 # adds to them: the filament loaded, the MMU slot feeding it
 RX_EXTRUDER = re.compile(r"extruder(\d*)")
@@ -1593,29 +1593,34 @@ class PushNotifications:
                 "nozzle_diameter": 0.4, "bed_temperature": float(bed)}
 
     def _queue_item(self, name: str, seconds: float, grams: Optional[float],
-                    materials: List[str], start: float) -> Dict[str, Any]:
+                    meters: Optional[float], materials: List[str],
+                    start: float) -> Dict[str, Any]:
         return {"name": name, "time": self._dur(seconds) if seconds
-                else None, "grams": grams, "materials": materials or None,
+                else None, "grams": grams, "meters": meters,
+                "materials": materials or None,
                 "eta": self._eta(start + seconds) if seconds else None}
 
     def _sample_queue_item(self, n: int, start: float = 0.
                            ) -> Dict[str, Any]:
-        name, hours, grams, mats = SAMPLE_QUEUE[(n - 1) % len(SAMPLE_QUEUE)]
+        name, hours, grams, meters, mats = SAMPLE_QUEUE[(n - 1) % len(SAMPLE_QUEUE)]
         if not start:
             start = SAMPLE_LEFT + sum(
                 SAMPLE_QUEUE[(i - 1) % len(SAMPLE_QUEUE)][1] * 3600.
                 for i in range(1, n))
-        return self._queue_item(name, hours * 3600., grams, mats, start)
+        return self._queue_item(name, hours * 3600., grams, meters, mats,
+                                start)
 
     def _queue_summary(self, items: List[Dict[str, Any]],
                        left: Optional[float]) -> Dict[str, Any]:
         secs = sum(float(i["time"]) for i in items if i.get("time"))
         grams = [i["grams"] for i in items if i.get("grams")]
+        meters = [i["meters"] for i in items if i.get("meters")]
         return {"remaining": len(items), "items": items,
                 "list": [i["name"] for i in items] or None,
                 "time": self._dur(secs) if items else None,
                 "eta": self._eta((left or 0.) + secs) if items else None,
-                "grams": sum(grams) if grams else None}
+                "grams": round(sum(grams), 1) if grams else None,
+                "meters": round(sum(meters), 2) if meters else None}
 
     def _queue_values(self, filename: str, left: Optional[float]
                       ) -> Dict[str, Any]:
@@ -1631,10 +1636,12 @@ class PushNotifications:
                 meta = {}
             secs = float(meta.get("estimated_time") or 0.)
             grams = meta.get("filament_weight_total")
+            mm = meta.get("filament_total")
             mats = [m for m in tp.split_values(str(meta.get("filament_type")
                                                    or "")) if m]
-            items.append(self._queue_item(shown(f), secs, float(grams)
-                                          if grams else None, mats, start))
+            items.append(self._queue_item(
+                shown(f), secs, float(grams) if grams else None,
+                round(float(mm) / 1000., 2) if mm else None, mats, start))
             start += secs
         return self._queue_summary(items, left)
 
@@ -1885,12 +1892,14 @@ class PushNotifications:
         queued = [leaf("queue.#.name"),
                   leaf("queue.#.time", info="Slicer estimate."),
                   leaf("queue.#.eta", info="If printed one after another."),
-                  leaf("queue.#.grams"), leaf("queue.#.materials")]
+                  leaf("queue.#.grams"), leaf("queue.#.meters"),
+                  leaf("queue.#.materials")]
         nxt = [leaf("queue.next.name"),
                leaf("queue.next.time", info="Slicer estimate."),
                leaf("queue.next.eta", info="When it should finish, after "
                     "this print job."),
-               leaf("queue.next.grams"), leaf("queue.next.materials")]
+               leaf("queue.next.grams"), leaf("queue.next.meters"),
+               leaf("queue.next.materials")]
         return [
             leaf("file"),
             leaf("progress", info="Through the file, 0-100."),
@@ -1922,7 +1931,8 @@ class PushNotifications:
                 leaf("queue.time", info="All waiting print jobs, slicer "
                      "estimates."),
                 leaf("queue.eta", info="When the last one should finish."),
-                leaf("queue.grams"),
+                leaf("queue.grams", info="All waiting print jobs."),
+                leaf("queue.meters", info="All waiting print jobs."),
             ]),
         ]
 

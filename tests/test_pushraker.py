@@ -2487,6 +2487,7 @@ async def test_data():
         "{job.filament29.extruder} {job.time.remaining|H:MM} {job.filament#.name}"
         " | {job.filaments.materials} | {job.time.remaining|D days H hours M minutes}"
         " | {job.queue.remaining} {job.queue.next} {job.queue.2.time|H:MM}"
+        " {job.queue.meters} {job.queue.next.meters}"
         " {job.queue.list|line}"}))
     check("preview: the sample Benchy for job values, any filament number, "
           "the printer's live values for Klipper objects; # reads n/a",
@@ -2494,7 +2495,7 @@ async def test_data():
           "TPU 95A Orange, PLA Matte Grey PLA 60 extruder, extruder1, "
           "extruder2, extruder3 PLA Basic White extruder 27:12 n/a"
           " | PLA, PETG, TPU, PLA | 1 days 3 hours 12 minutes"
-          " | 3 Cable_clips_x12_PETG 2:12 Cable_clips_x12_PETG\n"
+          " | 3 Cable_clips_x12_PETG 2:12 53.4 7.32 Cable_clips_x12_PETG\n"
           "Spool_holder_PLA\nPhone_stand_PLA_TPU"
           and not out["live_job"] and out["placeholders"]
           == ["{job.filament#.name}"], out)
@@ -2526,7 +2527,8 @@ async def test_data():
           [f["label"] for f in rem["children"][0]["formats"]])
     check("queue: remaining, list, next, by position, time, eta, grams",
           names(job["queue"]["children"]) == ["remaining", "list", "next",
-                                               "#", "time", "eta", "grams"],
+                                               "#", "time", "eta", "grams",
+                                               "meters"],
           names(job["queue"]["children"]))
     check("a driver without a temperature isn't offered; nor a value "
           "that isn't there",

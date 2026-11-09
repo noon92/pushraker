@@ -399,8 +399,8 @@ tag or the screen.
 | `{job.extruders}` | the toolheads the job uses (`extruder, extruder2`) |
 | `{job.queue.remaining}` | print jobs waiting in Moonraker's job queue after this one |
 | `{job.queue.list}` | their names |
-| `{job.queue.time}` `.eta` `.grams` | all of them: slicer time, when the last should finish, filament |
-| `{job.queue.next.name}` `.time` `.eta` `.grams` `.materials` | the next one |
+| `{job.queue.time}` `.eta` `.grams` `.meters` | all of them: slicer time, when the last should finish, filament |
+| `{job.queue.next.name}` `.time` `.eta` `.grams` `.meters` `.materials` | the next one |
 | `{job.queue.#.name}` … | one by position: replace `#` with 1, 2, 3… (same fields as `next`) |
 
 Per-filament values come from the slicer's settings at the end of the
