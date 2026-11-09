@@ -207,7 +207,7 @@ TITLES = {
     "filament_low": "🧵 {name} spool running low",
     "filament_lows": "🧵 {name} spools running low on {n} toolheads",
     "spool_switch": "🔄 {name} switched to backup spool",
-    "slot_empty": "🧵 {name} ACE slot ran empty",
+    "slot_empty": "🧵 {name} spool in ACE slot ran out",
 }
 IMAGE_KINDS = ("render", "snapshot", "spool", "none")
 # machine_state_manager.main_state values of the manual calibrations run

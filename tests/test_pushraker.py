@@ -1054,7 +1054,7 @@ async def test_ace():
     await c._on_status_update({"ace": {"aces": STATE["ace"]["aces"]}}, 0)
     await asyncio.sleep(0.5)
     titles = [e["title"].split(" ", 2)[2] for e in log]
-    check("slot ran empty is reported", titles == ["ACE slot ran empty"],
+    check("slot ran empty is reported", titles == ["spool in ACE slot ran out"],
           titles)
     body = log[0]["body"] if log else ""
     check("...naming the slot, the toolhead and the next slots",
