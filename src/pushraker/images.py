@@ -235,13 +235,33 @@ def _put(bg: Image.Image, cx: float, y: int, sp: Image.Image) -> Image.Image:
     return bg
 
 
-def _background(height: int) -> Image.Image:
-    bg = Image.new("RGBA", (WIDTH, height))
+def _background(height: int, width: int = WIDTH) -> Image.Image:
+    bg = Image.new("RGBA", (width, height))
     d = ImageDraw.Draw(bg)
     for y in range(height):
         g = int(238 - 18 * y / max(1, height - 1))
-        d.line([(0, y), (WIDTH, y)], fill=(g, g + 1, g + 5, 255))
+        d.line([(0, y), (width, y)], fill=(g, g + 1, g + 5, 255))
     return bg
+
+
+def _columns(row: Dict[str, Any]) -> int:
+    """How many spool columns a row uses: its own spool, then up to two
+    refills on its line; a note sits in the two right columns."""
+    refills = row.get("refills") or []
+    if refills:
+        return 1 + min(2, len(refills))
+    return 3 if row.get("note") else 1
+
+
+def _shape(cols: int, w: int, h: int) -> Tuple[int, int]:
+    """The image's size for its content: one spool about square, two
+    spools 4:3, three in a row as wide as they are."""
+    if cols >= 3:
+        return w, h
+    if cols == 2:
+        return w, max(h, round(w * 3 / 4))
+    side = max(w, h)
+    return side, side
 
 
 def _layout(row: Dict[str, Any]) -> List[Tuple[int, int]]:
@@ -301,7 +321,11 @@ def render(rows: List[Dict[str, Any]], path: str) -> str:
     """
     heights = [_row_height(r) for r in rows]
     height = sum(heights) + 12
-    bg = _background(height)
+    cols = max((_columns(r) for r in rows), default=1)
+    used = COLUMN * cols
+    # Drawn on a clear canvas at the full layout, then placed on a
+    # background shaped to what it holds
+    bg = Image.new("RGBA", (WIDTH, height), (0, 0, 0, 0))
 
     def stack(d: ImageDraw.ImageDraw, cx: float, y0: int, sp: Dict[str, Any],
               col: RGB, needs: str = "") -> None:
@@ -351,7 +375,7 @@ def render(rows: List[Dict[str, Any]], path: str) -> str:
             draw(sp, COLUMNS[c], line_y(ln))
         d = ImageDraw.Draw(bg)
         if i:
-            d.line([40, y0 - 4, WIDTH - 40, y0 - 4], fill=(190, 193, 200),
+            d.line([40, y0 - 4, used - 40, y0 - 4], fill=(190, 193, 200),
                    width=2)
         stack(d, COLUMNS[0], y0, row, col, row.get("needs") or "")
         prev = (0, 0)
@@ -385,7 +409,11 @@ def render(rows: List[Dict[str, Any]], path: str) -> str:
                   "Backup spool order may differ from what's shown",
                   False, 16, GREY, center=True)
         y0 += heights[i]
-    bg.convert("RGB").save(path, quality=88)
+    w, h = _shape(cols, used, height)
+    out = _background(h, w)
+    out.alpha_composite(bg.crop((0, 0, used, height)),
+                        ((w - used) // 2, (h - height) // 2))
+    out.convert("RGB").save(path, quality=88)
     return path
 
 
