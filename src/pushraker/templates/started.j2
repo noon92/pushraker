@@ -10,7 +10,7 @@ Print 1/{{ job.queue.remaining + 1 }} remaining in queue{% if job.queue.time %} 
 {# Pauses written into the file (M600, PAUSE, M601) #}
 {% if job.pauses.count %}
 
-⏸️ Print job contains {{ job.pauses.count|plural("a pause", "pauses") }}{% if job.pauses.layers %} (layer{{ "s" if job.pauses.count > 1 }} {{ job.pauses.layers }}){% endif %}.
+⏸️ Print job contains {{ job.pauses.count|plural("a pause", "pauses") }}{% if job.pauses.layers %} (layer{% if job.pauses.count > 1 %}s{% endif %} {{ job.pauses.layers }}){% endif %}.
 {% endif %}
 {# Calibrations chosen on the printer before the print job starts #}
 {% if job.preprint %}

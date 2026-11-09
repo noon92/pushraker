@@ -1169,10 +1169,12 @@ async def test_file_pauses():
     reset_world()
     log = []
     ntfy = FakeService(log, "ntfy")
-    hi = FakeService(log, "ntfy")
     server, c = make({}, {"started": [("ntfy", ntfy, False)],
-                          "paused": [("ntfy", ntfy, False)],
-                          "file_pause": [("ntfy", hi, False)]})
+                          "paused": [("ntfy", ntfy, False)]})
+    prios = []
+    real_at = c._at_priority
+    c._at_priority = lambda rid, dests, p: (prios.append((rid, p)),
+                                            real_at(rid, dests, p))[1]
     body = ["; start\n", "G28\n"]
     for layer in range(1, 60):
         body.append(";LAYER_CHANGE\n;Z:%d\n" % layer)
@@ -1205,9 +1207,8 @@ async def test_file_pauses():
     await server.handlers["job_state:state_changed"](
         JobEvent.PAUSED, {}, STATE["print_stats"])
     await asyncio.sleep(3.6)
-    check("the file's pause goes out on the max-priority twin of the Paused "
-          "row", len(log) == 1 and log[0]["headers"] is hi.srv.headers or
-          (len(log) == 1 and log[0]["title"].startswith("👋")))
+    check("the file's pause: Print paused, its template setting priority max",
+          len(log) == 1 and prios == [("paused", "max")], prios)
     check("the file's pause is told apart from a person's",
           [e["title"] for e in log] == ["👋 U1 paused by the print job"]
           and log[0]["body"] == 'Magnets\nPause 2 of 3 at layer 40, as '
@@ -1218,8 +1219,10 @@ async def test_file_pauses():
     await server.handlers["job_state:state_changed"](
         JobEvent.PAUSED, {}, STATE["print_stats"])
     await asyncio.sleep(3.6)
-    check("a pause elsewhere is the normal paused notification",
-          [e["title"] for e in log] == ["⏸️ U1 paused"], [e["title"] for e in log])
+    check("a pause elsewhere is the normal paused notification, at the "
+          "row's priority",
+          [e["title"] for e in log] == ["⏸️ U1 paused"]
+          and prios == [("paused", "max")], [e["title"] for e in log])
     log.clear()
     STATE["virtual_sdcard"]["file_position"] = offsets["M600"] + 5
     await server.handlers["job_state:state_changed"](
@@ -2196,7 +2199,7 @@ async def test_print_by_object():
         server, c = make({"first_layer_objects": mode},
                          {"first_layer": [("ntfy", ntfy, False)],
                           "layer_started": [("ntfy", ntfy, False)],
-                          "object_complete": [("ntfy", ntfy, False)]})
+                          "complete": [("ntfy", ntfy, False)]})
         await start_job(server, filename)
         for layer in range(1, 244):
             # The layer line comes just before the object marker, and the
@@ -2494,7 +2497,7 @@ async def test_template_variants():
     reset_world()
     log = []
     ntfy = FakeService(log, "ntfy")
-    rows = ("started", "resumed", "paused", "file_pause", "complete",
+    rows = ("started", "resumed", "paused", "complete",
             "cancelled", "error", "filament_short", "filament_low",
             "spool_switch", "slot_empty", "filament_change")
     server, c = make({}, {r: [("ntfy", ntfy, False)] for r in rows})
@@ -2690,12 +2693,12 @@ async def test_templates_sending():
         rows=dict(base["rows"], paused=dict(
             base["rows"]["paused"], enabled=True)),
         templates={"paused": {"image": "render"},
-                   "file_pause": {"image": "none"}}),
+                   "complete": {"image": "none"}}),
         pn.cfgmod.Env(cameras={"case": {"snapshot": "http://c/snap"},
                                "nozzle": {"snapshot": "http://n/snap"}}))
-    check("each notification's image: Paused render, its file pause none",
+    check("each notification's image: Paused render, Complete none",
           opts.get("paused", "").startswith("render, ")
-          and opts.get("file_pause", "").startswith("none, "), opts)
+          and opts.get("complete", "").startswith("none, "), opts)
     opts = pn.cfgmod.render_options(dict(
         base, enabled=True, provider="ntfy",
         server="https://ntfy.example.com", topic="t", camera="case",
@@ -2789,7 +2792,7 @@ async def test_codemirror():
         st = await c._ep_codemirror(WebRequest("POST", {"action":
                                                         "update"}))
         check("a download that doesn't match the checksum isn't installed",
-              "checksum" in (st.get("error") or "") and not st["up_to_date"]
+              "checksum" in (st.get("error") or "").lower() and not st["up_to_date"]
               and "PushrakerCM" in open(os.path.join(
                   c._cm_dir, "pushraker-codemirror.js")).read(), st)
         st = await c._ep_codemirror(WebRequest("POST", {"action":

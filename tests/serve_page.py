@@ -74,10 +74,12 @@ async def make():
     return server, c
 
 
-def local_codemirror(self):
+def local_codemirror(self, log=None):
     """CodeMirror from this checkout's codemirror/ folder (no download)."""
     import shutil as sh
     js, info = self._cm_paths()
+    if log is not None:
+        log.append("Copying from this checkout's codemirror/ (test server)")
     os.makedirs(self._cm_dir, exist_ok=True)
     sh.copy(os.path.join(HERE, "..", "codemirror", T.pn.CODEMIRROR["file"]),
             js)

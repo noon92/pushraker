@@ -1,6 +1,14 @@
 {{ job.file }}
+{% if event.object %}
+Object {{ event.object.number }} of {{ event.object.count }}: {{ event.object.name }}
+{# Time left by the estimation method chosen in settings; the ETA needs the time zone #}
+{% if job.time.remaining %}
+~{{ job.time.remaining }} left{% if job.time.eta %}, ETA {{ job.time.eta }}{% endif %}
+{% endif %}
+{% else %}
 Print time: {{ job.time.elapsed|default("0m") }}
 {# Moonraker's job queue: what is still waiting #}
 {% if job.queue.remaining %}
 {{ job.queue.remaining|plural("1 print", "prints") }} remaining in queue{% if job.queue.time %} (total {{ job.queue.time }}){% endif %}
+{% endif %}
 {% endif %}

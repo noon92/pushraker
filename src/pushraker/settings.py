@@ -46,6 +46,10 @@ AUTH_MODES = ["none", "token", "basic"]
 ROWS = [
     ("started", "Print started", "▶️", True, "default", "render", "print",
      False),
+    # When the pre-print calibrations chosen for the print job are done
+    # (printers that have them)
+    ("preprint_done", "Pre-print calibrations finished", "📐", True,
+     "default", "render", "print", False),
     ("paused", "Print paused", "⏸️", True, "default", "snapshot", "print",
      False),
     ("resumed", "Print resumed", "▶️", False, "default", "snapshot", "print",
@@ -115,11 +119,9 @@ JOB_IMAGES = ("none", "render", "camera")
 SPOOL_IMAGES = ("none", "render", "camera", "graphic")
 TEMPLATES = [
     ("started", "started", "Print started", "render", JOB_IMAGES),
-    ("preprint_done", "started", "Pre-print calibrations done", "render",
-     JOB_IMAGES),
+    ("preprint_done", "preprint_done", "Pre-print calibrations finished",
+     "render", JOB_IMAGES),
     ("paused", "paused", "Print paused", "camera", JOB_IMAGES),
-    ("file_pause", "paused", "Paused by the print job", "camera",
-     JOB_IMAGES),
     ("resumed", "resumed", "Print resumed", "camera", JOB_IMAGES),
     ("layer_started", "layer_started", "First layer started", "camera",
      JOB_IMAGES),
@@ -128,7 +130,6 @@ TEMPLATES = [
     ("status_report", "status_report", "Status report", "camera",
      JOB_IMAGES),
     ("complete", "complete", "Print complete", "camera", JOB_IMAGES),
-    ("object_complete", "complete", "Object complete", "camera", JOB_IMAGES),
     ("cancelled", "cancelled", "Print cancelled", "camera", JOB_IMAGES),
     ("macro", "macro", "From macros and G-code", "camera", JOB_IMAGES),
     ("calibration", "calibration", "Manual calibrations", "camera",
@@ -166,15 +167,7 @@ OPTION_KEYS = dict({f"progress_{m}": "progress" for m in (25, 50, 75)},
                    **{f"macro_{p}": "macro" for p in
                       ("min", "low", "default", "high", "max")})
 ROW = {r[0]: r for r in ROWS}
-# Print-by-object: "Print complete" for each object is sent as its own
-# notification (so a webhook sees event=object_complete), with the Print
-# complete row's settings. It isn't a row of its own in the form.
-OBJECT_ROW = "object_complete"
-# A pause the print job's file asks for is sent with the Paused row's
-# destinations at the highest priority: the file wants something from you
-FILE_PAUSE_ROW = "file_pause"
-# Pre-print calibrations done (printers that have them): sent with the
-# Print started row's settings, when its checkbox is on
+# Pre-print calibrations done (printers that have them)
 PREPRINT_ROW = "preprint_done"
 # The Progress row's marks, and the component's row for each
 PROGRESS_MARKS = (25, 50, 75)
@@ -221,7 +214,8 @@ STRING_FIELDS = ("provider", "server", "topic", "auth", "username",
                  "pushover_user", "pushover_device", "telegram_chat",
                  "gotify_server",
                  "discord_user", "discord_mention", "printer_url",
-                 "camera", "name", "timezone", "first_layer_objects",
+                 "camera", "name", "timezone", "browser_timezone",
+                 "first_layer_objects",
                  "filament_change_events",
                  "complete_objects",
                  "email_host",
@@ -232,7 +226,7 @@ SECRET_FIELDS = ("secret", "email_password", "webhook_url")
 INT_FIELDS = ("layers_complete", "email_port", "filament_low_percent",
               "filament_low_grams", "driver_temp", "report_interval")
 BOOL_FIELDS = ("enabled", "push_enabled", "email_enabled", "webhook_enabled",
-               "filament_unknown", "preprint_done")
+               "filament_unknown")
 # Settings the form fills in for common providers
 EMAIL_PRESETS = {
     "gmail": {"label": "Gmail", "host": "smtp.gmail.com", "port": 587,
@@ -324,7 +318,10 @@ def _defaults(name: str) -> Dict[str, Any]:
         "printer_url": "",
         "camera": "",           # a Moonraker webcam name, "" for none
         "name": name,
-        "timezone": "",
+        # "browser": the time zone of the browser the page was last saved
+        # from (browser_timezone); or a time zone of its own
+        "timezone": "browser",
+        "browser_timezone": "",
         "layers_complete": 2,
         # Print-by-object: "layer N complete" and "Print complete" for
         # each object, or once per print job
@@ -334,9 +331,6 @@ def _defaults(name: str) -> Dict[str, Any]:
         "filament_low_percent": 10,
         "filament_low_grams": 50,
         "filament_unknown": True,
-        # Under Print started: also notify when the pre-print calibrations
-        # chosen for the job are done
-        "preprint_done": True,
         # The Progress row: which of 25, 50, 75 % it reports
         "progress_marks": "25,50,75",
         # Time-left method (component.TIME_METHODS and the printer's own);
@@ -437,8 +431,23 @@ def parse_section(sec: Any, s: Dict[str, Any]) -> Dict[str, Any]:
             s[key] = int(sec.get(key, str(s[key])))
         except ValueError:
             pass
+    if "timezone" in sec and "browser_timezone" not in sec:
+        # Before the setting: the page saved the browser's time zone
+        s["browser_timezone"] = s["timezone"] if s["timezone"] not in (
+            "", "browser") else ""
+        s["timezone"] = "browser"
     for rid in ROW_IDS:
         raw = sec.get(rid)
+        if rid == PREPRINT_ROW and raw and raw.strip().lower() in (
+                "true", "false"):
+            # Before its row: a checkbox under Print started, with its
+            # settings
+            s["rows"][rid].update(dict(s["rows"]["started"]),
+                                  enabled=raw.strip().lower() == "true"
+                                  and s["rows"]["started"]["enabled"])
+            if raw.strip().lower() == "false":
+                s["rows"][rid]["email"] = False
+            continue
         if raw:
             if _parse_row(s["rows"][rid], raw) is False:
                 # Before templates: no_image on the row: its notifications
@@ -777,7 +786,10 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     if not RX_NAME.fullmatch(s["name"]):
         raise ConfigError("Printer name: up to 32 letters, digits, spaces "
                           "and . _ - ( )")
-    if not RX_TIMEZONE.fullmatch(s["timezone"]):
+    if not s["timezone"]:
+        s["timezone"] = "browser"
+    if not RX_TIMEZONE.fullmatch(s["timezone"]) or \
+            not RX_TIMEZONE.fullmatch(s["browser_timezone"]):
         raise ConfigError("Invalid time zone")
     if s["printer_url"] and not RX_PRINTER_URL.fullmatch(s["printer_url"]):
         raise ConfigError("Printer URL must look like http://100.64.0.1")
@@ -1212,10 +1224,11 @@ def email_url(s: Dict[str, Any]) -> str:
 
 
 def available_rows(env: Env) -> List[str]:
-    """The filament rows need the Spoolman integration."""
-    if env.spoolman_url:
-        return list(ROW_IDS)
-    return [rid for rid in ROW_IDS if rid not in SPOOLMAN_ONLY]
+    """The filament rows need the Spoolman integration; pre-print
+    calibrations, a printer that has them."""
+    return [rid for rid in ROW_IDS
+            if (env.spoolman_url or rid not in SPOOLMAN_ONLY)
+            and (env.preprint or rid != PREPRINT_ROW)]
 
 
 def push_rows(s: Dict[str, Any], env: Env) -> List[str]:
@@ -1290,6 +1303,7 @@ def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
     if cam and cam.get("snapshot"):
         out["snapshot_url"] = cam["snapshot"]
     out["layers_complete"] = str(s["layers_complete"])
+    out["complete_objects"] = s["complete_objects"]
     out["first_layer_objects"] = s["first_layer_objects"]
     if "filament_change" in rows:
         out["filament_change_events"] = s["filament_change_events"]
@@ -1297,8 +1311,9 @@ def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
         out["driver_temp"] = str(s["driver_temp"])
     if "status_report" in rows:
         out["report_interval"] = str(s["report_interval"])
-    if s["timezone"]:
-        out["timezone"] = s["timezone"]
+    tz = time_zone(s)
+    if tz:
+        out["timezone"] = tz
     if s["time_left"]:
         out["time_left"] = s["time_left"]
     if any(r in rows for r in SPOOLMAN_ROWS) and env.spoolman_url:
@@ -1330,6 +1345,9 @@ def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
                     pkind = "none" if s["provider"] == "gotify" else kind
                     out[name] = f"{pkind}, " \
                         f"{row_url(s, rid, s['rows'][rid]['priority'], env)}"
+                    for pr in PRIORITIES:
+                        if pr != s["rows"][rid]["priority"]:
+                            out[f"{name}@{pr}"] = row_url(s, rid, pr, env)
                 if rid in email:
                     out[f"{name}_email"] = f"{kind}, {email_url(s)}"
                 if rid in hook:
@@ -1351,23 +1369,27 @@ def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
                     out[f"{name}_webhook"] = \
                         f"{kind}, {webhook_url(s, 'macro', env)}"
             continue
-        # The object-complete notification follows the Print complete row
-        for name in ([rid, OBJECT_ROW] if rid == "complete"
-                     and s["complete_objects"] == "each" else
-                     [rid, FILE_PAUSE_ROW] if rid == "paused" else
-                     [rid, PREPRINT_ROW] if rid == "started"
-                     and s["preprint_done"] and env.preprint else [rid]):
-            kind = image_kind(s, name, env)
-            if rid in push:
-                url = row_url(s, rid, "max" if name == FILE_PAUSE_ROW
-                              else s["rows"][rid]["priority"], env)
-                pkind = "none" if s["provider"] == "gotify" else kind
-                out[name] = f"{pkind}, {url}"
-            if rid in email:
-                out[f"{name}_email"] = f"{kind}, {email_url(s)}"
-            if rid in hook:
-                out[f"{name}_webhook"] = f"{kind}, {webhook_url(s, name, env)}"
+        kind = image_kind(s, rid, env)
+        if rid in push:
+            prio = s["rows"][rid]["priority"]
+            pkind = "none" if s["provider"] == "gotify" else kind
+            out[rid] = f"{pkind}, {row_url(s, rid, prio, env)}"
+            # A template may set its own priority ({% set priority =
+            # "max" %}): the row's push address at each other priority
+            for p in PRIORITIES:
+                if p != prio:
+                    out[f"{rid}@{p}"] = row_url(s, rid, p, env)
+        if rid in email:
+            out[f"{rid}_email"] = f"{kind}, {email_url(s)}"
+        if rid in hook:
+            out[f"{rid}_webhook"] = f"{kind}, {webhook_url(s, rid, env)}"
     return out
+
+
+def time_zone(s: Dict[str, Any]) -> str:
+    """The time zone ETAs are given in."""
+    return s["browser_timezone"] if s["timezone"] in ("", "browser") \
+        else s["timezone"]
 
 
 def hook_values(s: Dict[str, Any], env: Env) -> Dict[str, int]:

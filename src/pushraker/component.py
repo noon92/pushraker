@@ -565,6 +565,15 @@ CODEMIRROR_TIMEOUT = 60.
 SAMPLE_RENDER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "web", "sample-render.jpg")
 
+# event.* a notification has only sometimes: shown in the tree
+SAMPLE_EXTRA: Dict[str, Dict[str, Any]] = {
+    "paused": {"planned": True, "pause": {
+        "number": 1, "layer": 42, "kind": "filament change",
+        "message": "Insert the magnets"}},
+    "complete": {"object": {"name": "3DBenchy #3", "number": 3,
+                            "count": 40}},
+}
+
 # The preview's sample spools: (name, spool id, grams left, colour)
 SAMPLE_SPOOLS = [("Bambu PLA Basic White", 7, 780., (245, 245, 245)),
                  ("Elegoo PETG HF Black", 12, 95., (28, 28, 28)),
@@ -739,6 +748,9 @@ class AppriseLog(logging.Handler):
 
     def take(self, channel: str) -> List[str]:
         return self.messages.pop(channel, [])
+
+
+PRIORITY_NAMES = ("min", "low", "default", "high", "max")
 
 
 class Destination(NamedTuple):
@@ -937,6 +949,12 @@ class PushNotifications:
         self.layers_complete: int = int(num("layers_complete", 2, 1, 3))
         # Print-by-object: "layer N complete" for each object, or once
         self.first_layer_objects: str = get("first_layer_objects", "each")
+        # Print-by-object: Print complete for each object, or once
+        self.complete_objects: str = get("complete_objects", "each")
+        # A row's push address at another priority, for a template that
+        # sets its own ({% set priority = "max" %}): "<row>@<priority>"
+        self.priority_urls: Dict[str, str] = {
+            k: v for k, v in opts.items() if "@" in k and v}
         # Which of loaded / unloaded the Filament loaded / unloaded row sends
         self.filament_change_events = {
             e.strip() for e in get(
@@ -1624,14 +1642,36 @@ class PushNotifications:
         return await self._render(text, ctx)
 
     async def _render(self, text: str, ctx: Dict[str, Any]) -> str:
+        return (await self._render_vars(text, ctx))[0]
+
+    async def _render_vars(self, text: str, ctx: Dict[str, Any]
+                           ) -> Tuple[str, Dict[str, Any]]:
         """Rendered off Moonraker's event loop, with a time limit: a
-        template that loops for long doesn't hold up the printer."""
+        template that loops for long doesn't hold up the printer. Also
+        what the template set ({% set priority = ... %})."""
         try:
             return await asyncio.wait_for(self.eventloop.run_in_thread(
-                jj.render, text, ctx), TEMPLATE_TIMEOUT)
+                jj.render_vars, text, ctx), TEMPLATE_TIMEOUT)
         except asyncio.TimeoutError:
             raise jj.TemplateError(
                 f"took longer than {TEMPLATE_TIMEOUT:.0f} seconds") from None
+
+    @staticmethod
+    def _one_line(title: str) -> str:
+        """A title is one line: a template's line breaks become spaces."""
+        return " ".join(t.strip() for t in title.splitlines() if t.strip())
+
+    async def _render_pair(self, title: str, contents: str,
+                           ctx: Dict[str, Any]
+                           ) -> Tuple[str, str, Optional[str]]:
+        """Title and contents, and the priority either set (None: the
+        row's)."""
+        t, tv = await self._render_vars(title, ctx)
+        c, cv = await self._render_vars(contents, ctx)
+        prio = str(cv.get("priority", tv.get("priority", "")) or "")
+        prio = prio.strip().lower()
+        return self._one_line(t), c, prio if prio in PRIORITY_NAMES \
+            else None
 
     async def _resolver(self, tokens: Sequence[tp.Token],
                         state: Dict[str, Any], sample: bool) -> Any:
@@ -2170,6 +2210,9 @@ class PushNotifications:
         key = str(dict(web_request.get_args()).get("key") or "")
         if key in cfgmod.TEMPLATE:
             event = jj.prune(self._sample_event(key))
+            # What the notification can also have, for the tree (the
+            # preview shows the plain case)
+            event.update(SAMPLE_EXTRA.get(key, {}))
             cats.insert(0, {"id": "event", "label": "⚡ This notification",
                             "hint": "event", "info": "What this notification is about. The "
                             "preview shows a sample.", "guide": "event",
@@ -2351,6 +2394,8 @@ class PushNotifications:
         for field, text in (("title", title), ("text", contents)):
             try:
                 out[field] = await self._render(text, ctx)
+                if field == "title":
+                    out[field] = self._one_line(out[field])
             except jj.TemplateError as e:
                 out["error"] = {"field": "title" if field == "title"
                                 else "contents", "message": str(e)}
@@ -2395,13 +2440,8 @@ class PushNotifications:
             return {"layer": 2}
         if key == "progress":
             return {"progress": 50}
-        if key == "object_complete":
-            return {"object": {"name": "3DBenchy #3", "number": 3,
-                               "count": 40}}
-        if key == "file_pause":
-            return {"pause": {"number": 1, "layer": 42,
-                              "kind": "filament change",
-                              "message": "Insert the magnets"}}
+        if key == "paused":
+            return {"planned": False}
         if key == "macro":
             return {"title": "Bed ready", "message": "60 °C, levelled",
                     "priority": "default"}
@@ -2530,21 +2570,27 @@ class PushNotifications:
                 "project": CODEMIRROR["project"],
                 "pushraker": __version__}
 
-    def _cm_download_sync(self) -> None:
+    def _cm_download_sync(self, log: Optional[List[str]] = None) -> None:
         """Download this pushraker version's build, check it, put it in
-        place (a failed download leaves what was there)."""
+        place (a failed download leaves what was there). What it did goes
+        to `log`, for the page."""
+        log = log if log is not None else []
         url = CODEMIRROR["url"].format(version=__version__,
                                        file=CODEMIRROR["file"])
+        log.append(f"Downloading {url}")
         try:
             with urllib.request.urlopen(
                     url, timeout=CODEMIRROR_TIMEOUT) as resp:
                 data = resp.read(CODEMIRROR["size"] * 2 + 1)
         except Exception as e:
-            raise RuntimeError(f"Download failed ({url}): {e}") from None
-        if hashlib.sha256(data).hexdigest() != CODEMIRROR["sha256"]:
-            raise RuntimeError("The download doesn't match the checksum "
-                               "this pushraker version expects; not "
-                               "installed.")
+            raise RuntimeError(f"Download failed: {e}") from None
+        log.append(f"Downloaded {len(data)} bytes")
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != CODEMIRROR["sha256"]:
+            raise RuntimeError(f"Checksum {digest} doesn't match the "
+                               f"expected {CODEMIRROR['sha256']}; not "
+                               "installed")
+        log.append(f"Checksum OK (sha256 {digest[:16]}…)")
         js, info = self._cm_paths()
         os.makedirs(self._cm_dir, exist_ok=True)
         tmp = js + ".part"
@@ -2555,6 +2601,7 @@ class PushNotifications:
             json.dump({"version": CODEMIRROR["version"],
                        "sha256": CODEMIRROR["sha256"],
                        "pushraker": __version__}, f)
+        log.append(f"Written to {js}")
 
     async def _cm_follow(self) -> None:
         """After an upgrade: an installed CodeMirror that isn't the build
@@ -2573,22 +2620,31 @@ class PushNotifications:
         free space. POST action=install|update|remove."""
         args = dict(web_request.get_args())
         action = str(args.get("action") or "")
+        log: List[str] = []
         if web_request.get_action() == "POST" or action:
             try:
                 if action in ("install", "update"):
                     if action == "install" or not self._cm_status()[
                             "up_to_date"]:
                         await self.eventloop.run_in_thread(
-                            self._cm_download_sync)
+                            self._cm_download_sync, log)
+                    else:
+                        log.append(f"CodeMirror {CODEMIRROR['version']} is "
+                                   f"the build pushraker {__version__} "
+                                   "expects: up to date")
                 elif action == "remove":
                     shutil.rmtree(self._cm_dir, ignore_errors=True)
+                    log.append(f"Removed {self._cm_dir}")
                 else:
                     raise RuntimeError("Unknown action")
             except Exception as e:
                 out = self._cm_status()
                 out["error"] = str(e)
+                out["log"] = log
                 return out
-        return self._cm_status()
+        out = self._cm_status()
+        out["log"] = log
+        return out
 
     async def _ep_codemirror_js(self, web_request: Any) -> Dict[str, Any]:
         """The installed CodeMirror, for the page to load (None when it
@@ -2812,7 +2868,9 @@ class PushNotifications:
         try:
             if delay:
                 await asyncio.sleep(delay)
-            title, body = await self._compose(key, title, body, event)
+            title, body, prio = await self._compose(key, title, body, event)
+            if prio:
+                dests = self._at_priority(rid, dests, prio)
             if camera_wait and image == "snapshot" and not snapshot_ready:
                 path = await self._wait_for_snapshot(camera_wait, key)
             else:
@@ -2834,6 +2892,33 @@ class PushNotifications:
             for t in tickets:
                 await t.gate.done(t.ticket)
         return all(results)
+
+    def _at_priority(self, rid: str, dests: List[Destination],
+                     prio: str) -> List[Destination]:
+        """The push destinations of a row at the priority a template set
+        (email and the webhook have none)."""
+        if rid.startswith("macro_"):
+            other = self.rows.get(f"macro_{prio}")
+            if other is None:
+                return dests
+            push = [d for d in other[1] if not d.email
+                    and d.channel != "webhook"]
+            return push + [d for d in dests if d.email
+                           or d.channel == "webhook"]
+        url = self.priority_urls.get(f"{rid}@{prio}")
+        if not url:
+            return dests
+        ap = apprise.Apprise()
+        if not ap.add(url):
+            return dests
+        for srv in ap:
+            srv.socket_read_timeout = max(srv.socket_read_timeout,
+                                          SEND_READ_TIMEOUT)
+            srv.socket_connect_timeout = max(srv.socket_connect_timeout,
+                                             SEND_CONNECT_TIMEOUT)
+        return [Destination(d.channel, ap, d.email)
+                if not d.email and d.channel != "webhook" else d
+                for d in dests]
 
     @staticmethod
     def _outcomes(rid: str, dests: List[Destination],
@@ -3405,33 +3490,34 @@ class PushNotifications:
         return cfgmod.template(self.settings or {}, key)
 
     async def _compose(self, key: str, title: str, body: str,
-                       event: Optional[Dict[str, Any]]) -> Tuple[str, str]:
+                       event: Optional[Dict[str, Any]]
+                       ) -> Tuple[str, str, Optional[str]]:
         """The notification's title and text from its template. An edited
         template that fails sends the default's text, with what went
         wrong; the default failing (it shouldn't) sends what was built
         here."""
         tpl = self._template(key)
         if not tpl:
-            return title, body
+            return title, body, None
         d = dflt.default(key)
         try:
             ctx = await self._template_context(
                 [tpl["title"], tpl["contents"]], False, event)
-            return (await self._render(tpl["title"], ctx),
-                    await self._render(tpl["contents"], ctx))
+            return await self._render_pair(tpl["title"], tpl["contents"],
+                                           ctx)
         except jj.TemplateError as e:
             edited = d is None or (tpl["title"], tpl["contents"]) != d
             logging.warning("[pushraker] %s template: %s", key, e)
             if not edited:
-                return title, body
+                return title, body, None
             try:
                 ctx = await self._template_context(list(d), False, event)
-                return (await self._render(d[0], ctx), self._lines(
-                    await self._render(d[1], ctx),
-                    f"⚠️ Your template failed: {e}"))
+                t, c, prio = await self._render_pair(d[0], d[1], ctx)
+                return t, self._lines(c, f"⚠️ Your template failed: {e}"), \
+                    prio
             except jj.TemplateError:
                 return title, self._lines(
-                    body, f"⚠️ Your template failed: {e}")
+                    body, f"⚠️ Your template failed: {e}"), None
 
     async def _parity(self, key: str, title: str, body: str,
                       event: Optional[Dict[str, Any]]) -> None:
@@ -3445,8 +3531,7 @@ class PushNotifications:
             return
         try:
             ctx = await self._template_context(list(d), False, event)
-            got = (await self._render(d[0], ctx),
-                   await self._render(d[1], ctx))
+            got = (await self._render_pair(d[0], d[1], ctx))[:2]
         except Exception as e:
             PARITY_LOG.append((key, "error", f"{title}\n{body}", str(e)))
             return
@@ -3523,7 +3608,7 @@ class PushNotifications:
             else:
                 self._spawn(self._send(
                     "paused", self._title("paused"), shown(filename),
-                    delay=PAUSE_SNAPSHOT_DELAY))
+                    delay=PAUSE_SNAPSHOT_DELAY, event={"planned": False}))
         elif job_event == JobEvent.RESUMED:
             self._driver_hot_sent = False   # a hot driver may warn again
             if ex is not None:
@@ -4629,7 +4714,8 @@ class PushNotifications:
         i = self._file_pause(pos)
         if i is None:
             await self._send("paused", self._title("paused"), shown(filename),
-                             delay=PAUSE_SNAPSHOT_DELAY)
+                             delay=PAUSE_SNAPSHOT_DELAY,
+                             event={"planned": False})
             return
         self._pauses_seen.add(i)
         p = self._job_pauses[i]
@@ -4640,14 +4726,13 @@ class PushNotifications:
         line = f"{what}, as planned in the print job."
         if p["message"]:
             line += f' "{p["message"]}"'
-        # The Paused row's destinations at the highest priority (the
-        # file_pause row the config writes next to paused)
-        await self._send("file_pause" if "file_pause" in self.rows
-                         else "paused", self._title("file_pause"),
+        # Print paused, planned: its default template sends it at the
+        # highest priority (the file wants something from you)
+        await self._send("paused", self._title("file_pause"),
                          self._lines(shown(filename), line,
                                      "Waiting for you to resume…"),
-                         delay=PAUSE_SNAPSHOT_DELAY, key="file_pause",
-                         event={"pause": {
+                         delay=PAUSE_SNAPSHOT_DELAY,
+                         event={"planned": True, "pause": {
                              "number": i + 1, "layer": p["layer"] or None,
                              "kind": p["kind"] or "pause",
                              "message": p["message"] or None}})
@@ -4717,10 +4802,10 @@ class PushNotifications:
                        "object": self._object_info(cur)}))
 
     def _object_done(self, name: str, filename: str) -> None:
-        if "object_complete" not in self.rows:
+        if "complete" not in self.rows or self.complete_objects != "each":
             return
         self._spawn(self._send(
-            "object_complete", self._title("object_complete"),
+            "complete", self._title("object_complete"),
             self._lines(shown(filename), self._object_line(name),
                         self._time_left()),
             event={"object": self._object_info(name)}))
@@ -6113,12 +6198,15 @@ class PushNotifications:
                     None, False, rid)
             remaining = self._template(rid).get("remaining", True)
             per_dest: List[List[Tuple[str, str, Optional[str]]]] = []
+            sent_to: List[Destination] = []
             for d in dests:
+                prio: Optional[str] = None
                 if packer is None:
                     msgs = []
                     for t, b, rows in messages or []:
                         await self._parity(rid, t, b, event)
-                        t, b = await self._compose(rid, t, b, event)
+                        t, b, p = await self._compose(rid, t, b, event)
+                        prio = prio or p
                         msgs.append((t, b, rows))
                     keyed = [((k,), m) for k, m in enumerate(msgs)]
                 else:
@@ -6136,7 +6224,8 @@ class PushNotifications:
                                 [caps[i] for i in idx], head,
                                 n if len(parts) > 1 else None, len(parts))
                             await self._parity(rid, t, body, ev)
-                            t, body = await self._compose(rid, t, body, ev)
+                            t, body, p = await self._compose(rid, t, body, ev)
+                            prio = prio or p
                         keyed.append((tuple(idx), (
                             t, body, [row_fn(issues[i]) for i in idx])))
                 out = []
@@ -6155,10 +6244,13 @@ class PushNotifications:
                         path = paths[key]
                     out.append((t, b, path))
                 per_dest.append(out)
+                # The priority a template set, for this destination
+                sent_to.append(self._at_priority(rid, [d], prio)[0]
+                               if prio else d)
             report: List[Dict[str, Any]] = []
             results = self._outcomes(rid, dests, await asyncio.gather(*(
                 self._deliver(rid, d, t, msgs, report)
-                for d, t, msgs in zip(dests, tickets, per_dest)),
+                for d, t, msgs in zip(sent_to, tickets, per_dest)),
                 return_exceptions=True))
             self._console_report(report)
         finally:

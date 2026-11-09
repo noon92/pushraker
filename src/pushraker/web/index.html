@@ -174,7 +174,13 @@
     .nt-ast.blue { color: var(--accent); }
     /* On a phone the Data button is the row's last line instead of a column */
     .nt-data-inline { display: none; }
-    .pr-data .pr-modal-box { max-width: 920px; border-radius: 12px; padding: 20px 24px; max-height: 92vh; overflow-y: auto; }
+    .pr-data .pr-modal-box { max-width: min(1600px, 96vw); border-radius: 12px; padding: 20px 24px; max-height: 94vh; overflow-y: auto; }
+    .pr-data-grid { grid-template-areas: "ed side" "prev img"; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) !important; }
+    .pr-ed { grid-area: ed; } .pr-side { grid-area: side; } .pr-imgwrap { grid-area: img; } .pr-prevwrap { grid-area: prev; }
+    #pr-t-title { height: auto; min-height: 0; resize: none; overflow: hidden; line-height: 1.4; margin-bottom: 10px; }
+    .pr-rec { font-size: 12px; color: var(--muted); }
+    .pr-cm .pr-console { height: auto; min-height: 0; max-height: 200px; margin: 12px 0 0; display: none; }
+    .pr-cm .pr-console.on { display: block; }
     .pr-data h3 { font-size: 18px; margin-bottom: 10px; }
     .pr-modes { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 14px; }
     .pr-lblrow { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
@@ -220,6 +226,7 @@
     .pr-data .pr-lbl { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
     .pr-tap { display: none; } @media (hover: none), (pointer: coarse) { .pr-tap { display: inline; } .pr-click { display: none; } }
     .pr-data textarea.nt-input { height: 130px; resize: vertical; font-size: 13px; line-height: 1.4; }
+    .pr-data textarea#pr-data-text { min-height: 260px; }
     .pr-data textarea.pr-ro { color: var(--muted); }
     .pr-data-err { color: var(--error); font-size: 12px; margin-top: 6px; }
     .pr-data-err code { font-family: monospace; }
@@ -258,10 +265,12 @@
     .pr-data .pr-buttons .pr-gap { width: 30px; }
     .pr-data .pr-buttons .btn-save { margin-left: 0; }
     @media (max-width: 600px) {
-        .pr-data-grid { grid-template-columns: 1fr; }
-        .pr-data-grid .pr-pickwrap { order: -1; }
+        .pr-data-grid { grid-template-columns: minmax(0, 1fr) !important; grid-template-areas: "side" "ed" "img" "prev"; }
         .pr-pick { max-height: 260px; }
-        .pr-data .pr-modal-box { padding: 16px; }
+        .pr-data .pr-modal-box { padding: 12px 10px; max-width: 100%; }
+        .pr-modal { padding: 6px; }
+        body { padding: 8px; }
+        .card { padding: 10px; }
         .nt-table th.nt-data, .nt-table td.nt-data { display: none; }
         .nt-data-inline { display: block; margin-top: 6px; }
     }
@@ -506,6 +515,11 @@
                 <select class="nt-input" id="nt-camera"></select>
                 <div class="nt-warn" id="nt-camera-warn"></div>
             </div>
+            <div class="nt-field">
+                <label for="nt-tz">Time zone</label>
+                <select class="nt-input" id="nt-tz"></select>
+                <div class="nt-hint">For ETAs. Browser: the one this page was last saved from.</div>
+            </div>
             <div class="nt-field" style="grid-column: 1 / -1">
                 <label for="nt-printer-url">Printer URL for buttons (optional)</label>
                 <div class="nt-fill-wrap">
@@ -598,30 +612,34 @@
     <div class="pr-modal-box">
         <h3 id="pr-data-title"></h3>
         <div class="pr-data-grid">
-            <div>
+            <div class="pr-ed">
                 <div class="pr-lbl">Title</div>
-                <input class="nt-input pr-code" id="pr-t-title" spellcheck="false" autocomplete="off">
-                <div class="pr-lblrow"><div class="pr-lbl">Contents</div><button type="button" class="pr-link" id="pr-cm-link">Install CodeMirror</button></div>
+                <textarea class="nt-input pr-code" id="pr-t-title" rows="1" spellcheck="false" autocomplete="off"></textarea>
+                <div class="pr-lblrow"><div class="pr-lbl">Contents</div><span><span class="pr-rec" id="pr-cm-rec">Recommended: </span><button type="button" class="pr-link" id="pr-cm-link">Install CodeMirror</button></span></div>
                 <textarea class="nt-input" id="pr-data-text" spellcheck="false" autocomplete="off"></textarea>
                 <div id="pr-cm-host"></div>
                 <div class="pr-data-err" id="pr-data-err" style="display:none"></div>
-                <div class="pr-lbl" style="margin-top:10px">Image</div>
-                <div class="pr-imgs" id="pr-imgs"></div>
-                <div class="pr-imgopts" id="pr-imgopts"></div>
-                <div class="pr-lbl">Preview</div>
-                <div class="pr-prev" id="pr-prev"></div>
             </div>
-            <div class="pr-pickwrap">
+            <div class="pr-side">
+                <div class="pr-lbl">Jinja <a href="https://github.com/noon92/pushraker/blob/main/docs/guide.md#templates" target="_blank">Guide</a></div>
                 <div class="pr-jj" id="pr-jj">
-                    <div class="pr-lbl">Jinja <a href="https://github.com/noon92/pushraker/blob/main/docs/guide.md#templates" target="_blank">Guide</a></div>
-                    <button type="button" class="pr-j" data-j="if">if</button><button type="button" class="pr-j" data-j="elif">elif</button><button type="button" class="pr-j" data-j="else">else</button><button type="button" class="pr-j" data-j="for">for each</button><button type="button" class="pr-j" data-j="comment">{# comment #}</button>
+                    <button type="button" class="pr-j" data-j="if">if</button><button type="button" class="pr-j" data-j="elif">elif</button><button type="button" class="pr-j" data-j="else">else</button><button type="button" class="pr-j" data-j="for">for each</button><button type="button" class="pr-j" data-j="set">set</button><button type="button" class="pr-j" data-j="comment">{# comment #}</button>
                     <div class="pr-ops" id="pr-ops" style="display:none">
                         <div class="pr-lbl">Compare</div>
-                        <button type="button" class="pr-j" data-op=" == ">==</button><button type="button" class="pr-j" data-op=" != ">!=</button><button type="button" class="pr-j" data-op=" > ">&gt;</button><button type="button" class="pr-j" data-op=" < ">&lt;</button><button type="button" class="pr-j" data-op=" >= ">&gt;=</button><button type="button" class="pr-j" data-op=" <= ">&lt;=</button><button type="button" class="pr-j" data-op="not ">not</button><button type="button" class="pr-j" data-op=" and ">and</button><button type="button" class="pr-j" data-op=" or ">or</button><button type="button" class="pr-j" data-op='""'>"text"</button>
+                        <button type="button" class="pr-j" data-op=" == ">==</button><button type="button" class="pr-j" data-op=" != ">!=</button><button type="button" class="pr-j" data-op=" > ">&gt;</button><button type="button" class="pr-j" data-op=" < ">&lt;</button><button type="button" class="pr-j" data-op=" >= ">&gt;=</button><button type="button" class="pr-j" data-op=" <= ">&lt;=</button><button type="button" class="pr-j" data-op="not ">not</button><button type="button" class="pr-j" data-op=" and ">and</button><button type="button" class="pr-j" data-op=" or ">or</button><button type="button" class="pr-j" data-op=" in ">in</button><button type="button" class="pr-j" data-op=" is defined">is defined</button><button type="button" class="pr-j" data-op='""'>"string"</button>
                     </div>
                 </div>
                 <div class="pr-lbl">Values</div>
                 <div class="pr-pick" id="pr-pick"><div class="pr-any">Loading the printer's objects…</div></div>
+            </div>
+            <div class="pr-imgwrap">
+                <div class="pr-lbl">Image</div>
+                <div class="pr-imgs" id="pr-imgs"></div>
+                <div class="pr-imgopts" id="pr-imgopts"></div>
+            </div>
+            <div class="pr-prevwrap">
+                <div class="pr-lbl">Preview</div>
+                <div class="pr-prev" id="pr-prev"></div>
             </div>
         </div>
         <div class="pr-buttons">
@@ -647,6 +665,7 @@
         <p class="pr-note">Downloaded from pushraker's release on GitHub and checked against the checksum this pushraker version expects. Upgrading pushraker updates it too. Removable at any time. Safe during a print job.</p>
         <div class="pr-buttons" id="pr-cm-buttons"></div>
         <div class="pr-cm-msg" id="pr-cm-msg"></div>
+        <div class="pr-console" id="pr-cm-log"></div>
     </div>
 </div>
 
@@ -771,7 +790,7 @@
                                complete: ['nt-complete-objects', state.complete_objects] }[meta.id];
             const objects = byObject
                 ? `<span class="nt-sub">Print-by-object mode: <select class="nt-input nt-layer" id="${byObject[0]}">${[['each', 'once per object *'], ['once', 'once per print job']].map(([v, t]) =>
-                    `<option value="${v}"${v === byObject[1] ? ' selected' : ''}>${t}</option>`).join('')}</select>${meta.id === 'complete' ? editButton('object_complete', true, 'Object complete') : ''}</span>`
+                    `<option value="${v}"${v === byObject[1] ? ' selected' : ''}>${t}</option>`).join('')}</select></span>`
                 : '';
             const driver = meta.id === 'driver_hot'
                 ? `<span class="nt-sub">X or Y driver over <input class="nt-input nt-layer nt-deg" id="nt-driver-hot" type="number" min="40" max="150" inputmode="numeric" value="${state.driver_temp}"> °C</span>`
@@ -785,8 +804,8 @@
                 : '';
             const calib = meta.id === 'calibration'
                 ? '<span class="nt-sub">Notifies when complete, failed or requires user intervention</span>'
-                : meta.id === 'started' && state.meta.preprint
-                ? `<span class="nt-sub"><label><input type="checkbox" id="nt-preprint"${state.preprint_done ? ' checked' : ''}> Notify when pre-print calibrations finish</label>${editButton('preprint_done', true)}</span>`
+                : meta.id === 'preprint_done'
+                ? '<span class="nt-sub">The calibrations chosen when the print job started</span>'
                 : meta.id === 'filament_change'
                 ? `<span class="nt-sub"><label style="margin-right:12px"><input type="checkbox" id="nt-fc-loaded"${state.filament_change_events.includes('loaded') ? ' checked' : ''}> Loaded</label><label><input type="checkbox" id="nt-fc-unloaded"${state.filament_change_events.includes('unloaded') ? ' checked' : ''}> Unloaded</label></span>`
                 : meta.id === 'chamber_waiting'
@@ -798,7 +817,7 @@
                 : meta.id === 'slot_empty'
                 ? '<span class="nt-sub">multiACE only: the slot feeding a toolhead ran out; the toolhead prints what is left in the filament path</span>'
                 : meta.id === 'paused'
-                ? `<span class="nt-sub">A pause the print job's file asks for is sent at the highest priority${editButton('file_pause', true)}</span>`
+                ? '<span class="nt-sub">A pause the print job\'s file asks for is sent at the highest priority (set in its template)</span>'
                 : meta.id === 'macro'
                     ? '<span class="nt-sub"><code>RESPOND PREFIX=notify MSG="Title || Message || priority"</code> (priority optional)</span>'
                     : '';
@@ -969,9 +988,11 @@
         const loop = f && f.isContents ? loopAt(f.get(), f.sel()[0]) : null;
         const fields = loop ? loopFields(loop.list) : [];
         if (!loop) { box.innerHTML = ''; return; }
+        const LOOP_INFO = [['loop.index', 'which item, from 1'], ['loop.first', 'the first item'], ['loop.last', 'the last item']];
         box.innerHTML = `<div class="pr-row pr-cat pr-loop"><span class="pr-ar">▾</span>🔁 This loop: <code>${esc(loop.name)}</code> <small>each of ${esc(loop.list)}</small></div>` +
             (fields.length ? fields.map(k => `<div class="pr-row pr-leaf" style="padding-left:26px" data-loop="${esc(loop.name + '.' + k)}"><span class="pr-ar"></span><code>${esc(k)}</code></div>`).join('')
-                : `<div class="pr-row" style="padding-left:26px"><code>${esc(loop.name)}</code></div>`);
+                : `<div class="pr-row pr-leaf" style="padding-left:26px" data-loop="${esc(loop.name)}"><span class="pr-ar"></span><code>${esc(loop.name)}</code></div>`) +
+            LOOP_INFO.map(([k, h]) => `<div class="pr-row pr-leaf" style="padding-left:26px" data-loop="${k}"><span class="pr-ar"></span><code>${k}</code> <small>${h}</small></div>`).join('');
         box.querySelectorAll('[data-loop]').forEach(r => { r.onclick = () => insertValue(r.dataset.loop, ''); });
     }
     function renderPicker(cats) {
@@ -1139,6 +1160,7 @@
             elif: ls ? ['{% elif  %}\n', 8] : ['{% elif  %}', 8],
             else: ls ? ['{% else %}\n', 11] : ['{% else %}', 10],
             for: ls ? ['{% for item in  %}\n{% endfor %}', 15] : ['{% for item in  %}{% endfor %}', 15],
+            set: ['{% set  =  %}', 7],
             comment: ['{#  #}', 3]
         }[kind];
         insertText(blocks[0], blocks[1], 0);
@@ -1161,8 +1183,14 @@
     let editing = null;      // { key, title, contents, image, camera, remaining }
     let previewTimer = null, previewSeq = 0, previewError = null;
     const imgCache = {};
+    function growTitle() {
+        const t = el('pr-t-title');
+        t.style.height = 'auto';
+        t.style.height = (t.scrollHeight + 2) + 'px';
+    }
     function editorChanged() {
         if (!editing) return;
+        growTitle();
         editing.title = el('pr-t-title').value;
         editing.contents = field('contents').get();
         updateJinjaPane();
@@ -1278,7 +1306,7 @@
         return new Promise(resolve => {
             const box = el('pr-reset'), yes = el('pr-reset-yes'), no = el('pr-reset-no');
             el('pr-reset-text').textContent = text;
-            let left = 5, timer = null;
+            let left = 3, timer = null;
             const tick = () => {
                 yes.disabled = left > 0;
                 yes.textContent = left > 0 ? `Reset (${left})` : 'Reset';
@@ -1319,6 +1347,7 @@
         try { cmStatus = await api('/server/pushraker/codemirror'); } catch (e) { cmStatus = null; }
         el('pr-cm-link').textContent = cmStatus && cmStatus.installed ? 'Manage CodeMirror' : 'Install CodeMirror';
         el('pr-cm-link').style.display = cmStatus ? '' : 'none';
+        el('pr-cm-rec').style.display = cmStatus && !cmStatus.installed ? '' : 'none';
         return cmStatus;
     }
     async function cmLoad() {
@@ -1400,14 +1429,19 @@
             ? '<button type="button" class="btn btn-secondary" id="pr-cm-update">Check for updates</button><button type="button" class="btn btn-remove" id="pr-cm-remove">Remove</button><button type="button" class="btn btn-secondary" id="pr-cm-close">Close</button>'
             : '<button type="button" class="btn btn-save" id="pr-cm-install">Install</button><button type="button" class="btn btn-secondary" id="pr-cm-close">Close</button>';
         const msg = (text, err) => { el('pr-cm-msg').textContent = text; el('pr-cm-msg').classList.toggle('err', !!err); };
+        const log = el('pr-cm-log');
         const run = async (action, busy) => {
             el('pr-cm-buttons').querySelectorAll('button').forEach(b => { b.disabled = true; });
             msg(busy);
+            log.classList.add('on');
+            log.innerHTML = `<div>${esc(busy)}</div>`;
             let r = null;
             try { r = await api('/server/pushraker/codemirror', 'POST', { action }); } catch (e) { r = { error: e.message }; }
+            log.innerHTML = ((r && r.log) || []).map(l => `<div>${esc(l)}</div>`).join('') +
+                (r && r.error ? `<div class="err">Error: ${esc(r.error)}</div>` : '<div class="ok">Done.</div>');
             await cmRefresh();
             cmDialog();
-            if (r && r.error) { msg(r.error, true); return; }
+            if (r && r.error) { msg('Failed: see below.', true); return; }
             if (action === 'remove') { unmountEditor(); msg('Removed.'); }
             else if (action === 'install') { if (editing) { await mountEditor(); field('contents').set(editing.contents); } msg('Installed.'); }
             else msg(r && r.up_to_date ? 'Up to date.' : 'Updated.');
@@ -1418,7 +1452,12 @@
         if (el('pr-cm-remove')) el('pr-cm-remove').onclick = () => run('remove', 'Removing…');
         el('pr-cm').classList.add('open');
     }
-    el('pr-cm-link').onclick = async () => { await cmRefresh(); el('pr-cm-msg').textContent = ''; cmDialog(); };
+    el('pr-cm-link').onclick = async () => {
+        await cmRefresh();
+        el('pr-cm-msg').textContent = '';
+        el('pr-cm-log').classList.remove('on');
+        cmDialog();
+    };
     el('pr-cm').onclick = e => { if (e.target === el('pr-cm')) el('pr-cm').classList.remove('open'); };
 
     // A row is dimmed where it sends nothing: priority without push, image
@@ -1646,6 +1685,18 @@
 
     // The cameras are Moonraker's webcams; one with no snapshot URL can't
     // give pictures
+    const BROWSER_TZ = (() => {
+        try { return (Intl.DateTimeFormat().resolvedOptions().timeZone || '').replace(/[^A-Za-z0-9_+\-\/]/g, ''); } catch (e) { return ''; }
+    })();
+    function renderTimezones() {
+        let zones = [];
+        try { zones = Intl.supportedValuesOf('timeZone'); } catch (e) { zones = []; }
+        const cur = state.timezone && state.timezone !== 'browser' ? state.timezone : '';
+        if (cur && !zones.includes(cur)) zones = [cur].concat(zones);
+        el('nt-tz').innerHTML = `<option value="browser">Browser (${esc(BROWSER_TZ || 'unknown')})</option>` +
+            zones.map(z => `<option value="${esc(z)}">${esc(z)}</option>`).join('');
+        el('nt-tz').value = cur || 'browser';
+    }
     function renderCameras() {
         const cams = state.meta.cameras || {};
         const names = Object.keys(cams);
@@ -1729,6 +1780,7 @@
         cmRefresh();
         renderTimeMethods();
         renderCameras();
+        renderTimezones();
         renderRows();
         updateProvider();
         updateEmail();
@@ -1903,7 +1955,6 @@
             filament_low_percent: parseInt(el('nt-fl-percent').value, 10) || 0,
             filament_low_grams: parseInt(el('nt-fl-grams').value, 10) || 0,
             filament_unknown: el('nt-fl-unknown').checked,
-            preprint_done: el('nt-preprint') ? el('nt-preprint').checked : !!state.preprint_done,
             time_left: timeMethod(),
             progress_marks: (state.meta.progress_marks || [25, 50, 75]).filter(m => el('nt-pm-' + m) && el('nt-pm-' + m).checked).join(','),
             email_enabled: emailEnabled,
@@ -1915,7 +1966,8 @@
             email_to: el('nt-email-to').value.trim(),
             webhook_enabled: webhookEnabled,
             // The printer's clock may be UTC: ETAs are shown in this browser's time zone
-            timezone: (Intl.DateTimeFormat().resolvedOptions().timeZone || '').replace(/[^A-Za-z0-9_+\-\/]/g, ''),
+            timezone: el('nt-tz').value || 'browser',
+            browser_timezone: BROWSER_TZ,
             rows, templates
         };
         if (secret) payload.secret = secret;

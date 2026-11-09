@@ -1,1 +1,6 @@
+{# Printing by object: each object as it finishes, then the print job #}
+{% if event.object %}
+📦 {{ machine.name }} object complete
+{% else %}
 ✅ {{ machine.name }} complete
+{% endif %}

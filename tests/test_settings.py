@@ -97,33 +97,50 @@ def run_settings_tests():
           opts["started"].startswith("render, ntfys://ntfy.example.com/u1"),
           opts.get("started"))
     pp = st.Env(cameras=ENV.cameras, preprint=True)
-    check("pre-print calibrations complete: Print started's destination, "
-          "on printers that have them, while its checkbox is on",
+    check("pre-print calibrations finished: a row of its own, on "
+          "printers that have them",
           "preprint_done" not in opts
           and st.render_options(s, pp).get("preprint_done", "").startswith(
               "render, ntfys://ntfy.example.com/u1")
-          and "preprint_done" not in st.render_options(
-              dict(s, preprint_done=False), pp))
+          and "preprint_done" not in st.render_options(dict(s, rows=dict(
+              s["rows"], preprint_done=dict(s["rows"]["preprint_done"],
+                                            enabled=False))), pp))
+    m = st.parse_section({"started": "on, high, email",
+                          "preprint_done": "true",
+                          "timezone": "Asia/Jerusalem"}, st.defaults("U1"))
+    check("before its row: preprint_done: true takes Print started's "
+          "settings; the saved time zone was the browser's",
+          m["rows"]["preprint_done"] == dict(enabled=True, priority="high",
+                                             email=True)
+          and m["timezone"] == "browser"
+          and m["browser_timezone"] == "Asia/Jerusalem"
+          and st.time_zone(m) == "Asia/Jerusalem",
+          (m["rows"]["preprint_done"], m["timezone"], m["browser_timezone"]))
+    m = st.parse_section({"preprint_done": "false"}, st.defaults("U1"))
+    check("...and false turns it off",
+          not m["rows"]["preprint_done"]["enabled"]
+          and not m["rows"]["preprint_done"]["email"])
+    m = st.parse_section({"timezone": "Europe/London",
+                          "browser_timezone": "Asia/Jerusalem"},
+                         st.defaults("U1"))
+    check("a time zone of its own wins over the browser's",
+          st.time_zone(m) == "Europe/London")
     comp = open(os.path.join(HERE, "..", "src", "pushraker",
                              "component.py")).read()
     known = set(re.findall(r'(?:get|num)\(\s*"(\w+)"', comp))
     rows = {k for k in opts if k.split("_email")[0].split("_webhook")[0]
-            in st.ROW_IDS + [st.OBJECT_ROW, st.FILE_PAUSE_ROW]
-            or k.startswith("macro_")}
+            in st.ROW_IDS or k.startswith("macro_") or "@" in k}
     check("every option is one the component reads",
           set(opts) - rows <= known, sorted(set(opts) - rows - known))
-    check("a file's pause: the Paused row's destinations at priority max",
+    check("a template may set its own priority: the row's push address at "
+          "each other priority",
           opts["paused"].startswith("snapshot, ntfys://")
-          and opts["file_pause"].startswith("snapshot, ntfys://")
-          and "priority=max" in opts["file_pause"], opts.get("file_pause"))
-    check("print-by-object: object complete follows the Print complete row",
-          opts["object_complete"].startswith("snapshot, ntfys://")
-          and opts["first_layer_objects"] == "each"
-          and "complete_objects" not in opts)
-    s["complete_objects"] = "once"
-    check("or is left out when complete is once per print job",
-          "object_complete" not in st.render_options(s, ENV))
-    s["complete_objects"] = "each"
+          and "priority=max" in opts["paused@max"]
+          and "paused@default" not in opts and "paused_email@max" not in opts,
+          sorted(k for k in opts if k.startswith("paused")))
+    check("print-by-object goes to the component",
+          opts["complete_objects"] == "each"
+          and opts["first_layer_objects"] == "each")
     check("the error index link comes from the environment (the harness)",
           "Error%20Index" in opts["error"] and "wiki.example.com" in opts["error"]
           and "Error%20Index" not in st.render_options(

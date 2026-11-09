@@ -341,15 +341,31 @@ def check(text: str) -> Optional[str]:
 
 def render(text: str, context: Dict[str, Any]) -> str:
     """The template's text. Raises TemplateError on a mistake."""
+    return render_vars(text, context)[0]
+
+
+def render_vars(text: str, context: Dict[str, Any]
+                ) -> Tuple[str, Dict[str, Any]]:
+    """The template's text, and the variables it set at its top level
+    ({% set priority = "max" %}, also inside an if). Raises TemplateError
+    on a mistake."""
     tpl = compile_template(text)
+    ctx = tpl.new_context(dict(context))
     try:
         out: List[str] = []
         size = 0
-        for piece in tpl.generate(**context):
-            out.append(piece)
-            size += len(piece)
-            if size > MAX_OUTPUT:
-                raise TemplateError(f"longer than {MAX_OUTPUT} characters")
+        try:
+            for piece in tpl.root_render_func(ctx):
+                out.append(piece)
+                size += len(piece)
+                if size > MAX_OUTPUT:
+                    raise TemplateError(
+                        f"longer than {MAX_OUTPUT} characters")
+        except TemplateError:
+            raise
+        except Exception:
+            # Jinja's own: the error as raised at the template's line
+            tpl.environment.handle_exception()
         text = "".join(out)
     except TemplateError:
         raise
@@ -359,7 +375,8 @@ def render(text: str, context: Dict[str, Any]) -> str:
     except Exception as e:
         line = _error_line(e)
         raise TemplateError(f"{line}{type(e).__name__}: {e}") from None
-    return text.strip("\n")
+    return text.strip("\n"), {k: ctx.vars[k] for k in ctx.exported_vars
+                               if k in ctx.vars}
 
 
 def _error_line(e: BaseException) -> str:

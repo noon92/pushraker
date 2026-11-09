@@ -21,13 +21,13 @@ server), and/or to a webhook for home automation.
 | Notification | Image | Notes |
 |---|---|---|
 | ▶️ Print started | Model preview | The slicer thumbnail, and the slicer's estimated print time and ETA. With Moonraker's job queue in use: "Print 1/N remaining in queue", counting this one, and their total time. When the file has pauses in it (Orca's *add pause* and *change filament*, or a `PAUSE`, `M601`, `M226`, `M0`, `M1` or `M600` typed in): "⏸️ Print job contains 3 pauses (layers 12, 40 and 55)." With pre-print calibrations chosen when the print job started (Snapmaker U1: bed levelling, extrusion flow calibration): "📐 Pre-print calibrations selected: ..." |
-| 📐 Pre-print calibrations complete | Model preview | A checkbox under *Print started* (on by default, same settings): when the chosen pre-print calibrations are done, before the park, heat-up and priming line. Only on printers that have them |
-| ⏸️ Print paused / ▶️ Print resumed | Camera | Resumed includes time left and ETA. A pause the file itself asks for comes as "👋 … paused by the print job" instead, with its number, layer and any message the slicer put with it ("Pause 2 of 3 at layer 40, as planned in the print job. \"Insert magnet now\"") — the file wants something from you, like a normal pause doesn't, so it goes out at the highest priority whatever the row is set to. Told apart by where in the file the print job stopped |
+| 📐 Pre-print calibrations finished | Model preview | When the chosen pre-print calibrations are done, before the park, heat-up and priming line. Only on printers that have them |
+| ⏸️ Print paused / ▶️ Print resumed | Camera | Resumed includes time left and ETA. A pause the file itself asks for comes as "👋 … paused by the print job" instead, with its number, layer and any message the slicer put with it ("Pause 2 of 3 at layer 40, as planned in the print job. \"Insert magnet now\"") — the file wants something from you, like a normal pause doesn't, so its template sets the highest priority (`event.planned`; see [Priority](#priority)). Told apart by where in the file the print job stopped |
 | 🎬 First layer started | Camera | Off by default. When the first layer begins, after the start routine (homing, bed mesh, flow calibration can take a while): time to watch it go down. With time left and ETA |
 | 🔍 1st / 2nd / 3rd layer complete | Camera | Choose after which layer (default: 2nd). With time left and ETA. When printing by object (Orca's *print sequence: by object*), once per object, counted from the object's own first layer, or once per print job |
 | ⏳ Progress | Camera | Off by default. At 25, 50 and/or 75 % (checkboxes under the row), the same percentage as Fluidd and the Snapmaker app, with time left and ETA |
 | ⏱️ Status report | Camera | Off by default. Every N minutes of print time (5 to 720, default 30; a pause stops the clock), the first one an interval after the start: progress, layer ("42% complete, layer 120 of 285."), time left and ETA, with the picture |
-| ✅ Print complete | Camera | Includes print time, and the prints still in the job queue with their total time. When printing by object: once per object as each one finishes and the next begins ("📦 object complete", with which object, e.g. "Object 2 of 3: Assembly", and time left; the last object's is the Print complete notification itself), or once per print job |
+| ✅ Print complete | Camera | Includes print time, and the prints still in the job queue with their total time. When printing by object: once per object as each one finishes and the next begins ("📦 object complete", with which object, e.g. "Object 2 of 3: Assembly", and time left; the last object's is the Print complete notification itself; `event.object` in the template), or once per print job |
 | 🚫 Print cancelled | Camera | |
 | 📐 Manual calibrations | Camera | Calibrations started from the touchscreen (bed levelling, XYZ offset, flow, input shaper): "📐 … Bed levelling complete" when one finishes (or hands over to the next queued one), "📐 … failed" when the printer drops into its abnormal state instead, and "👋 … user intervention needed" when one reaches a step that waits for you (brush the nozzle of Toolhead N; the screen waiting for a tap: nothing running in Klipper for more than 15 s). Not for the bed mesh inside a print job's start routine |
 | 📣 From macros and G-code | Camera | Sent by any macro or G-code line: `RESPOND PREFIX=notify MSG="<title> \|\| <message> \|\| <priority>"` (see [Notifications from macros](#notifications-from-macros-and-g-code)) |
@@ -53,8 +53,9 @@ errors by push and email. By default, faults and power loss are also emailed.
 - **Time left and ETA**: Calculated like Fluidd's default estimate (print
   time so far, divided by file progress). This also holds after a
   power-loss recovery, which keeps the print time and progress of the
-  interrupted print. ETAs are shown in the time zone of the browser you last
-  saved the settings from, since the printer's clock runs on UTC.
+  interrupted print. The printer's clock runs on UTC, so ETAs use the **Time zone**
+  setting: **Browser** (the time zone of the browser the page was last saved
+  from) or one you pick.
 - **Error codes**: Error, warning and shutdown notifications include the
   Snapmaker error code in the same format the printer uses
   (`level-module-index-code`, e.g. `0002-0532-0000-0001: detected dirty bed`)
@@ -333,6 +334,7 @@ Bed {{ printer.heater_bed.temperature|round|int }}°C, cavity {{ printer["temper
 ```
 
 - `{{ … }}` prints a value, `{% … %}` is logic, `{# … #}` a comment.
+- The title can span lines (an `if` around it); it's sent as one line.
 - A line holding only tags and comments leaves nothing behind (no empty
   line); blank lines you type stay.
 - A value that isn't available reads `n/a` and counts as false:
@@ -357,6 +359,21 @@ Bed {{ printer.heater_bed.temperature|round|int }}°C, cavity {{ printer["temper
 
 Numbers start at 1: `job.filament1` is the slicer's first filament,
 `job.queue.job1` the next print job in the queue.
+
+### Priority
+
+The row's priority is the default. A template can set its own, for that
+one notification, with `set` (`min`, `low`, `default`, `high`, `max`), in
+the title or the contents, outside any `for` loop:
+
+```jinja
+{% if event.planned %}
+{% set priority = "max" %}
+{% endif %}
+```
+
+Print paused's default template does exactly that for pauses written into
+the print job's file.
 
 ### Filters
 
@@ -462,8 +479,8 @@ the tree lists what each one has. For example:
 | Error, Warning, Klipper shutdown | `event.kind`, `event.file`, `event.fault.code` `.title` `.details` `.message` `.text` |
 | Print cancelled | `event.kind`, `event.file`, `event.fault` (when a fault caused it) |
 | Layer complete, Progress | `event.layer`, `event.progress` |
-| Object complete | `event.object.name` `.number` `.count` |
-| Paused by the print job | `event.pause.number` `.layer` `.kind` `.message` |
+| Print complete | `event.object.name` `.number` `.count`: an object finished (printing by object); none for the print job |
+| Print paused | `event.planned` (a pause written into the file), `event.pause.number` `.layer` `.kind` `.message` |
 | From macros and G-code | `event.title` `event.message` `event.priority` |
 | Manual calibrations | `event.calibration.name` `.result` `.next` |
 | Driver running hot | `event.limit`, `event.drivers` (each: `name`, `temperature`, `hot`) |

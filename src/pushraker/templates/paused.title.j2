@@ -1,1 +1,6 @@
+{# A pause written into the print job's file, or any other pause #}
+{% if event.planned %}
+👋 {{ machine.name }} paused by the print job
+{% else %}
 ⏸️ {{ machine.name }} paused
+{% endif %}

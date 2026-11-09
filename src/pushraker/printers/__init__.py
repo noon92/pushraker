@@ -66,7 +66,8 @@ class Printer:
     # coded warnings
     rows_unavailable: Sequence[str] = ("calibration", "filament_change",
                                        "spool_switch", "slot_empty",
-                                       "power_loss", "warning")
+                                       "power_loss", "warning",
+                                       "preprint_done")
     # Notification data (templating.py): objects of this printer's own
     # that the picker shouldn't list (typed tokens still work), beyond
     # Klipper's internals
