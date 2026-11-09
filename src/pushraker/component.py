@@ -52,6 +52,7 @@ import datetime
 import html
 import http
 import inspect
+import hashlib
 import json
 import logging
 import os
@@ -543,6 +544,22 @@ def fault_key(ex: Dict[str, Any]) -> FaultKey:
 
 TEMPLATE_TIMEOUT = 2.       # seconds a template may take to render
 
+# CodeMirror for the template editor, installed on request: the build in
+# this version's codemirror/ folder on GitHub (codemirror/build.sh),
+# checked against this checksum. Upgrading pushraker updates it.
+CODEMIRROR = {
+    "version": "6.36.8",
+    "file": "pushraker-codemirror.js",
+    "sha256": "dc239946479e8a3d28ee9cb914e4c0d2f7ae77f501414a232cdaa373795aad45",
+    "size": 327508,
+    "url": "https://raw.githubusercontent.com/noon92/pushraker/v{version}/"
+           "codemirror/{file}",
+    "licence_url": "https://raw.githubusercontent.com/noon92/pushraker/"
+                   "v{version}/codemirror/LICENSE.txt",
+    "project": "https://codemirror.net/",
+}
+CODEMIRROR_TIMEOUT = 60.
+
 # The preview's render: the sample print job (four 3DBenchy, public
 # domain since 2025, drawn from the official model)
 SAMPLE_RENDER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -765,6 +782,8 @@ class PushNotifications:
         config_dir = os.path.dirname(app_args.get("config_file") or "") \
             or os.path.join(data_path, "config")
         self._low_path = os.path.join(data_path, ".pushraker.json")
+        # CodeMirror, when installed: <data>/pushraker/codemirror/
+        self._cm_dir = os.path.join(data_path, "pushraker", "codemirror")
         # 0.1 kept it under this name; moved on first read
         self._old_low_path = os.path.join(data_path, ".push_notifications.json")
         # Where the settings come from: pushraker.conf (the page edits it,
@@ -819,6 +838,8 @@ class PushNotifications:
                         ("preview", ["POST"], self._ep_preview),
                         ("preview_image", ["POST"],
                          self._ep_preview_image),
+                        ("codemirror", ["GET", "POST"], self._ep_codemirror),
+                        ("codemirror_js", ["GET"], self._ep_codemirror_js),
                         ("status", ["GET"], self._ep_status)):
                     try:
                         self.server.register_endpoint(
@@ -827,6 +848,7 @@ class PushNotifications:
                         logging.error("[pushraker] endpoint "
                                       "%s/%s: %s", base, path, e)
             self._spawn(self._watch_settings())
+            self._spawn(self._cm_follow())
             self._retire()
 
     async def close(self) -> None:
@@ -2421,6 +2443,117 @@ class PushNotifications:
             return "ink"
         return "orange" if remaining <= self._low_threshold(full) \
             else "green"
+
+    # ---- CodeMirror ----------------------------------------------------
+
+    def _cm_paths(self) -> Tuple[str, str]:
+        return (os.path.join(self._cm_dir, CODEMIRROR["file"]),
+                os.path.join(self._cm_dir, "installed.json"))
+
+    def _cm_installed(self) -> Optional[Dict[str, Any]]:
+        js, info = self._cm_paths()
+        try:
+            with open(info) as f:
+                meta = json.load(f)
+            if os.path.isfile(js):
+                return meta
+        except Exception:
+            pass
+        return None
+
+    def _cm_status(self) -> Dict[str, Any]:
+        meta = self._cm_installed()
+        try:
+            du = shutil.disk_usage(os.path.dirname(self._cm_dir)
+                                   if os.path.isdir(os.path.dirname(
+                                       self._cm_dir))
+                                   else os.path.dirname(os.path.dirname(
+                                       self._cm_dir)))
+            free, total = du.free, du.total
+        except Exception:
+            free = total = None
+        fmt = {"version": __version__, "file": CODEMIRROR["file"]}
+        return {"installed": meta is not None,
+                "installed_version": (meta or {}).get("version"),
+                "up_to_date": bool(meta) and meta.get("sha256")
+                == CODEMIRROR["sha256"],
+                "version": CODEMIRROR["version"], "size": CODEMIRROR["size"],
+                "free": free, "total": total,
+                "licence": "MIT",
+                "licence_url": CODEMIRROR["licence_url"].format(**fmt),
+                "project": CODEMIRROR["project"],
+                "pushraker": __version__}
+
+    def _cm_download_sync(self) -> None:
+        """Download this pushraker version's build, check it, put it in
+        place (a failed download leaves what was there)."""
+        url = CODEMIRROR["url"].format(version=__version__,
+                                       file=CODEMIRROR["file"])
+        try:
+            with urllib.request.urlopen(
+                    url, timeout=CODEMIRROR_TIMEOUT) as resp:
+                data = resp.read(CODEMIRROR["size"] * 2 + 1)
+        except Exception as e:
+            raise RuntimeError(f"Download failed ({url}): {e}") from None
+        if hashlib.sha256(data).hexdigest() != CODEMIRROR["sha256"]:
+            raise RuntimeError("The download doesn't match the checksum "
+                               "this pushraker version expects; not "
+                               "installed.")
+        js, info = self._cm_paths()
+        os.makedirs(self._cm_dir, exist_ok=True)
+        tmp = js + ".part"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, js)
+        with open(info, "w") as f:
+            json.dump({"version": CODEMIRROR["version"],
+                       "sha256": CODEMIRROR["sha256"],
+                       "pushraker": __version__}, f)
+
+    async def _cm_follow(self) -> None:
+        """After an upgrade: an installed CodeMirror that isn't the build
+        this version expects is updated."""
+        meta = self._cm_installed()
+        if meta and meta.get("sha256") != CODEMIRROR["sha256"]:
+            try:
+                await self.eventloop.run_in_thread(self._cm_download_sync)
+                logging.info("[pushraker] CodeMirror updated to %s",
+                             CODEMIRROR["version"])
+            except Exception as e:
+                logging.warning("[pushraker] CodeMirror update: %s", e)
+
+    async def _ep_codemirror(self, web_request: Any) -> Dict[str, Any]:
+        """GET: whether CodeMirror is installed, its size, the printer's
+        free space. POST action=install|update|remove."""
+        args = dict(web_request.get_args())
+        action = str(args.get("action") or "")
+        if web_request.get_action() == "POST" or action:
+            try:
+                if action in ("install", "update"):
+                    if action == "install" or not self._cm_status()[
+                            "up_to_date"]:
+                        await self.eventloop.run_in_thread(
+                            self._cm_download_sync)
+                elif action == "remove":
+                    shutil.rmtree(self._cm_dir, ignore_errors=True)
+                else:
+                    raise RuntimeError("Unknown action")
+            except Exception as e:
+                out = self._cm_status()
+                out["error"] = str(e)
+                return out
+        return self._cm_status()
+
+    async def _ep_codemirror_js(self, web_request: Any) -> Dict[str, Any]:
+        """The installed CodeMirror, for the page to load (None when it
+        isn't installed)."""
+        js, _info = self._cm_paths()
+        if not self._cm_installed():
+            return {"js": None}
+        def read() -> str:
+            with open(js, encoding="utf-8") as f:
+                return f.read()
+        return {"js": await self.eventloop.run_in_thread(read)}
 
     async def _ep_preview_image(self, web_request: Any) -> Dict[str, Any]:
         """The editor's image: what a notification would send (the

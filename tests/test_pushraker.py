@@ -1260,7 +1260,8 @@ async def test_file_mode():
           set(server.endpoints) == {f"/server/{b}/{p}" for b in (
               "pushraker", "push_notifications")
               for p in ("config", "test", "objects", "preview",
-                        "preview_image", "status")}
+                        "preview_image", "codemirror", "codemirror_js",
+                        "status")}
           and c.rows == {} and c.store is not None)
     STATE["print_stats"] = ps("standby")
     await server.handlers["server:klippy_ready"]()
@@ -2727,6 +2728,78 @@ async def test_templates_sending():
           and rows[0]["remaining"] == 12., plain)
 
 
+async def test_codemirror():
+    """CodeMirror: installed from this version's build (checksum checked),
+    served to the page, updated after an upgrade, removed."""
+    print("CodeMirror")
+    reset_world()
+    server, c = make({}, {"paused": [("ntfy", FakeService([], "ntfy"),
+                                      False)]})
+    c._cm_dir = os.path.join(WORK, "data", "pushraker", "codemirror")
+    shutil.rmtree(c._cm_dir, ignore_errors=True)
+    bundle = open(os.path.join(HERE, "..", "codemirror",
+                               "pushraker-codemirror.js"), "rb").read()
+    asked = []
+
+    class Resp:
+        def __init__(self, data):
+            self.data = data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, n=-1):
+            return self.data
+    served = {"data": bundle}
+
+    def fake_urlopen(url, timeout=None):
+        asked.append(url)
+        return Resp(served["data"])
+    real = pn.urllib.request.urlopen
+    pn.urllib.request.urlopen = fake_urlopen
+    try:
+        st = await c._ep_codemirror(WebRequest("GET"))
+        check("not installed: its size, the printer's free and total space",
+              not st["installed"] and st["size"] == pn.CODEMIRROR["size"]
+              and st["free"] and st["total"] and st["licence"] == "MIT", st)
+        js = await c._ep_codemirror_js(WebRequest("GET"))
+        check("...and nothing to load", js["js"] is None)
+        st = await c._ep_codemirror(WebRequest("POST", {"action":
+                                                        "install"}))
+        check("installed from this version's build on GitHub",
+              st["installed"] and st["up_to_date"] and not st.get("error")
+              and asked[-1] == "https://raw.githubusercontent.com/noon92/"
+              f"pushraker/v{pn.__version__}/codemirror/"
+              "pushraker-codemirror.js", (st, asked))
+        js = await c._ep_codemirror_js(WebRequest("GET"))
+        check("the page loads it", js["js"] and "PushrakerCM" in js["js"])
+        # An upgrade: the installed build isn't the one expected
+        info = os.path.join(c._cm_dir, "installed.json")
+        with open(info, "w") as f:
+            json.dump({"version": "6.0.0", "sha256": "old"}, f)
+        await c._cm_follow()
+        st = await c._ep_codemirror(WebRequest("GET"))
+        check("after an upgrade it's updated", st["up_to_date"], st)
+        served["data"] = b"tampered" + bundle
+        with open(info, "w") as f:
+            json.dump({"version": "6.0.0", "sha256": "old"}, f)
+        st = await c._ep_codemirror(WebRequest("POST", {"action":
+                                                        "update"}))
+        check("a download that doesn't match the checksum isn't installed",
+              "checksum" in (st.get("error") or "") and not st["up_to_date"]
+              and "PushrakerCM" in open(os.path.join(
+                  c._cm_dir, "pushraker-codemirror.js")).read(), st)
+        st = await c._ep_codemirror(WebRequest("POST", {"action":
+                                                        "remove"}))
+        check("removed", not st["installed"]
+              and not os.path.exists(c._cm_dir), st)
+    finally:
+        pn.urllib.request.urlopen = real
+
+
 async def test_data():
     """Notification data: {object.field|fmt} tokens from Klipper, job.*
     from pushraker, per-filament slicer settings, n/a for what's missing,
@@ -3046,7 +3119,8 @@ async def run_component_tests():
               test_driver_hot,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
-              test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_data):
+              test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_codemirror,
+              test_data):
         try:
             await t()
         except Exception as e:  # report and carry on
