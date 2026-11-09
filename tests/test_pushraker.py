@@ -2385,6 +2385,39 @@ async def test_old_names():
           and os.path.exists(os.path.join(data, ".pushraker.json")), got)
 
 
+async def test_two_fixes():
+    # A shutdown while idle: print_stats still holds the last file's name,
+    # but no print job was interrupted, so it isn't named
+    reset_world()
+    log = []
+    server, c = make({}, {"shutdown": [("ntfy", FakeService(log, "ntfy"),
+                                        False)]})
+    STATE["print_stats"] = ps("complete", filename="Old_job.gcode")
+    STATE["webhooks"] = {"state": "shutdown",
+                         "state_message": "MCU 'mcu' shutdown: Timer too close"}
+    await c._handle_shutdown()
+    body = log[0]["body"] if log else ""
+    check("shutdown while idle doesn't name the last print job's file",
+          log and "Old_job" not in body and "Timer too close" in body, log)
+    log.clear()
+    STATE["print_stats"] = ps("printing", filename="Live_job.gcode")
+    c._last_fault_send = 0.
+    await c._handle_shutdown()
+    body = log[0]["body"] if log else ""
+    check("...and does while printing", "Live_job" in body, body)
+    STATE.pop("webhooks", None)
+    # Spool running low with a multiACE slot as the backup: named as the
+    # slot (Quad Replenish), as Not enough filament does
+    it = dict(ch=0, name="X PLA", sid=10, rem=40., full=1000., need=0.,
+              refill_on=False, exact=True, blockers=[],
+              backups=[dict(ace=(0, 1), ch=0, name="X PLA")])
+    text = c._low_text(it, None)
+    check("spool running low: a multiACE backup is its ACE slot",
+          "Quad Replenish is on: ACE 1 slot 2 (X PLA), is an exact match."
+          in text and "Toolhead 1 (X PLA)" not in text.split("\n", 1)[1],
+          text)
+
+
 async def test_data():
     """Notification data: {object.field|fmt} tokens from Klipper, job.*
     from pushraker, per-filament slicer settings, n/a for what's missing,
@@ -2636,7 +2669,7 @@ async def run_component_tests():
               test_driver_hot,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
-              test_data):
+              test_two_fixes, test_data):
         try:
             await t()
         except Exception as e:  # report and carry on

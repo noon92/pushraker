@@ -3422,7 +3422,7 @@ class PushNotifications:
         msg = msg.splitlines()[0] if msg else "Klipper shutdown"
         # print_stats keeps the last file name after the job: name it only
         # if the shutdown interrupted it
-        filename = ps.get("filename") or "" \
+        filename = (ps.get("filename") or "") \
             if ps.get("state") in ("printing", "paused") else ""
         self._last_fault_send = time.monotonic()
         await self._send("shutdown", self._title("shutdown"),
@@ -4429,19 +4429,23 @@ class PushNotifications:
         lines = [f"{self._desc(it['ch'], it['name'], it['sid'], cap)}: "
                  f"{left}.",
                  self._low_need_line(it) if it["need"] else ""]
-        if it["refill_on"] and it["backups"]:
-            for b in it["backups"]:
-                lines.append(
-                    f"Refill is on: "
-                    f"{self._desc(b['ch'], b['name'], b['sid'], cap)}"
-                    + (f", {b['rem']:.0f} g left" if b["rem"] > 0
-                       else ", amount left unknown")
-                    + f", is {self._match_text(b)}.")
-        elif it["refill_on"]:
+        for b in it["backups"]:
+            if b.get("ace"):
+                lines.append(f"Quad Replenish is on: "
+                             f"{self._bdesc(b, cap)}, is an exact match.")
+                continue
+            lines.append(
+                f"Refill is on: {self._bdesc(b, cap)}"
+                + (f", {b['rem']:.0f} g left" if b["rem"] > 0
+                   else ", amount left unknown")
+                + f", is {self._match_text(b)}.")
+        if not it["backups"] and it["refill_on"]:
             lines.append("Refill is on. " + (
                 "No exact match spool for refill found on printer."
                 if it["exact"] else
                 "No compatible spool for refill found on printer."))
+        if not it["backups"]:
+            lines.extend(self._ace_none_lines(it["ch"]))
         lines.extend(self._blocker_lines(it))
         return self._lines(*lines)
 
