@@ -1398,11 +1398,11 @@
         } else if (provider === 'ntfy') {
             el('pr-topic-lbl').textContent = 'Topic';
             input.placeholder = `${el('nt-topic').value || 'printer'} (default)`;
-            info.dataset.info = 'Sends this notification to another topic on the same ntfy server. Leave empty for the default topic.' + set;
+            info.dataset.info = 'Sends this notification to another topic on the same ntfy server. Leave empty for default.' + set;
         } else {
             el('pr-topic-lbl').textContent = 'Topic ID';
             input.placeholder = 'the chat (default)';
-            info.dataset.info = 'Sends this notification to a topic of the chat, by its ID (a number). Only in groups with topics turned on (forum-style groups). Leave empty for the default (the chat itself).' + set;
+            info.dataset.info = 'Sends this notification to a topic of the chat, by its ID (a number). Only in groups with topics turned on (forum-style groups). Leave empty for default (the chat itself).' + set;
         }
     }
     el('pr-topic').oninput = () => {
@@ -2274,7 +2274,16 @@
         showError('');
         let payload;
         const bad = badTopics();
-        if (bad.length) { showError(`⚠️ Telegram topics are IDs (numbers). Change or clear the topic of: ${bad.join(', ')}.`); return; }
+        if (bad.length) {
+            runStart('Save & Apply', 'Checking the settings…');
+            showConsole([
+                '!! ⚠️ Not saved.',
+                `!! The push service is Telegram, but ${bad.length === 1 ? 'this notification has a topic' : 'these notifications have topics'} from before the switch that Telegram can't use: ${bad.join(', ')}.`,
+                "!! Telegram topics are IDs (numbers). Open each one's Edit and change its Topic ID to a number, or clear it (empty: the chat itself). Then save again."
+            ]);
+            runEnd('Not saved', false);
+            return;
+        }
         try { payload = collect(true); } catch (e) { showError(e.message); return; }
         busy(true, 'Saving…');
         runStart('Save & Apply', 'Saving and applying settings…');
