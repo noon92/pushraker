@@ -197,6 +197,7 @@
     .pr-buttons .btn-remove { margin-left: auto; }
     .nt-crow code { font-size: 11px; }
     .nt-add td { padding-top: 10px; }
+    tr.nt-topic-bad { outline: 2px solid var(--error); outline-offset: -2px; }
     .pr-cm .pr-console { height: auto; min-height: 0; max-height: 200px; margin: 12px 0 0; display: none; }
     .pr-cm .pr-console.on { display: block; }
     .pr-data h3 { font-size: 18px; margin-bottom: 10px; }
@@ -1879,15 +1880,32 @@
     }
 
     // Telegram's topics are IDs: the notifications whose topic isn't one
+    function badTopicRows() {
+        if (el('nt-provider').value !== 'telegram') return { tpls: [], customs: [] };
+        return {
+            tpls: (state.meta.templates || []).filter(t => {
+                const v = (tplEdits[t.key] || {}).topic;
+                return v && !/^\d+$/.test(v);
+            }),
+            customs: customs.filter(c => c.topic && !/^\d+$/.test(c.topic))
+        };
+    }
     function badTopics() {
-        if (el('nt-provider').value !== 'telegram') return [];
-        const bad = (state.meta.templates || []).filter(t => {
-            const v = (tplEdits[t.key] || {}).topic;
-            return v && !/^\d+$/.test(v);
-        }).map(t => t.label);
-        return bad.concat(customs.filter(c => c.topic && !/^\d+$/.test(c.topic)).map(c => c.name));
+        const b = badTopicRows();
+        return b.tpls.map(t => t.label).concat(b.customs.map(c => c.name));
     }
     function renderTopicWarning() {
+        // The rows whose topic Telegram can't take: outlined in red
+        const rows = badTopicRows();
+        document.querySelectorAll('tr.nt-topic-bad').forEach(tr => tr.classList.remove('nt-topic-bad'));
+        rows.tpls.forEach(t => {
+            const tr = el('nt-rows').querySelector(`tr[data-row="${t.row}"]`);
+            if (tr) tr.classList.add('nt-topic-bad');
+        });
+        rows.customs.forEach(c => {
+            const tr = el('nt-crows').querySelector(`tr[data-crow="${c._id}"]`);
+            if (tr) tr.classList.add('nt-topic-bad');
+        });
         const bad = badTopics();
         el('nt-topic-warn').innerHTML = bad.length
             ? `⚠️ Telegram topics are IDs (numbers). Change or clear the topic of: ${bad.map(esc).join(', ')}. Saving is blocked until then.` : '';
