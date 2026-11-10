@@ -182,6 +182,18 @@
     .pr-data .pr-pick { max-height: 260px; }
     #pr-t-title { height: auto; min-height: 0; resize: none; overflow: hidden; line-height: 1.4; margin-bottom: 10px; }
     .pr-rec { font-size: 12px; color: var(--muted); }
+    .pr-custom { margin-bottom: 4px; }
+    .pr-custom input.pr-code { margin-bottom: 8px; }
+    #pr-when { height: auto; min-height: 0; resize: vertical; font-family: monospace; font-size: 13px; margin-bottom: 4px; }
+    .pr-now { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+    .pr-now b.yes { color: var(--success); } .pr-now b.no { color: var(--muted); }
+    .pr-now code { font-size: 11px; }
+    .pr-repeat { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: #ddd; margin-bottom: 10px; }
+    .pr-repeat select, .pr-repeat input { background: #2a2a2a; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 3px 6px; font-size: 13px; }
+    .pr-repeat input { width: 64px; }
+    .pr-buttons .btn-remove { margin-left: auto; }
+    .nt-crow code { font-size: 11px; }
+    .nt-add td { padding-top: 10px; }
     .pr-cm .pr-console { height: auto; min-height: 0; max-height: 200px; margin: 12px 0 0; display: none; }
     .pr-cm .pr-console.on { display: block; }
     .pr-data h3 { font-size: 18px; margin-bottom: 10px; }
@@ -549,6 +561,7 @@
                     <tr><th>Notification</th><th class="nt-c nt-col-push">Push</th><th class="nt-col-push nt-ch">Priority</th><th class="nt-c nt-col-email">Email</th><th class="nt-data"></th></tr>
                 </thead>
                 <tbody id="nt-rows"></tbody>
+                <tbody id="nt-crows"></tbody>
             </table>
         </div>
         <div class="nt-foot">* Needs <b>Exclude objects</b> enabled in the slicer.</div>
@@ -619,6 +632,14 @@
         <div class="pr-data-grid">
             <div class="pr-col-l">
             <div class="pr-ed">
+                <div class="pr-custom" id="pr-custom" style="display:none">
+                    <div class="pr-lbl">Name</div>
+                    <input class="nt-input pr-code" id="pr-cname" spellcheck="false" autocomplete="off" maxlength="32" placeholder="bed_cooled">
+                    <div class="pr-lbl">When <button type="button" class="nt-i pr-info" data-info="A condition, checked every 5 seconds: sent when it turns true. Empty: sent only from G-code." data-guide="custom-notifications" aria-label="About">?</button></div>
+                    <textarea class="nt-input" id="pr-when" rows="2" spellcheck="false" autocomplete="off" placeholder="printer.heater_bed.temperature &lt; 40"></textarea>
+                    <div class="pr-now" id="pr-now"></div>
+                    <div class="pr-repeat"><span>Send</span><select id="pr-repeat"><option value="change">each time it turns true (at most once a minute)</option><option value="job">once per print job</option><option value="minutes">at most every</option></select><span id="pr-rmin-wrap"><input type="number" id="pr-rmin" min="1" max="1440" inputmode="numeric"> minutes</span></div>
+                </div>
                 <div class="pr-lbl">Title</div>
                 <textarea class="nt-input pr-code" id="pr-t-title" rows="1" spellcheck="false" autocomplete="off"></textarea>
                 <div class="pr-lblrow"><div class="pr-lbl">Contents</div><span><span class="pr-rec" id="pr-cm-rec">Recommended: </span><button type="button" class="pr-link" id="pr-cm-link">Install CodeMirror</button></span></div>
@@ -635,7 +656,7 @@
             <div class="pr-side">
                 <div class="pr-lbl">Jinja <a href="https://github.com/noon92/pushraker/blob/main/docs/guide.md#templates" target="_blank">Guide</a></div>
                 <div class="pr-jj" id="pr-jj">
-                    <button type="button" class="pr-j" data-j="if">if</button><button type="button" class="pr-j" data-j="elif">elif</button><button type="button" class="pr-j" data-j="else">else</button><button type="button" class="pr-j" data-j="for">for each</button><button type="button" class="pr-j" data-j="set">set</button><button type="button" class="pr-j" data-j="comment">{# comment #}</button>
+                    <span id="pr-blocks"><button type="button" class="pr-j" data-j="if">if</button><button type="button" class="pr-j" data-j="elif">elif</button><button type="button" class="pr-j" data-j="else">else</button><button type="button" class="pr-j" data-j="for">for each</button><button type="button" class="pr-j" data-j="set">set</button><button type="button" class="pr-j" data-j="comment">{# comment #}</button></span>
                     <div class="pr-ops" id="pr-ops" style="display:none">
                         <div class="pr-lbl">Compare</div>
                         <button type="button" class="pr-j" data-op=" == ">==</button><button type="button" class="pr-j" data-op=" != ">!=</button><button type="button" class="pr-j" data-op=" > ">&gt;</button><button type="button" class="pr-j" data-op=" < ">&lt;</button><button type="button" class="pr-j" data-op=" >= ">&gt;=</button><button type="button" class="pr-j" data-op=" <= ">&lt;=</button><button type="button" class="pr-j" data-op="not ">not</button><button type="button" class="pr-j" data-op=" and ">and</button><button type="button" class="pr-j" data-op=" or ">or</button><button type="button" class="pr-j" data-op=" in ">in</button><button type="button" class="pr-j" data-op=" is defined">is defined</button><button type="button" class="pr-j" data-op='""'>"string"</button>
@@ -656,6 +677,7 @@
             <span class="pr-gap"></span>
             <button type="button" class="btn btn-secondary" id="pr-data-cancel">Cancel</button>
             <button type="button" class="btn btn-secondary" id="pr-data-reset">Reset</button>
+            <button type="button" class="btn btn-remove" id="pr-data-delete" style="display:none">Delete</button>
         </div>
     </div>
 </div>
@@ -845,6 +867,38 @@
         updateRowDimming();
     }
 
+    // Custom notifications' rows, and ➕ Add
+    function renderCustomRows() {
+        const prio = p => state.meta.priorities.map(x =>
+            `<option value="${x}"${x === p ? ' selected' : ''}>${PRIORITY_LABELS[x] || x}</option>`).join('');
+        const max = state.meta.custom_max || 20;
+        el('nt-crows').innerHTML = `<tr class="nt-group"><td colspan="5">Custom</td></tr>` + customs.map(c => {
+            const id = c._id;
+            const when = c.when.trim()
+                ? `<span class="nt-sub">When <code>${esc(c.when.length > 70 ? c.when.slice(0, 70) + '…' : c.when)}</code></span>`
+                : '<span class="nt-sub">Sent only from G-code</span>';
+            return `<tr class="nt-crow" data-crow="${id}">
+                <td><span class="nt-icon">🔔</span><span class="nt-name">${esc(c.name)}</span>${when}<span class="nt-sub nt-data-inline"><span class="nt-dim"><button type="button" class="btn btn-secondary nt-data-btn" data-ctpl="${id}">Edit</button></span></span></td>
+                <td class="nt-c nt-col-push"><input type="checkbox" data-cenabled="${id}"${c.enabled ? ' checked' : ''}></td>
+                <td class="nt-col-push"><select class="nt-input nt-dim-push" data-cpriority="${id}">${prio(c.priority)}</select></td>
+                <td class="nt-c nt-col-email"><input type="checkbox" data-cemail="${id}"${c.email ? ' checked' : ''}></td>
+                <td class="nt-data"><span class="nt-dim"><button type="button" class="btn btn-secondary nt-data-btn" data-ctpl="${id}">Edit</button></span></td>
+            </tr>`;
+        }).join('') + (customs.length < max
+            ? '<tr class="nt-add"><td colspan="5"><button type="button" class="btn btn-secondary nt-data-btn" id="nt-add-custom">➕ Add custom notification</button></td></tr>' : '');
+        const rows = el('nt-crows');
+        rows.querySelectorAll('[data-cenabled]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cenabled)).enabled = b.checked; updateRowDimming(); }; });
+        rows.querySelectorAll('[data-cemail]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cemail)).email = b.checked; updateRowDimming(); }; });
+        rows.querySelectorAll('[data-cpriority]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cpriority)).priority = b.value; }; });
+        rows.querySelectorAll('[data-ctpl]').forEach(b => { b.onclick = e => { e.preventDefault(); openEditor('custom:' + b.dataset.ctpl); }; });
+        if (el('nt-add-custom')) el('nt-add-custom').onclick = e => {
+            e.preventDefault();
+            draft = Object.assign({ _id: ++customSeq, _saved: null, name: '' }, JSON.parse(JSON.stringify(state.meta.custom_default)));
+            openEditor('custom:' + draft._id);
+        };
+        updateRowDimming();
+    }
+
     // ---- time-left method -------------------------------------------------
     // Radio buttons: the printer's default first, then the rest, each with
     // an (i) that opens the method's explanation
@@ -879,8 +933,27 @@
     let tplEdits = {};
     let savedTpl = '{}';
     const TPL_FIELDS = ['title', 'contents', 'image', 'camera', 'remaining'];
-    const tplMeta = key => (state.meta.templates || []).find(t => t.key === key);
+    // Custom notifications: the page's copy (_id: this page's, _saved: the
+    // name as saved, null for a new one)
+    let customs = [];
+    let savedCustoms = '{}';
+    let customSeq = 0;
+    let draft = null;       // a new one, until Done
+    const CUSTOM_FIELDS = ['name', 'enabled', 'priority', 'email', 'when', 'title', 'contents', 'image', 'camera', 'repeat', 'repeat_minutes'];
+    const RX_CUSTOM_NAME = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
+    const isCustom = key => String(key).startsWith('custom:');
+    const customById = id => customs.find(c => c._id === id) || (draft && draft._id === id ? draft : null);
+    const pickCustom = c => { const o = {}; CUSTOM_FIELDS.forEach(f => { o[f] = c[f]; }); return o; };
+    function tplMeta(key) {
+        if (isCustom(key)) {
+            const c = customById(Number(key.slice(7)));
+            if (!c) return null;
+            return { key, row: null, label: c.name || 'New custom notification', images: ['none', 'render', 'camera'], default: state.meta.custom_default };
+        }
+        return (state.meta.templates || []).find(t => t.key === key);
+    }
     function effective(key) {
+        if (isCustom(key)) return pickCustom(customById(Number(key.slice(7))));
         return Object.assign({}, tplMeta(key).default, tplEdits[key] || {});
     }
     function diffFromDefault(key, t) {
@@ -888,7 +961,7 @@
         TPL_FIELDS.forEach(f => { if (t[f] !== d[f]) out[f] = t[f]; });
         return out;
     }
-    const isEdited = key => !!tplEdits[key] && Object.keys(tplEdits[key]).length > 0;
+    const isEdited = key => !isCustom(key) && !!tplEdits[key] && Object.keys(tplEdits[key]).length > 0;
     // Edit, with a red * when the notification is edited
     function editButton(key, mini, label) {
         if (!tplMeta(key)) return '';
@@ -1114,6 +1187,7 @@
     function field(which) {
         which = which || activeField;
         if (which === 'title') return textareaField(el('pr-t-title'), false);
+        if (which === 'when') return textareaField(el('pr-when'), false);
         return cmView ? cmField(cmView) : textareaField(el('pr-data-text'), true);
     }
     // Where the cursor is: in {{ }}, in {% %}, or in plain text
@@ -1129,7 +1203,7 @@
         const f = field();
         const v = f.get();
         let [a, z] = f.sel();
-        const tag = tagAt(v, a);
+        const tag = activeField === 'when' ? null : tagAt(v, a);
         // Never inside a {{ value }}: after its }} (just after typing a
         // filament number, say)
         if (tag && tag.kind === 'expr' && a === z) {
@@ -1147,7 +1221,8 @@
     function insertValue(expr, filter, placeholder) {
         const f = field();
         const tag = tagAt(f.get(), f.sel()[0]);
-        const text = tag && tag.kind === 'stmt' ? `${expr}${filter || ''}` : `{{ ${expr}${filter || ''} }}`;
+        // A condition (When, an if) takes the value bare
+        const text = activeField === 'when' || (tag && tag.kind === 'stmt') ? `${expr}${filter || ''}` : `{{ ${expr}${filter || ''} }}`;
         const at = placeholder ? text.indexOf('#') : -1;
         if (at >= 0) insertText(text, at, 1); else insertText(text);
     }
@@ -1179,8 +1254,11 @@
         const f = field();
         const v = f.get(), a = f.sel()[0];
         const tag = tagAt(v, a);
-        const inCond = !!tag && tag.kind === 'stmt' && /^\{%-?\s*(if|elif)\b/.test(v.slice(tag.at));
+        const when = activeField === 'when';
+        const inCond = when || (!!tag && tag.kind === 'stmt' && /^\{%-?\s*(if|elif)\b/.test(v.slice(tag.at)));
         el('pr-ops').style.display = inCond ? '' : 'none';
+        // When is one condition: no blocks in it
+        el('pr-blocks').style.display = when ? 'none' : '';
         renderLoop();
     }
     el('pr-jj').querySelectorAll('[data-j]').forEach(b => { b.onmousedown = e => e.preventDefault(); b.onclick = () => jinjaButton(b.dataset.j); });
@@ -1201,6 +1279,14 @@
     function editorChanged() {
         if (!editing) return;
         growTitle();
+        if (isCustom(editing.key)) {
+            editing.name = el('pr-cname').value.trim();
+            editing.when = el('pr-when').value;
+            editing.repeat = el('pr-repeat').value;
+            editing.repeat_minutes = Math.max(1, Math.min(1440, parseInt(el('pr-rmin').value, 10) || 10));
+            el('pr-rmin-wrap').style.display = editing.repeat === 'minutes' ? '' : 'none';
+            el('pr-data-title').textContent = editing.name || 'New custom notification';
+        }
         editing.title = el('pr-t-title').value;
         editing.contents = field('contents').get();
         updateJinjaPane();
@@ -1211,7 +1297,16 @@
         const err = el('pr-data-err');
         const msgs = [];
         if (r && r.placeholders && r.placeholders.length) msgs.push(`Replace # in <code>${esc(r.placeholders[0])}</code> with a number.`);
-        if (r && r.error) msgs.push(`${r.error.field === 'title' ? 'Title' : 'Contents'}, ${esc(r.error.message)}`);
+        if (r && r.error) msgs.push(`${r.error.field === 'title' ? 'Title' : r.error.field === 'when' ? 'When' : 'Contents'}, ${esc(r.error.message)}`);
+        if (editing && isCustom(editing.key)) {
+            const c = customById(Number(editing.key.slice(7)));
+            const bad = !RX_CUSTOM_NAME.test(editing.name) ? 'Name: up to 32 letters, digits and _, starting with a letter.'
+                : customs.some(o => o !== c && o.name.toLowerCase() === editing.name.toLowerCase()) ? 'Name: another custom notification has it.' : '';
+            if (bad) msgs.unshift(bad);
+            const now = !editing.when.trim() ? 'Sent only from G-code'
+                : r && typeof r.when_now === 'boolean' ? `Right now: <b class="${r.when_now ? 'yes' : 'no'}">${r.when_now}</b>${r.live_job ? '' : ' (with the sample print job)'}` : '';
+            el('pr-now').innerHTML = now + (editing.name ? ` · From G-code: <code>RESPOND PREFIX=notify_custom MSG=${esc(editing.name)}</code>` : '');
+        }
         previewError = msgs.length ? msgs.join(' ') : null;
         err.innerHTML = msgs.join('<br>');
         err.style.display = msgs.length ? '' : 'none';
@@ -1221,7 +1316,11 @@
         const seq = ++previewSeq;
         let r = null;
         try {
-            r = await api('/server/pushraker/preview', 'POST', { key: editing.key, title: editing.title, contents: editing.contents });
+            const custom = isCustom(editing.key);
+            r = await api('/server/pushraker/preview', 'POST', {
+                key: custom ? 'custom_' + (editing.name || 'my_notification') : editing.key,
+                title: editing.title, contents: editing.contents, when: custom ? editing.when : ''
+            });
         } catch (e) {
             if (seq === previewSeq) el('pr-prev').textContent = 'Preview unavailable: ' + e.message;
             return;
@@ -1274,6 +1373,17 @@
         }
     }
     function fillEditor() {
+        const custom = isCustom(editing.key);
+        el('pr-custom').style.display = custom ? '' : 'none';
+        el('pr-data-reset').style.display = custom ? 'none' : '';
+        el('pr-data-delete').style.display = custom ? '' : 'none';
+        if (custom) {
+            el('pr-cname').value = editing.name;
+            el('pr-when').value = editing.when;
+            el('pr-repeat').value = editing.repeat;
+            el('pr-rmin').value = editing.repeat_minutes;
+            el('pr-now').innerHTML = '';
+        }
         el('pr-t-title').value = editing.title;
         field('contents').set(editing.contents);
         if (!cmView) el('pr-data-text').value = editing.contents;
@@ -1290,12 +1400,20 @@
         el('pr-data').classList.add('open');
         await mountEditor();
         fillEditor();
-        activeField = 'contents';
-        renderPicker(await loadCatalogue(key));
+        activeField = isCustom(key) && !editing.when ? 'when' : 'contents';
+        renderPicker(await loadCatalogue(isCustom(key) ? 'custom' : key));
     }
-    function closeEditor(keep) {
+    async function closeEditor(keep) {
         if (keep && previewError) {
             el('pr-data-err').scrollIntoView({ block: 'nearest' });
+            return;
+        }
+        if (editing && isCustom(editing.key)) {
+            if (keep && !(await keepCustom())) return;
+            el('pr-data').classList.remove('open');
+            clearTimeout(previewTimer);
+            editing = null;
+            draft = null;
             return;
         }
         el('pr-data').classList.remove('open');
@@ -1313,16 +1431,61 @@
         }
         editing = null;
     }
+    // A custom notification's Done: its name checked; a saved one renamed
+    // only after the warning (G-code that sends it by name stops working)
+    async function keepCustom() {
+        editorChanged();
+        const id = Number(editing.key.slice(7));
+        const c = customById(id);
+        if (!RX_CUSTOM_NAME.test(editing.name) || customs.some(o => o !== c && o.name.toLowerCase() === editing.name.toLowerCase())) {
+            preview();
+            return false;
+        }
+        if (c._saved && c._saved !== editing.name) {
+            const ok = await confirmReset(
+                `G-code and macros that send this notification by its name (RESPOND PREFIX=notify_custom MSG=${c._saved}) stop working once you save: pushraker can't change them. Change them to MSG=${editing.name}.`,
+                `⚠️ Rename ${c._saved} to ${editing.name}?`, 'Rename');
+            if (!ok) return false;
+        }
+        Object.assign(c, pickCustom(editing));
+        if (c === draft) customs.push(c);
+        renderCustomRows();
+        setTimeout(markDirty, 0);
+        return true;
+    }
+    el('pr-data-delete').onclick = async () => {
+        if (!editing || !isCustom(editing.key)) return;
+        const c = customById(Number(editing.key.slice(7)));
+        if (c !== draft) {
+            const ok = await confirmReset(
+                `${c._saved ? `G-code and macros that send it (RESPOND PREFIX=notify_custom MSG=${c._saved}) send nothing once you save. ` : ''}Deleted on Save & Apply.`,
+                `Delete ${c.name || 'this custom notification'}?`, 'Delete');
+            if (!ok) return;
+            customs = customs.filter(o => o !== c);
+            renderCustomRows();
+            setTimeout(markDirty, 0);
+        }
+        el('pr-data').classList.remove('open');
+        editing = null;
+        draft = null;
+    };
+    el('pr-cname').oninput = el('pr-when').oninput = editorChanged;
+    el('pr-repeat').onchange = el('pr-rmin').oninput = editorChanged;
+    el('pr-when').onfocus = () => { activeField = 'when'; updateJinjaPane(); };
+    ['pr-cname'].forEach(id => { el(id).onfocus = () => { el('pr-blocks').style.display = ''; }; });
+
     // Reset: back to the default, after a confirmation that only works
-    // after 5 seconds
-    function confirmReset(text) {
+    // after 3 seconds (also Delete and the rename warning)
+    function confirmReset(text, title, label) {
         return new Promise(resolve => {
             const box = el('pr-reset'), yes = el('pr-reset-yes'), no = el('pr-reset-no');
             el('pr-reset-text').textContent = text;
+            el('pr-reset-title').textContent = title || 'Reset this notification?';
+            label = label || 'Reset';
             let left = 3, timer = null;
             const tick = () => {
                 yes.disabled = left > 0;
-                yes.textContent = left > 0 ? `Reset (${left})` : 'Reset';
+                yes.textContent = left > 0 ? `${label} (${left})` : label;
                 if (left-- > 0) timer = setTimeout(tick, 1000);
             };
             const done = v => { clearTimeout(timer); box.classList.remove('open'); resolve(v); };
@@ -1483,6 +1646,13 @@
             const id = tr.dataset.row;
             const p = push && tr.querySelector(`[data-enabled="${id}"]`).checked;
             const e = email && tr.querySelector(`[data-email="${id}"]`).checked;
+            tr.classList.toggle('nt-nopush', !p);
+            tr.classList.toggle('nt-off', !p && !e && !hook);
+        });
+        el('nt-crows').querySelectorAll('tr[data-crow]').forEach(tr => {
+            const id = tr.dataset.crow;
+            const p = push && tr.querySelector(`[data-cenabled="${id}"]`).checked;
+            const e = email && tr.querySelector(`[data-cemail="${id}"]`).checked;
             tr.classList.toggle('nt-nopush', !p);
             tr.classList.toggle('nt-off', !p && !e && !hook);
         });
@@ -1790,6 +1960,8 @@
             el('nt-email-security').value = p.security;
         }
         tplEdits = JSON.parse(JSON.stringify(data.templates || {}));
+        customs = (data.custom || []).map(c => Object.assign({ _id: ++customSeq, _saved: c.name }, c));
+        renderCustomRows();
         cmRefresh();
         renderTimeMethods();
         renderCameras();
@@ -1853,6 +2025,7 @@
         el('nt-root').classList.remove('pr-hidden');
         saved = JSON.stringify(collect(false));
         savedTpl = JSON.stringify(tplEdits);
+        savedCustoms = JSON.stringify(Object.fromEntries(customs.map(c => [c._id, pickCustom(c)])));
         // Just loaded or saved: nothing to discard, nothing changed
         el('pr-close').disabled = true;
         snapshotFields();
@@ -1882,6 +2055,13 @@
         (state.meta.templates || []).forEach(t => {
             if (JSON.stringify(tplEdits[t.key] || null) === JSON.stringify(was[t.key] || null)) return;
             const tr = el('nt-rows').querySelector(`tr[data-row="${t.row}"]`);
+            if (tr) tr.classList.add('nt-chg');
+        });
+        let wasC = {};
+        try { wasC = JSON.parse(savedCustoms || '{}'); } catch (e) { /* first render */ }
+        customs.forEach(c => {
+            if (JSON.stringify(pickCustom(c)) === JSON.stringify(wasC[c._id] || null)) return;
+            const tr = el('nt-crows').querySelector(`tr[data-crow="${c._id}"]`);
             if (tr) tr.classList.add('nt-chg');
         });
     }
@@ -1981,7 +2161,8 @@
             // The printer's clock may be UTC: ETAs are shown in this browser's time zone
             timezone: el('nt-tz').value || 'browser',
             browser_timezone: BROWSER_TZ,
-            rows, templates
+            rows, templates,
+            custom: customs.map(pickCustom)
         };
         if (secret) payload.secret = secret;
         if (emailPassword) payload.email_password = emailPassword;

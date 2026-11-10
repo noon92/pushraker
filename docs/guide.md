@@ -501,6 +501,50 @@ the tree lists what each one has. For example:
 `.pushraker_version`, `.moonraker_version`, `.klipper_version`,
 `.links.web_ui` `.camera` `.errors`.
 
+## Custom notifications
+
+Notifications of your own, under **Custom** at the end of the table. **➕
+Add custom notification** opens the editor with three more fields:
+
+- **Name**: letters, digits and `_`, starting with a letter. It's the
+  notification's name in the table and how G-code sends it. Renaming a
+  saved one warns first: G-code and macros that use the old name stop
+  working, and pushraker can't change them.
+- **When**: a condition, as in an `if` (without `{% if %}`), checked every
+  5 seconds. The notification is sent when it turns true; a condition that
+  is already true when pushraker starts isn't. **Right now** under it shows
+  what it is with the printer's values (and the sample print job when none
+  is running). Empty: sent only from G-code.
+- **Send**: each time it turns true (never more than once a minute), once
+  per print job, or at most every N minutes.
+
+```jinja
+printer.heater_bed.temperature < 40 and not printer.heater_bed.target
+job.progress >= 90 and job.filaments.count > 1
+printer["temperature_sensor cavity"].temperature > 55
+```
+
+From G-code or a macro, whatever its condition:
+
+```
+RESPOND PREFIX=notify_custom MSG=bed_cool
+```
+
+Its title, contents and image work like any other notification's, with
+`event.name` (its name) and `event.trigger` (`condition` or `gcode`). In
+`pushraker.conf` each is a section of its own:
+
+```ini
+[pushraker custom bed_cool]
+notification: on, default, no_email
+when: printer.heater_bed.temperature < 40
+title: 🔔 {{ machine.name }} {{ event.name }}
+contents: Bed {{ printer.heater_bed.temperature|round|int }}°C
+image: camera
+camera:
+repeat: change          # change, job, or a number of minutes
+```
+
 ## Notifications from macros and G-code
 
 Any Klipper macro or G-code line (a farm loop, an ejection macro, the
