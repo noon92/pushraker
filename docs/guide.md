@@ -373,7 +373,8 @@ the title or the contents, outside any `for` loop:
 ```
 
 Print paused's default template does exactly that for pauses written into
-the print job's file.
+the print job's file. `{% set timezone = "Europe/Warsaw" %}` gives that
+notification's ETAs in another time zone.
 
 ### Topic
 
@@ -526,7 +527,8 @@ Add custom notification** opens the editor with three more fields:
   what it is with the printer's values (and the sample print job when none
   is running). Empty: sent only from G-code.
 - **Send**: each time it turns true (never more than once a minute), once
-  per print job, or at most every N minutes.
+  per print job, once per print job and again after a pause, or at most
+  every # minutes.
 
 ```jinja
 printer.heater_bed.temperature < 40 and not printer.heater_bed.target
@@ -552,7 +554,7 @@ title: 🔔 {{ machine.name }} {{ event.name }}
 contents: Bed {{ printer.heater_bed.temperature|round|int }}°C
 image: camera
 camera:
-repeat: change          # change, job, or a number of minutes
+repeat: change          # change, job, job_pause, or a number of minutes
 ```
 
 ## Notifications from macros and G-code

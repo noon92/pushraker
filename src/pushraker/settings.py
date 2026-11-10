@@ -74,9 +74,22 @@ ROWS = [
      "print", False),
     ("calibration", "Manual calibrations", "📐", True, "high", "snapshot",
      "print", False),
-    # Filament loaded into or unloaded from a toolhead, outside a print job
+    # Filaments: loaded into or unloaded from a toolhead,
+    # outside a print job
     ("filament_change", "Filament loaded / unloaded", "🧵", False, "low",
-     "spool", "print", False),
+     "spool", "filament", False),
+    # Need the Spoolman integration
+    ("filament_short", "Not enough filament", "🧵", True, "high", "spool",
+     "spoolman", True),
+    ("filament_low", "Spool running low", "🧵", True, "default", "spool",
+     "spoolman", False),
+    # The printer's own refill (its toolhead map), with or without
+    # Spoolman: Spoolman only adds the spools' names and weights
+    ("spool_switch", "Switched to backup spool", "🔄", True, "default",
+     "spool", "refill", False),
+    # multiACE: the slot feeding a toolhead went empty mid-print
+    ("slot_empty", "Spool in ACE slot ran out", "🧵", True, "default",
+     "spool", "refill", False),
     # Chamber temperature: only when a print job waits on a chamber target
     # (any chamber heater, or Snapmaker's own chamber wait)
     ("chamber_waiting", "Waiting for chamber temperature", "🌡️", True,
@@ -95,18 +108,6 @@ ROWS = [
     # job, again after a pause
     ("driver_hot", "Driver running hot", "🌡️", True, "max", "snapshot",
      "fault", True),
-    # Need the Spoolman integration
-    ("filament_short", "Not enough filament", "🧵", True, "high", "spool",
-     "spoolman", True),
-    ("filament_low", "Spool running low", "🧵", True, "default", "spool",
-     "spoolman", False),
-    # The printer's own refill (its toolhead map), with or without
-    # Spoolman: Spoolman only adds the spools' names and weights
-    ("spool_switch", "Switched to backup spool", "🔄", True, "default",
-     "spool", "refill", False),
-    # multiACE: the slot feeding a toolhead went empty mid-print
-    ("slot_empty", "Spool in ACE slot ran out", "🧵", True, "default",
-     "spool", "refill", False),
 ]
 ROW_IDS = [r[0] for r in ROWS]
 
@@ -416,7 +417,7 @@ CUSTOM_SECTION = "pushraker custom "
 CUSTOM_MAX = 20
 RX_CUSTOM_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,31}")
 CUSTOM_IMAGES = ("none", "render", "camera")
-CUSTOM_REPEATS = ("change", "job", "minutes")
+CUSTOM_REPEATS = ("change", "job", "job_pause", "minutes")
 WHEN_MAX = 1000
 CUSTOM_DEFAULT = {
     "enabled": True, "priority": "default", "email": False,

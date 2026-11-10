@@ -155,6 +155,11 @@
     .nt-eta-opts .nt-eta-def { color: var(--muted); font-size: 12px; }
     .nt-i { display: inline-flex; width: 16px; height: 16px; border: 1px solid #777; border-radius: 50%; color: #aaa; font-size: 11px; font-weight: 700; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; align-items: center; justify-content: center; cursor: help; line-height: 1; background: none; padding: 0; }
     .nt-i.on, .nt-i:hover { border-color: var(--accent); color: var(--accent); }
+    /* The ? is drawn, not typed: a font's ? sits off-centre in some fonts */
+    .nt-i { font-size: 0 !important; vertical-align: middle; position: relative; top: -0.25em; }
+    .nt-i::after { content: ''; width: 58%; height: 58%; background: currentColor;
+        -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M3 3.4a2 2 0 1 1 3 1.7c-.6.4-1 .8-1 1.5v.3' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round'/%3E%3Ccircle cx='5' cy='8.9' r='.9'/%3E%3C/svg%3E") center / contain no-repeat;
+        mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M3 3.4a2 2 0 1 1 3 1.7c-.6.4-1 .8-1 1.5v.3' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round'/%3E%3Ccircle cx='5' cy='8.9' r='.9'/%3E%3C/svg%3E") center / contain no-repeat; }
     .nt-tip { display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 6; background: #1e1e1e; border: 1px solid #555; border-radius: 8px; padding: 10px 12px; width: 340px; font-size: 12px; color: var(--text); line-height: 1.45; white-space: normal; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-weight: normal; cursor: auto; }
     .nt-tip.open { display: block; }
     .nt-tip b { color: #fff; }
@@ -180,6 +185,8 @@
     .pr-imgwrap { margin-top: 12px; }
     .pr-topicwrap { margin-top: 4px; max-width: 340px; }
     .pr-topicwrap.off { opacity: .45; }
+    .nt-greyed .nt-field > *:not(label), .nt-greyed label { opacity: .5; }
+    .nt-greyed label .nt-i { opacity: 1; }
     .pr-topicwrap.off input { cursor: not-allowed; }
     /* Values: no taller than the contents box starts out */
     .pr-data .pr-pick { max-height: 260px; }
@@ -194,7 +201,8 @@
     .pr-repeat { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: #ddd; margin-bottom: 10px; }
     .pr-repeat select, .pr-repeat input { background: #2a2a2a; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 3px 6px; font-size: 13px; }
     .pr-repeat input { width: 64px; }
-    .pr-buttons .btn-remove { margin-left: auto; }
+    .nt-x { background: none; border: 1px solid #555; color: #e57373; border-radius: 5px; width: 26px; height: 26px; margin-left: 6px; cursor: pointer; font-size: 13px; vertical-align: middle; }
+    .nt-x:hover { border-color: var(--error); background: rgba(229,115,115,.12); }
     .nt-crow code { font-size: 11px; }
     .nt-add td { padding-top: 10px; }
     tr.nt-topic-bad { outline: 2px solid var(--error); outline-offset: -2px; }
@@ -318,7 +326,7 @@
 <div class="pr-loading" id="pr-loading">Loading settings…</div>
 <div class="nt pr-hidden" id="nt-root">
     <label class="nt-enable"><input type="checkbox" id="nt-enabled"> Enable notifications</label>
-    <div class="nt-public" id="nt-stored-error" style="display:none; margin: -8px 0 16px"></div>
+
 
     <div class="nt-body">
         <div class="nt-section">Push notifications</div>
@@ -528,9 +536,8 @@
         <div class="nt-section">Notification content</div>
         <div class="nt-grid">
             <div class="nt-field">
-                <label for="nt-name">Printer name</label>
+                <label for="nt-name">Printer name <button type="button" class="nt-i pr-info" id="nt-name-info" data-info="" aria-label="About">?</button></label>
                 <input class="nt-input" id="nt-name" autocomplete="off">
-                <div class="nt-hint" id="nt-name-hint">Shown in every title, e.g. "✅ U1 complete".</div>
             </div>
             <div class="nt-field">
                 <label for="nt-camera">Default camera</label>
@@ -538,9 +545,8 @@
                 <div class="nt-warn" id="nt-camera-warn"></div>
             </div>
             <div class="nt-field">
-                <label for="nt-tz">Time zone</label>
+                <label for="nt-tz">Time zone <button type="button" class="nt-i pr-info" data-info="By default, the time zone of the last browser to save this page. A template can set its own: {% set timezone = &quot;Europe/Warsaw&quot; %}." aria-label="About">?</button></label>
                 <select class="nt-input" id="nt-tz"></select>
-                <div class="nt-hint">For ETAs. Browser: the one this page was last saved from.</div>
             </div>
             <div class="nt-field" style="grid-column: 1 / -1">
                 <label for="nt-printer-url">Printer URL for buttons (optional)</label>
@@ -572,7 +578,7 @@
         <div class="nt-foot">* Needs <b>Exclude objects</b> enabled in the slicer.</div>
         <div class="nt-grid" id="nt-filament">
             <div class="nt-field">
-                <label for="nt-fl-percent">🧵 Spool running low: alert when a spool is down to</label>
+                <label for="nt-fl-percent">🧵 Spool running low: alert when a spool is down to <button type="button" class="nt-i pr-info" id="nt-fl-info" data-info="Needs Spoolman, to know how much filament each spool has left: run a Spoolman server and turn on Moonraker's [spoolman] integration (in Firmware Config). Then Not enough filament and Spool running low work." aria-label="About">?</button></label>
                 <div class="nt-inline nt-unit">
                     <input class="nt-input" id="nt-fl-percent" type="number" min="0" max="90" inputmode="numeric">
                     <span>% of a full spool</span>
@@ -592,13 +598,11 @@
                 <div class="nt-hint">Turn off if you don't track spool weights in Spoolman.</div>
             </div>
         </div>
-        <div class="nt-hint" id="nt-filament-off" style="margin:-8px 0 16px;font-size:12px;color:var(--muted)">
-            🧵 <b>Spoolman</b> notifications (not enough filament, running low) need Moonraker's <code>[spoolman]</code> integration.
-        </div>
     </div>
 </div>
 
 <div class="pr-error" id="pr-error" style="display:none"></div>
+<div class="nt-public" id="nt-stored-error" style="display:none; margin: 0 0 12px"></div>
 <div class="pr-actions">
     <span class="pr-save-wrap">
         <button type="button" class="btn btn-save" id="pr-save">Save &amp; Apply</button>
@@ -643,7 +647,7 @@
                     <div class="pr-lbl">When <button type="button" class="nt-i pr-info" data-info="A condition, checked every 5 seconds: sent when it turns true. Empty: sent only from G-code." data-guide="custom-notifications" aria-label="About">?</button></div>
                     <textarea class="nt-input" id="pr-when" rows="2" spellcheck="false" autocomplete="off" placeholder="printer.heater_bed.temperature &lt; 40"></textarea>
                     <div class="pr-now" id="pr-now"></div>
-                    <div class="pr-repeat"><span>Send</span><select id="pr-repeat"><option value="change">each time it turns true (at most once a minute)</option><option value="job">once per print job</option><option value="minutes">at most every</option></select><span id="pr-rmin-wrap"><input type="number" id="pr-rmin" min="1" max="1440" inputmode="numeric"> minutes</span></div>
+                    <div class="pr-repeat"><span>Send</span><select id="pr-repeat"><option value="change">each time it turns true (at most once a minute)</option><option value="job">once per print job</option><option value="job_pause">once per print job, again after a pause</option><option value="minutes">at most every # minutes</option></select><span id="pr-rmin-wrap"># = <input type="number" id="pr-rmin" min="1" max="1440" inputmode="numeric"></span></div>
                 </div>
                 <div class="pr-lbl">Title</div>
                 <textarea class="nt-input pr-code" id="pr-t-title" rows="1" spellcheck="false" autocomplete="off"></textarea>
@@ -685,8 +689,8 @@
             <button type="button" class="btn btn-save" id="pr-data-ok">Done</button>
             <span class="pr-gap"></span>
             <button type="button" class="btn btn-secondary" id="pr-data-cancel">Cancel</button>
-            <button type="button" class="btn btn-secondary" id="pr-data-reset">Reset</button>
             <button type="button" class="btn btn-remove" id="pr-data-delete" style="display:none">Delete</button>
+            <button type="button" class="btn btn-secondary" id="pr-data-reset">Reset</button>
         </div>
     </div>
 </div>
@@ -737,7 +741,7 @@
 (function () {
     'use strict';
     const PRIORITY_LABELS = { min: 'Min', low: 'Low', default: 'Default', high: 'High', max: 'Max' };
-    const GROUP_LABELS = { chamber: 'Chamber temperature', fault: 'Faults', spools: 'Spools' };
+    const GROUP_LABELS = { chamber: 'Chamber temperature', fault: 'Faults', filaments: 'Filaments' };
     const el = id => document.getElementById(id);
     const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
     let state = null;
@@ -811,7 +815,7 @@
             // A row left off isn't sent on save, so it keeps its setting.
             if (meta.hidden || (meta.group === 'spoolman' && !state.meta.spoolman)) return html;
             // Spoolman's and the backup spools' rows: one group, Spools
-            const g = meta.group === 'spoolman' || meta.group === 'refill' ? 'spools' : meta.group;
+            const g = ['spoolman', 'refill', 'filament'].includes(meta.group) ? 'filaments' : meta.group;
             if (g !== group) {
                 group = g;
                 if (GROUP_LABELS[group]) {
@@ -891,7 +895,7 @@
                 <td class="nt-c nt-col-push"><input type="checkbox" data-cenabled="${id}"${c.enabled ? ' checked' : ''}></td>
                 <td class="nt-col-push"><select class="nt-input nt-dim-push" data-cpriority="${id}">${prio(c.priority)}</select></td>
                 <td class="nt-c nt-col-email"><input type="checkbox" data-cemail="${id}"${c.email ? ' checked' : ''}></td>
-                <td class="nt-data"><span class="nt-dim"><button type="button" class="btn btn-secondary nt-data-btn" data-ctpl="${id}">Edit</button></span></td>
+                <td class="nt-data"><span class="nt-dim"><button type="button" class="btn btn-secondary nt-data-btn" data-ctpl="${id}">Edit</button></span><button type="button" class="nt-x" data-cdel="${id}" aria-label="Delete">✕</button></td>
             </tr>`;
         }).join('') + (customs.length < max
             ? '<tr class="nt-add"><td colspan="5"><button type="button" class="btn btn-secondary nt-data-btn" id="nt-add-custom">➕ Add custom notification</button></td></tr>' : '');
@@ -900,6 +904,7 @@
         rows.querySelectorAll('[data-cemail]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cemail)).email = b.checked; updateRowDimming(); }; });
         rows.querySelectorAll('[data-cpriority]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cpriority)).priority = b.value; }; });
         rows.querySelectorAll('[data-ctpl]').forEach(b => { b.onclick = e => { e.preventDefault(); openEditor('custom:' + b.dataset.ctpl); }; });
+        rows.querySelectorAll('[data-cdel]').forEach(b => { b.onclick = async e => { e.preventDefault(); await deleteCustom(customById(Number(b.dataset.cdel))); }; });
         if (el('nt-add-custom')) el('nt-add-custom').onclick = e => {
             e.preventDefault();
             draft = Object.assign({ _id: ++customSeq, _saved: null, name: '' }, JSON.parse(JSON.stringify(state.meta.custom_default)));
@@ -1161,6 +1166,8 @@
         });
     }
     wireTips(document.querySelector('.pr-imgwrap'));
+    wireTips(el('pr-custom'));
+    wireTips(document.querySelector('.nt-body'));
 
     // -- the two text fields: the title (a line) and the contents (a text
     // box, or CodeMirror when installed); values go to the one last used
@@ -1280,6 +1287,8 @@
     let editing = null;      // { key, title, contents, image, camera, remaining }
     let previewTimer = null, previewSeq = 0, previewError = null;
     const imgCache = {};
+    const imgWhy = {};          // why a picture is missing, by the same id
+    const camWhy = t => imgWhy['camera:' + (t.camera || el('nt-camera').value)];
     function growTitle() {
         const t = el('pr-t-title');
         t.style.height = 'auto';
@@ -1340,7 +1349,8 @@
         showErrors(r);
         const img = await imageFor(editing);
         if (seq !== previewSeq || !editing) return;
-        el('pr-prev').innerHTML = `<div class="pr-pt">${esc(r.title || '')}</div>${esc(r.text || '')}${img ? `<img src="${img}" alt="">` : ''}`;
+        const why = !img && editing.image === 'camera' && camWhy(editing) ? `<div class="pr-now">📷 No camera picture: ${esc(camWhy(editing))}</div>` : '';
+        el('pr-prev').innerHTML = `<div class="pr-pt">${esc(r.title || '')}</div>${esc(r.text || '')}${img ? `<img src="${img}" alt="">` : why}`;
     }
     // The image a choice would send: the sample render, a snapshot, the
     // sample spool picture
@@ -1354,7 +1364,12 @@
         if (!(id in imgCache)) {
             imgCache[id] = api('/server/pushraker/preview_image', 'POST',
                 { key: t.key, image: kind, camera: cam || '', remaining: t.remaining ? 'true' : 'false' })
-                .then(r => (r && r.image) || null).catch(() => null);
+                .then(r => {
+                    if (r && r.image) return r.image;
+                    imgWhy[id] = (r && r.error) || 'no picture';
+                    delete imgCache[id];        // try again next time
+                    return null;
+                }).catch(e => { imgWhy[id] = e.message; delete imgCache[id]; return null; });
         }
         return imgCache[id];
     }
@@ -1380,7 +1395,10 @@
             const src = await imageFor(t, k);
             const th = box.querySelector(`[data-img="${k}"] .pr-th`);
             if (th && src) th.style.backgroundImage = `url(${src})`;
-            else if (th) th.innerHTML = k === 'camera' && !(t.camera || el('nt-camera').value) ? '<small>No camera</small>' : '—';
+            else if (th) {
+                th.innerHTML = k === 'camera' && !(t.camera || el('nt-camera').value) ? '<small>No camera</small>' : k === 'camera' ? '<small>No picture</small>' : '—';
+                if (k === 'camera' && camWhy(t)) th.title = camWhy(t);
+            }
         }
     }
     // The topic: ntfy and Telegram only, with push on; empty: the default
@@ -1444,7 +1462,10 @@
         await mountEditor();
         fillEditor();
         activeField = isCustom(key) && !editing.when ? 'when' : 'contents';
-        renderPicker(await loadCatalogue(isCustom(key) ? 'custom' : key));
+        await renderPicker(await loadCatalogue(isCustom(key) ? 'custom' : key));
+        // From the top (a new one: on its name)
+        el('pr-data').querySelector('.pr-modal-box').scrollTop = 0;
+        if (isCustom(key) && !editing.name) el('pr-cname').focus({ preventScroll: true });
     }
     async function closeEditor(keep) {
         if (keep && previewError) {
@@ -1496,18 +1517,24 @@
         setTimeout(markDirty, 0);
         return true;
     }
-    el('pr-data-delete').onclick = async () => {
-        if (!editing || !isCustom(editing.key)) return;
-        const c = customById(Number(editing.key.slice(7)));
+    // Delete a custom notification (from its row's ✕ or the editor),
+    // after the warning
+    async function deleteCustom(c) {
+        if (!c) return false;
         if (c !== draft) {
             const ok = await confirmReset(
                 `${c._saved ? `G-code and macros that send it (RESPOND PREFIX=notify_custom MSG=${c._saved}) send nothing once you save. ` : ''}Deleted on Save & Apply.`,
                 `⚠️ Delete ${c.name || 'this custom notification'}?`, 'Delete');
-            if (!ok) return;
+            if (!ok) return false;
             customs = customs.filter(o => o !== c);
             renderCustomRows();
             setTimeout(markDirty, 0);
         }
+        return true;
+    }
+    el('pr-data-delete').onclick = async () => {
+        if (!editing || !isCustom(editing.key)) return;
+        if (!(await deleteCustom(customById(Number(editing.key.slice(7)))))) return;
         el('pr-data').classList.remove('open');
         editing = null;
         draft = null;
@@ -2003,7 +2030,7 @@
         el('nt-username').value = data.username;
         el('nt-name').value = data.name;
         el('nt-name').placeholder = data.meta.default_name || 'Printer';
-        el('nt-name-hint').textContent = `Shown in every title, e.g. "✅ ${data.name || data.meta.default_name || 'Printer'} complete".`;
+        el('nt-name-info').dataset.info = `Shown by default in every title, e.g. "✅ ${data.name || data.meta.default_name || 'Printer'} complete".`;
         el('nt-printer-url').value = data.printer_url;
         el('nt-email-enabled').checked = data.email_enabled;
         el('nt-wh-enabled').checked = !!data.webhook_enabled;
@@ -2014,14 +2041,15 @@
         el('nt-wh-enabled').onchange = () => { updateWebhook(); updateRowDimming(); };
         updateWebhook();
         el('nt-stored-error').textContent = data.meta.stored_error
-            ? `The saved settings need attention: ${data.meta.stored_error}. Notifications keep the last applied settings until this is saved again.`
+            ? `⚠️ pushraker.conf couldn't be applied: ${data.meta.stored_error}. Notifications still use the settings from before that change. Fix it in the file, or save from this page.`
             : '';
         el('nt-stored-error').style.display = data.meta.stored_error ? '' : 'none';
         el('nt-fl-percent').value = data.filament_low_percent;
         el('nt-fl-grams').value = data.filament_low_grams;
         el('nt-fl-unknown').checked = !!data.filament_unknown;
-        el('nt-filament').style.display = data.meta.spoolman ? '' : 'none';
-        el('nt-filament-off').style.display = data.meta.spoolman ? 'none' : '';
+        // Without Spoolman: shown, greyed out; its ? says what it needs
+        el('nt-filament').classList.toggle('nt-greyed', !data.meta.spoolman);
+        el('nt-filament').querySelectorAll('input').forEach(i => { i.disabled = !data.meta.spoolman; });
         el('nt-email-host').value = data.email_host;
         el('nt-email-port').value = data.email_port;
         el('nt-email-security').value = data.email_security;

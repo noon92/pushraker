@@ -2668,6 +2668,21 @@ async def test_templates_sending():
     t, b, sets = await c._render_pair(
         "", '{% set priority = "urgent" %}{% set image = "photo" %}x', {})
     check("...only to what exists", sets == {}, sets)
+    import datetime as dt
+
+    class Zone:
+        def __str__(self):
+            return str(c._zone())
+    real_tz = c.tz
+    c.tz = dt.timezone.utc
+    t, b, sets = await c._render_pair(
+        "", '{% set timezone = "Asia/Tokyo" %}{{ zone }}', {"zone": Zone()})
+    t2, b2, _s = await c._render_pair(
+        "", '{% set timezone = "Nowhere/Never" %}{{ zone }}', {"zone": Zone()})
+    c.tz = real_tz
+    check("a template sets its time zone (the ETAs in it follow); an "
+          "unknown one keeps the setting", (b, b2) == ("Asia/Tokyo", "UTC"),
+          (b, b2))
     t, b, sets = await c._render_pair(
         "", '{% set topic = "u1-errors" %}x', {})
     check("a template sets the topic", sets == {"topic": "u1-errors"}, sets)
@@ -2810,6 +2825,12 @@ async def test_custom_notifications():
     await c._custom_check()
     await asyncio.sleep(0.2)
     check("once per print job: not twice in one", not log, log)
+    cust[0]["repeat"] = "job_pause"
+    c._custom_sent["bed_cool"] -= 120
+    check("once per print job, again after a pause: not before one",
+          not c._custom_due(cust[0]))
+    c._resumes += 1
+    check("...and after one, again", c._custom_due(cust[0]))
     cust[0]["repeat"] = "change"
     c._on_gcode_response("notify_custom bed_cool")
     c._on_gcode_response("notify_custom nobody")
@@ -2858,6 +2879,34 @@ async def test_custom_notifications():
         except st.ConfigError as e:
             check(f"refuses {what}", what in str(e), str(e))
 
+
+async def test_camera_pictures():
+    """A camera's picture: a snapshot, the first frame of an MJPEG stream,
+    or a PNG converted; something else says what it was."""
+    print("Camera pictures")
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), (200, 10, 10)).save(buf, "JPEG")
+    jpeg = buf.getvalue()
+    png = io.BytesIO()
+    Image.new("RGB", (8, 8), (10, 200, 10)).save(png, "PNG")
+    stream = (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg +
+              b"\r\n--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg)
+    files = {}
+    for name, data in (("snap.jpg", jpeg), ("stream.mjpg", stream),
+                       ("pic.png", png.getvalue()),
+                       ("page.html", b"<html>404</html>")):
+        files[name] = os.path.join(WORK, name)
+        with open(files[name], "wb") as f:
+            f.write(data)
+    got = {n: pn.PushNotifications._read_picture("file://" + path)
+           for n, path in files.items()}
+    check("a snapshot as it is", got["snap.jpg"][0] == jpeg)
+    check("a stream: its first frame", got["stream.mjpg"][0] == jpeg)
+    check("a PNG: converted", (got["pic.png"][0] or b"")[:2] == b"\xff\xd8")
+    check("something else: what it starts with", got["page.html"][0] is None
+          and "<html>404" in got["page.html"][1], got["page.html"])
 
 async def test_codemirror():
     """CodeMirror: installed from this version's build (checksum checked),
@@ -3250,7 +3299,7 @@ async def run_component_tests():
               test_driver_hot,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
-              test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_codemirror,
+              test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_camera_pictures, test_codemirror,
               test_data):
         try:
             await t()

@@ -59,6 +59,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import time
 import urllib.request
 from typing import (
@@ -977,6 +978,9 @@ class PushNotifications:
             e.strip() for e in get(
                 "filament_change_events", "loaded,unloaded").split(",")}
         self.tz: Optional[datetime.tzinfo] = None
+        # A time zone a template set ({% set timezone = ... %}), for the
+        # render running in this thread
+        self._tz_here = threading.local()
         tz_name = get("timezone", "")
         if tz_name:
             try:
@@ -1020,7 +1024,9 @@ class PushNotifications:
         # last sent (and in which print job), the last error logged
         self._custom_was: Dict[str, bool] = {}
         self._custom_sent: Dict[str, float] = {}
-        self._custom_job: Dict[str, int] = {}
+        self._custom_job: Dict[str, Tuple[int, int]] = {}
+        # Resumes so far: "once per print job, again after a pause"
+        self._resumes = 0
         self._custom_err: Dict[str, str] = {}
         self._filament_job = 0      # bumped per job; stops an old watcher
         self._job_map: List[Any] = []       # extruder_map_table at start
@@ -1667,14 +1673,28 @@ class PushNotifications:
     async def _render(self, text: str, ctx: Dict[str, Any]) -> str:
         return (await self._render_vars(text, ctx))[0]
 
-    async def _render_vars(self, text: str, ctx: Dict[str, Any]
+    def _zone(self) -> Optional[datetime.tzinfo]:
+        """The time zone for ETAs: a template's own, or the setting."""
+        return getattr(self._tz_here, "tz", None) or self.tz
+
+    def _render_in_zone(self, text: str, ctx: Dict[str, Any],
+                        tz: Optional[datetime.tzinfo]
+                        ) -> Tuple[str, Dict[str, Any]]:
+        self._tz_here.tz = tz
+        try:
+            return jj.render_vars(text, ctx)
+        finally:
+            self._tz_here.tz = None
+
+    async def _render_vars(self, text: str, ctx: Dict[str, Any],
+                           tz: Optional[datetime.tzinfo] = None
                            ) -> Tuple[str, Dict[str, Any]]:
         """Rendered off Moonraker's event loop, with a time limit: a
         template that loops for long doesn't hold up the printer. Also
         what the template set ({% set priority = ... %})."""
         try:
             return await asyncio.wait_for(self.eventloop.run_in_thread(
-                jj.render_vars, text, ctx), TEMPLATE_TIMEOUT)
+                self._render_in_zone, text, ctx, tz), TEMPLATE_TIMEOUT)
         except asyncio.TimeoutError:
             raise jj.TemplateError(
                 f"took longer than {TEMPLATE_TIMEOUT:.0f} seconds") from None
@@ -1692,6 +1712,22 @@ class PushNotifications:
         the row's)."""
         t, tv = await self._render_vars(title, ctx)
         c, cv = await self._render_vars(contents, ctx)
+        # {% set timezone = "Europe/Warsaw" %}: rendered again, with the
+        # ETAs in that time zone
+        zone = str(cv.get("timezone", tv.get("timezone", "")) or "").strip()
+        if zone:
+            tz = None
+            if cfgmod.RX_TIMEZONE.fullmatch(zone):
+                try:
+                    from zoneinfo import ZoneInfo
+                    tz = ZoneInfo(zone)
+                except Exception:
+                    tz = None
+            if tz is None:
+                logging.info("[pushraker] no such time zone: %r", zone)
+            else:
+                t, tv = await self._render_vars(title, ctx, tz)
+                c, cv = await self._render_vars(contents, ctx, tz)
         sets: Dict[str, str] = {}
         for name, allowed in (("priority", PRIORITY_NAMES),
                               ("image", tuple(IMAGE_SET))):
@@ -1890,9 +1926,10 @@ class PushNotifications:
         # The printer's clock runs on UTC: an ETA needs the time zone
         # setting (the page fills it from the browser). The preview's
         # sample shows one anyway.
-        if left is None or (self.tz is None and not sample):
+        tz = self._zone()
+        if left is None or (tz is None and not sample):
             return None
-        now = datetime.datetime.now(self.tz) if self.tz else \
+        now = datetime.datetime.now(tz) if tz else \
             datetime.datetime.now()
         at = now + datetime.timedelta(seconds=max(0., left))
         return tp.Clock(at, (at.date() - now.date()).days)
@@ -2721,10 +2758,16 @@ class PushNotifications:
             cams = self.env.cameras if self.env else {}
             url = (cams.get(name) or {}).get("snapshot") or \
                 self.snapshot_url
-            if url:
-                tmp = await self.eventloop.run_in_thread(
-                    self._fetch_snapshot_sync, True, url)
-                path = tmp
+            if not url:
+                return {"image": None, "error": (
+                    f"no camera named {name}" if name else "no camera set")}
+            tmp, why = await self.eventloop.run_in_thread(
+                self._snapshot_why, url)
+            if tmp is None:
+                logging.info("[pushraker] editor snapshot from %s: %s",
+                             url, why)
+                return {"image": None, "error": why}
+            path = tmp
         elif kind == "graphic" and key in cfgmod.TEMPLATE:
             rows = self._sample_rows(key)
             if rows and str(args.get("remaining", "true")).lower() \
@@ -2828,15 +2871,11 @@ class PushNotifications:
         url = url or self.snapshot_url
         if not url:
             return None
-        try:
-            with urllib.request.urlopen(url, timeout=SNAPSHOT_TIMEOUT) as resp:
-                data = resp.read(SNAPSHOT_MAX + 1)
-        except Exception as e:
+        data, why = self._read_picture(url)
+        if data is None:
             if not quiet:
-                logging.warning("[pushraker] no snapshot: %s", e)
-            return None
-        if not data.startswith(b"\xff\xd8") or len(data) > SNAPSHOT_MAX:
-            logging.warning("[pushraker] snapshot is not a JPEG")
+                logging.warning("[pushraker] no snapshot from %s: %s", url,
+                                why)
             return None
         tmpdir = tempfile.mkdtemp(prefix="pushraker_")
         path = os.path.join(tmpdir, "snapshot.jpg")
@@ -2848,6 +2887,55 @@ class PushNotifications:
             logging.warning("[pushraker] snapshot not saved: %s", e)
             return None
         return path
+
+    @staticmethod
+    def _read_picture(url: str) -> Tuple[Optional[bytes], str]:
+        """A JPEG from a camera address: a snapshot, the first frame of an
+        MJPEG stream (an address that streams), or a PNG or WebP picture
+        converted. Or why there's none."""
+        try:
+            with urllib.request.urlopen(url, timeout=SNAPSHOT_TIMEOUT) as resp:
+                buf = b""
+                while len(buf) <= SNAPSHOT_MAX:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    start = buf.find(b"\xff\xd8")
+                    if start >= 0:
+                        end = buf.find(b"\xff\xd9", start + 2)
+                        if end >= 0:
+                            return buf[start:end + 2], ""
+        except Exception as e:
+            return None, f"the camera didn't answer ({e})"
+        if len(buf) > SNAPSHOT_MAX:
+            return None, "no picture in the first 5 MB the camera sent"
+        start = buf.find(b"\xff\xd8")
+        if start >= 0:
+            return buf[start:], ""
+        try:
+            import io
+            from PIL import Image
+            img = Image.open(io.BytesIO(buf)).convert("RGB")
+            out = io.BytesIO()
+            img.save(out, "JPEG", quality=90)
+            return out.getvalue(), ""
+        except Exception:
+            head = buf[:40].decode("latin-1", "replace").strip()
+            return None, ("the camera sent something that isn't a picture"
+                          + (f" (it starts: {head!r})" if head else
+                             " (nothing)"))
+
+    def _snapshot_why(self, url: str) -> Tuple[Optional[str], str]:
+        """A snapshot for the editor, or why there's none."""
+        data, why = self._read_picture(url)
+        if data is None:
+            return None, why
+        tmpdir = tempfile.mkdtemp(prefix="pushraker_")
+        path = os.path.join(tmpdir, "snapshot.jpg")
+        with open(path, "wb") as f:
+            f.write(data)
+        return path, ""
 
     async def _fetch_snapshot(self, quiet: bool = False,
                               key: str = "") -> Optional[str]:
@@ -3005,7 +3093,8 @@ class PushNotifications:
         images say what they were: time, printer, notification, file, e.g.
         2026-10-22_17-05-03_U1-martha_50pct_Benchy.jpg. Letters, digits,
         . _ - only (it is also the email's inline image reference)."""
-        now = datetime.datetime.now(self.tz) if self.tz else \
+        now = datetime.datetime.now(self._zone()) if self._zone() \
+            else \
             datetime.datetime.now()
         # The notification as its title says it, without the emoji and the
         # printer's name ("⏳ U1-martha 50%" -> "50%")
@@ -3109,7 +3198,8 @@ class PushNotifications:
         # Gmail hides text a thread already showed ("•••"), so a repeated
         # notification (same fault twice) would look empty: the time at the
         # top and bottom keeps every email distinct.
-        now = datetime.datetime.now(self.tz) if self.tz else \
+        now = datetime.datetime.now(self._zone()) if self._zone() \
+            else \
             datetime.datetime.now()
         subject = title
         if thread is not None:
@@ -3396,9 +3486,10 @@ class PushNotifications:
         logging.info("[pushraker] %s: not sent, %s", what, why)
 
     def _clock(self, seconds_from_now: float) -> str:
-        if self.tz is None:
+        tz = self._zone()
+        if tz is None:
             return ""
-        now = datetime.datetime.now(self.tz)
+        now = datetime.datetime.now(tz)
         at = now + datetime.timedelta(seconds=seconds_from_now)
         days = (at.date() - now.date()).days
         return at.strftime("%H:%M") if days == 0 else \
@@ -3689,6 +3780,7 @@ class PushNotifications:
                     delay=PAUSE_SNAPSHOT_DELAY, event={"planned": False}))
         elif job_event == JobEvent.RESUMED:
             self._driver_hot_sent = False   # a hot driver may warn again
+            self._resumes += 1
             if ex is not None:
                 self._stale_fault = fault_key(ex)
             self._status["print_stats"].update(
@@ -3942,7 +4034,7 @@ class PushNotifications:
             self._skip(rid, "off")
             return
         self._custom_sent[c["name"]] = time.monotonic()
-        self._custom_job[c["name"]] = self._filament_job
+        self._custom_job[c["name"]] = (self._filament_job, self._resumes)
         await self._send(
             rid, f"🔔 {self.name} {c['name']}", "",
             filename=self._job_filename if self._job_active else "",
@@ -3958,7 +4050,11 @@ class PushNotifications:
         if last is not None and now - last < CUSTOM_GAP:
             return False
         if c["repeat"] == "job":
-            return self._custom_job.get(name) != self._filament_job
+            return self._custom_job.get(name, (None,))[0] != \
+                self._filament_job
+        if c["repeat"] == "job_pause":
+            return self._custom_job.get(name) != (self._filament_job,
+                                                  self._resumes)
         if c["repeat"] == "minutes" and last is not None:
             return now - last >= c["repeat_minutes"] * 60.
         return True
