@@ -199,7 +199,21 @@
     .pr-custom input.pr-code { margin-bottom: 8px; }
     #pr-when { height: auto; min-height: 0; resize: vertical; font-family: monospace; font-size: 13px; margin-bottom: 4px; }
     .pr-now { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+    .pr-now b { font-weight: 600; }
     .pr-now b.yes { color: var(--success); } .pr-now b.no { color: var(--muted); }
+    /* The name with its fixed pushraker. in front, in one box */
+    .pr-prefixed { display: flex; align-items: center; background: var(--item); border: 1px solid #555; border-radius: 6px; margin-bottom: 4px; cursor: text; }
+    .pr-prefixed:focus-within { border-color: var(--accent); }
+    .pr-prefixed .pr-prefix { padding: 9px 0 9px 10px; color: var(--muted); font-family: monospace; font-size: 13px; user-select: none; }
+    .pr-prefixed input { flex: 1; min-width: 0; border: none; background: transparent; padding: 9px 10px 9px 0; color: var(--text); font-size: 13px; font-family: monospace; }
+    .pr-prefixed input:focus { outline: none; }
+    #pr-cm-when .cm-editor { border: 1px solid #555; border-radius: 6px; font-size: 13px; margin-bottom: 4px; max-height: 160px; }
+    #pr-cm-when .cm-scroller { overflow: auto; font-family: monospace; }
+    .cm-placeholder { color: var(--muted) !important; font-style: italic; }
+    /* A field Done can't take: outlined; the reason next to Done */
+    .pr-bad, .pr-bad .cm-editor, .pr-prefixed.pr-bad { outline: 2px solid var(--error); outline-offset: -1px; }
+    .pr-buttons { position: relative; }
+    .pr-block-pop { position: absolute; left: 0; bottom: calc(100% + 8px); max-width: min(460px, 100%); background: var(--item); border: 1px solid var(--error); border-radius: 6px; padding: 8px 10px; font-size: 13px; color: var(--text); box-shadow: 0 4px 16px rgba(0,0,0,.4); z-index: 5; }
     .pr-now code { font-size: 11px; }
     .pr-repeat { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: #ddd; margin-bottom: 10px; }
     .pr-repeat select, .pr-repeat input { background: #2a2a2a; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 3px 6px; font-size: 13px; }
@@ -650,9 +664,10 @@
             <div class="pr-ed">
                 <div class="pr-custom" id="pr-custom" style="display:none">
                     <div class="pr-lbl">Name</div>
-                    <input class="nt-input pr-code" id="pr-cname" spellcheck="false" autocomplete="off" maxlength="32" placeholder="bed_cooled">
+                    <label class="pr-prefixed" id="pr-cname-wrap"><span class="pr-prefix">pushraker.</span><input id="pr-cname" spellcheck="false" autocomplete="off" maxlength="32" placeholder="bed_cooled" aria-label="Name"></label>
                     <div class="pr-lbl">When <button type="button" class="nt-i pr-info" data-info="A condition, checked every 5 seconds: sent when it turns true. Empty: sent only from G-code." data-guide="custom-notifications" aria-label="About">?</button></div>
-                    <textarea class="nt-input" id="pr-when" rows="2" spellcheck="false" autocomplete="off" placeholder="printer.heater_bed.temperature &lt; 40"></textarea>
+                    <textarea class="nt-input" id="pr-when" rows="2" spellcheck="false" autocomplete="off"></textarea>
+                    <div id="pr-cm-when"></div>
                     <div class="pr-now" id="pr-now"></div>
                     <div class="pr-repeat"><span>Send</span><select id="pr-repeat"><option value="change">each time it turns true (at most once a minute)</option><option value="job">once per print job</option><option value="job_pause">once per print job, again after a pause</option><option value="minutes">at most every # minutes</option></select><span id="pr-rmin-wrap"># = <input type="number" id="pr-rmin" min="1" max="1440" inputmode="numeric"></span></div>
                 </div>
@@ -697,6 +712,7 @@
             </div>
         </div>
         <div class="pr-buttons">
+            <div class="pr-block-pop" id="pr-block-pop" role="alert" style="display:none"></div>
             <button type="button" class="btn btn-save" id="pr-data-ok">Done</button>
             <span class="pr-gap"></span>
             <button type="button" class="btn btn-secondary" id="pr-data-cancel">Cancel</button>
@@ -1075,7 +1091,8 @@
         // What the tree says each item has (event.* lists)
         let found = null;
         const walk = n => { if (n.expr === list && n.item) found = n.item; (n.children || []).forEach(walk); };
-        (catalogues[editing && editing.key] || []).forEach(c => (c.children || []).forEach(walk));
+        const ck = editing ? (isCustom(editing.key) ? 'custom' : editing.key) : '';
+        (catalogues[ck] || []).forEach(c => (c.children || []).forEach(walk));
         if (found) return found;
         if (LOOP_FIELDS[list]) return LOOP_FIELDS[list];
         const k = Object.keys(LOOP_FIELDS).find(k => k.startsWith('.') && list.endsWith(k));
@@ -1176,7 +1193,18 @@
     // -- the two text fields: the title (a line) and the contents (a text
     // box, or CodeMirror when installed); values go to the one last used
     let activeField = 'contents';
-    let cmView = null;
+    let cmView = null, whenView = null;
+    let filling = false;        // fillEditor setting the fields: no change events
+    // A new custom notification's examples, shown while its fields are empty
+    const PH_WHEN = '"benchy" in job.file or "Benchy" in job.file';
+    const PH_CONTENTS = '🚢 Benchy McBenchface{% if job.objects.count >= 2 %}s{% endif %}, coming through! ⛵';
+    const phSpan = { when: document.createElement('span'), contents: document.createElement('span') };
+    function setPlaceholders(custom) {
+        phSpan.when.textContent = PH_WHEN;
+        phSpan.contents.textContent = custom ? PH_CONTENTS : '';
+        el('pr-when').placeholder = PH_WHEN;
+        el('pr-data-text').placeholder = custom ? PH_CONTENTS : '';
+    }
     function textareaField(t, isContents) {
         return {
             isContents,
@@ -1191,9 +1219,9 @@
             focus: () => t.focus()
         };
     }
-    function cmField(view) {
+    function cmField(view, isContents) {
         return {
-            isContents: true,
+            isContents: isContents !== false,
             get: () => view.state.doc.toString(),
             set: v => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: v } }),
             sel: () => [view.state.selection.main.from, view.state.selection.main.to],
@@ -1207,7 +1235,7 @@
     function field(which) {
         which = which || activeField;
         if (which === 'title') return textareaField(el('pr-t-title'), false);
-        if (which === 'when') return textareaField(el('pr-when'), false);
+        if (which === 'when') return whenView ? cmField(whenView, false) : textareaField(el('pr-when'), false);
         return cmView ? cmField(cmView) : textareaField(el('pr-data-text'), true);
     }
     // Where the cursor is: in {{ }}, in {% %}, or in plain text
@@ -1299,11 +1327,15 @@
         t.style.height = (t.scrollHeight + 2) + 'px';
     }
     function editorChanged() {
-        if (!editing) return;
+        if (!editing || filling) return;
+        el('pr-block-pop').style.display = 'none';
         growTitle();
         if (isCustom(editing.key)) {
-            editing.name = el('pr-cname').value.trim();
-            editing.when = el('pr-when').value;
+            // pushraker. is in front of the box already: a pasted one goes
+            const nm = el('pr-cname');
+            if (/^pushraker\./i.test(nm.value)) nm.value = nm.value.replace(/^pushraker\./i, '');
+            editing.name = nm.value.trim();
+            editing.when = field('when').get();
             editing.repeat = el('pr-repeat').value;
             editing.repeat_minutes = Math.max(1, Math.min(1440, parseInt(el('pr-rmin').value, 10) || 10));
             el('pr-rmin-wrap').style.display = editing.repeat === 'minutes' ? '' : 'none';
@@ -1315,23 +1347,39 @@
         clearTimeout(previewTimer);
         previewTimer = setTimeout(preview, 400);
     }
+    // The box each field is typed in (to outline when Done can't take it)
+    function fieldBox(f) {
+        return f === 'name' ? el('pr-cname-wrap') : f === 'when' ? (whenView ? el('pr-cm-when') : el('pr-when'))
+            : f === 'title' ? el('pr-t-title') : f === 'topic' ? el('pr-topic')
+            : (cmView ? el('pr-cm-host') : el('pr-data-text'));
+    }
+    let previewMsgs = [];
     function showErrors(r) {
         const err = el('pr-data-err');
-        const msgs = [];
-        if (r && r.placeholders && r.placeholders.length) msgs.push(`Replace # in <code>${esc(r.placeholders[0])}</code> with a number.`);
-        if (r && r.error) msgs.push(`${r.error.field === 'title' ? 'Title' : r.error.field === 'when' ? 'When' : 'Contents'}, ${esc(r.error.message)}`);
-        if (editing && editing.topic && !/^[A-Za-z0-9_-]{1,64}$/.test(editing.topic)) msgs.push('Topic: up to 64 letters, digits, - and _.');
-        else if (editing && editing.topic && el('nt-provider').value === 'telegram' && !/^\d+$/.test(editing.topic)) msgs.push('Topic ID: a number (the topic\'s ID).');
+        const msgs = [], bad = new Set();
+        if (r && r.placeholders && r.placeholders.length) {
+            msgs.push(`Replace # in <code>${esc(r.placeholders[0])}</code> with a number.`);
+            bad.add(editing && editing.title.includes(r.placeholders[0]) ? 'title' : 'contents');
+        }
+        if (r && r.error) {
+            const f = r.error.field === 'title' ? 'title' : r.error.field === 'when' ? 'when' : 'contents';
+            msgs.push(`${f === 'title' ? 'Title' : f === 'when' ? 'When' : 'Contents'}, ${esc(r.error.message)}`);
+            bad.add(f);
+        }
+        if (editing && editing.topic && !/^[A-Za-z0-9_-]{1,64}$/.test(editing.topic)) { msgs.push('Topic: up to 64 letters, digits, - and _.'); bad.add('topic'); }
+        else if (editing && editing.topic && el('nt-provider').value === 'telegram' && !/^\d+$/.test(editing.topic)) { msgs.push('Topic ID: a number (the topic\'s ID).'); bad.add('topic'); }
         if (editing && isCustom(editing.key)) {
             const c = customById(Number(editing.key.slice(7)));
-            const bad = !RX_CUSTOM_NAME.test(editing.name) ? 'Name: up to 32 letters, digits and _, starting with a letter.'
+            const nameBad = !RX_CUSTOM_NAME.test(editing.name) ? 'Name: up to 32 letters, digits and _, starting with a letter.'
                 : customs.some(o => o !== c && o.name.toLowerCase() === editing.name.toLowerCase()) ? 'Name: another custom notification has it.' : '';
-            if (bad) msgs.unshift(bad);
-            const now = !editing.when.trim() ? 'Sent only from G-code'
-                : r && typeof r.when_now === 'boolean' ? `Right now: <b class="${r.when_now ? 'yes' : 'no'}">${r.when_now}</b>${r.live_job ? '' : ' (with the sample print job)'}` : '';
-            el('pr-now').innerHTML = now + (editing.name ? ` · From G-code: <code>RESPOND PREFIX=notify_custom MSG=${esc(editing.name)}</code>` : '');
+            if (nameBad) { msgs.unshift(nameBad); bad.add('name'); }
+            // State: what the condition is now (empty: never true)
+            const st = !editing.when.trim() ? false : r && typeof r.when_now === 'boolean' ? r.when_now : null;
+            el('pr-now').innerHTML = st === null ? '' : `State: <b class="${st ? 'yes' : 'no'}">${st ? 'True' : 'False'}</b>`;
         }
+        ['name', 'when', 'title', 'contents', 'topic'].forEach(f => fieldBox(f).classList.toggle('pr-bad', bad.has(f)));
         previewError = msgs.length ? msgs.join(' ') : null;
+        previewMsgs = msgs;
         err.innerHTML = msgs.join('<br>');
         err.style.display = msgs.length ? '' : 'none';
     }
@@ -1465,9 +1513,13 @@
         el('pr-custom').style.display = custom ? '' : 'none';
         el('pr-data-reset').style.display = custom ? 'none' : '';
         el('pr-data-delete').style.display = custom ? '' : 'none';
+        filling = true;
+        setPlaceholders(custom);
+        el('pr-block-pop').style.display = 'none';
         if (custom) {
             el('pr-cname').value = editing.name;
             el('pr-when').value = editing.when;
+            if (whenView) field('when').set(editing.when);
             el('pr-repeat').value = editing.repeat;
             el('pr-rmin').value = editing.repeat_minutes;
             el('pr-now').innerHTML = '';
@@ -1475,6 +1527,7 @@
         el('pr-t-title').value = editing.title;
         field('contents').set(editing.contents);
         if (!cmView) el('pr-data-text').value = editing.contents;
+        filling = false;
         renderImages();
         editorChanged();
     }
@@ -1497,7 +1550,10 @@
     }
     async function closeEditor(keep) {
         if (keep && previewError) {
-            el('pr-data-err').scrollIntoView({ block: 'nearest' });
+            // Next to Done: why it can't close (the fields are outlined)
+            const pop = el('pr-block-pop');
+            pop.innerHTML = '⚠️ ' + previewMsgs.join('<br>⚠️ ');
+            pop.style.display = '';
             return;
         }
         if (editing && isCustom(editing.key)) {
@@ -1536,7 +1592,7 @@
         }
         if (c._saved && c._saved !== editing.name) {
             const ok = await confirmReset(
-                `G-code and macros that send this notification by its name (RESPOND PREFIX=notify_custom MSG=${c._saved}) stop working once you save: pushraker can't change them. Change them to MSG=${editing.name}.`,
+                `G-code and macros that send this notification by its name (RESPOND PREFIX=notify_custom MSG=pushraker.${c._saved}) stop working once you save: pushraker can't change them. Change them to MSG=pushraker.${editing.name}.`,
                 `⚠️ Rename ${c._saved} to ${editing.name}?`, 'Rename');
             if (!ok) return false;
         }
@@ -1552,7 +1608,7 @@
         if (!c) return false;
         if (c !== draft) {
             const ok = await confirmReset(
-                `${c._saved ? `G-code and macros that send it (RESPOND PREFIX=notify_custom MSG=${c._saved}) send nothing once you save. ` : ''}Deleted on Save & Apply.`,
+                `${c._saved ? `G-code and macros that send it (RESPOND PREFIX=notify_custom MSG=pushraker.${c._saved}) send nothing once you save. ` : ''}Deleted on Save & Apply.`,
                 `⚠️ Delete ${c.name || 'this custom notification'}?`, 'Delete');
             if (!ok) return false;
             customs = customs.filter(o => o !== c);
@@ -1641,7 +1697,8 @@
     function completionNames() {
         const out = new Set(['printer', 'job', 'extruders', 'event', 'machine', 'now', 'loop.index', 'loop.first', 'loop.last']);
         const walk = n => { if (n.expr) out.add(n.expr.replace(/#/g, '1')); (n.children || []).forEach(walk); };
-        (catalogues[editing && editing.key] || []).forEach(c => (c.children || []).forEach(walk));
+        const ck = editing ? (isCustom(editing.key) ? 'custom' : editing.key) : '';
+        (catalogues[ck] || []).forEach(c => (c.children || []).forEach(walk));
         const loop = editing ? loopAt(field('contents').get(), field('contents').sel()[0]) : null;
         if (loop) loopFields(loop.list).forEach(k => out.add(loop.name + '.' + k));
         return [...out];
@@ -1672,6 +1729,16 @@
         else return null;
         return { from: word.from, options, validFor: /^[\w.]*$/ };
     }
+    // When's completion: the whole field is an expression
+    function whenCompletions(ctx) {
+        const word = ctx.matchBefore(/[\w.]*$/);
+        if (!word || (word.from === word.to && !ctx.explicit)) return null;
+        const before = ctx.state.doc.sliceString(Math.max(0, word.from - 2), word.from);
+        const options = /\|\s?$/.test(before) ? FILTERS.map(f => ({ label: f, type: 'function' }))
+            : completionNames().map(n => ({ label: n, type: 'variable' }))
+                .concat(['and', 'or', 'not', 'in', 'is', 'defined', 'none', 'true', 'false'].map(k => ({ label: k, type: 'keyword' })));
+        return { from: word.from, options, validFor: /^[\w.]*$/ };
+    }
     async function mountEditor() {
         const host = el('pr-cm-host');
         if (cmView) return;
@@ -1689,6 +1756,7 @@
                     C.keymap.of([...C.completionKeymap, ...C.defaultKeymap, ...C.historyKeymap]),
                     C.StreamLanguage.define(C.jinja2), C.oneDark, C.bracketMatching(),
                     C.autocompletion({ override: [completions] }),
+                    C.placeholder(() => phSpan.contents),
                     C.EditorView.updateListener.of(u => {
                         if (u.docChanged) editorChanged();
                         else if (u.selectionSet) updateJinjaPane();
@@ -1698,6 +1766,27 @@
             })
         });
         ta.style.display = 'none';
+        // When: an expression on its own (no {{ }}), with the same colours
+        // and completion
+        whenView = new C.EditorView({
+            parent: el('pr-cm-when'),
+            state: C.EditorState.create({
+                doc: el('pr-when').value,
+                extensions: [
+                    C.history(), C.drawSelection(), C.EditorView.lineWrapping,
+                    C.keymap.of([...C.completionKeymap, ...C.defaultKeymap, ...C.historyKeymap]),
+                    C.StreamLanguage.define(C.jinja2), C.oneDark, C.bracketMatching(),
+                    C.autocompletion({ override: [whenCompletions] }),
+                    C.placeholder(() => phSpan.when),
+                    C.EditorView.updateListener.of(u => {
+                        if (u.docChanged) editorChanged();
+                        else if (u.selectionSet) updateJinjaPane();
+                        if (u.focusChanged && u.view.hasFocus) { activeField = 'when'; updateJinjaPane(); el('pr-blocks').style.display = 'none'; }
+                    })
+                ]
+            })
+        });
+        el('pr-when').style.display = 'none';
     }
     function unmountEditor() {
         if (!cmView) return;
@@ -1705,6 +1794,12 @@
         cmView.destroy();
         cmView = null;
         ta.style.display = '';
+        if (whenView) {
+            el('pr-when').value = whenView.state.doc.toString();
+            whenView.destroy();
+            whenView = null;
+            el('pr-when').style.display = '';
+        }
     }
     function cmDialog() {
         const st = cmStatus || {};

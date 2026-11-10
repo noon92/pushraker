@@ -2948,10 +2948,34 @@ async def test_custom_notifications():
     check("...and after one, again", c._custom_due(cust[0]))
     cust[0]["repeat"] = "change"
     c._on_gcode_response("notify_custom bed_cool")
-    c._on_gcode_response("notify_custom nobody")
+    c._on_gcode_response("notify_custom pushraker.nobody")
     await asyncio.sleep(0.3)
-    check("from G-code by name, whatever the condition",
+    check("from G-code: a plain name doesn't set it off", not log, log)
+    c._on_gcode_response("notify_custom pushraker.Bed_Cool")
+    await asyncio.sleep(0.3)
+    check("pushraker.<name>, whatever the condition and the case",
           [e["body"] for e in log] == ["Bed 35°C (asked)"], log)
+    log.clear()
+    c._custom_sent.clear()
+    c._on_gcode_response("notify_custom pushraker.bed_cool Layer "
+                         "{{ 3 * 4 }}\\nnext{% set priority = 'high' %}")
+    await asyncio.sleep(0.3)
+    check("...with Jinja added at the end: rendered, \\n a line break",
+          [e["body"] for e in log] == ["Bed 35°C (asked)\nLayer 12\nnext"],
+          log)
+    sent = []
+    real_send = c._send
+
+    async def capture(*a, **k):
+        sent.append((k.get("sets"), k.get("append")))
+    c._send = capture
+    c.settings = dict(c.settings, provider="ntfy", server="https://ntfy.sh")
+    await c._send_custom(cust[0], "gcode",
+                         "{% set topic = 'elsewhere' %}{% set priority = "
+                         "'high' %}x")
+    check("...what it sets wins; never a topic on the public ntfy server",
+          sent == [({"priority": "high"}, "x")], sent)
+    c._send = real_send
     log.clear()
     cust[0]["when"] = "printer.heater_bed.temperature <"
     await c._custom_check()

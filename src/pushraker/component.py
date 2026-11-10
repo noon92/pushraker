@@ -285,6 +285,11 @@ ACE_REFILL_WAIT = 180.
 MACRO_PREFIX = "notify "
 # RESPOND PREFIX=notify_custom MSG=<name>: send a custom notification
 CUSTOM_PREFIX = "notify_custom "
+# RESPOND PREFIX=notify_custom MSG="pushraker.<name> <Jinja added at the end>"
+# (the pushraker. keeps a plain word from setting one off by chance)
+CUSTOM_CALL = "pushraker."
+RX_CUSTOM_CALL = re.compile(r"pushraker\.([A-Za-z0-9_]+)(?:\s+(.*))?",
+                            re.I | re.S)
 # Custom notifications' conditions are checked this often (seconds); one
 # isn't sent again within CUSTOM_GAP of the last
 CUSTOM_INTERVAL = 5.
@@ -3150,6 +3155,7 @@ class PushNotifications:
         camera_wait: float = 0., event: Optional[Dict[str, Any]] = None,
         key: Optional[str] = None,
         sets: Optional[Dict[str, str]] = None,
+        append: str = "",
     ) -> bool:
         """Send one notification to each of its destinations; images are
         optional and never block it.
@@ -3173,7 +3179,10 @@ class PushNotifications:
                 await asyncio.sleep(delay)
             given = sets or {}
             title, body, sets = await self._compose(key, title, body, event)
-            # What the G-code message itself set wins over the template's
+            # What the G-code itself added: at the end; what it set wins
+            # over the template's
+            if append:
+                body = self._lines(body, append)
             sets = dict(sets, **given)
             topic = sets.get("topic") or self._template(key).get("topic") \
                 or ""
@@ -4196,14 +4205,25 @@ class PushNotifications:
         the line is only console output."""
         for line in str(response or "").splitlines():
             if line.startswith(CUSTOM_PREFIX):
-                name = line[len(CUSTOM_PREFIX):].strip()
-                c = next((c for c in (self.settings or {}).get("custom")
-                          or [] if c["name"] == name), None)
+                rest = line[len(CUSTOM_PREFIX):].strip()
+                m = RX_CUSTOM_CALL.fullmatch(rest)
+                customs = (self.settings or {}).get("custom") or []
+                if m is None:
+                    word = rest.split(" ", 1)[0]
+                    hint = f"; did you mean MSG=pushraker.{word}?" if any(
+                        c["name"].lower() == word.lower()
+                        for c in customs) else ""
+                    logging.info("[pushraker] notify_custom: %r is not "
+                                 "pushraker.<name>%s", rest[:60], hint)
+                    continue
+                name, extra = m.group(1).lower(), (m.group(2) or "").strip()
+                c = next((c for c in customs
+                          if c["name"].lower() == name), None)
                 if c is None:
                     logging.info("[pushraker] notify_custom: no custom "
                                  "notification named %s", name)
                     continue
-                self._spawn(self._send_custom(c, "gcode"))
+                self._spawn(self._send_custom(c, "gcode", extra))
                 continue
             if not line.startswith(MACRO_PREFIX):
                 continue
@@ -4222,19 +4242,32 @@ class PushNotifications:
 
     # ---- custom notifications ------------------------------------------
 
-    async def _send_custom(self, c: Dict[str, Any], trigger: str) -> None:
+    async def _send_custom(self, c: Dict[str, Any], trigger: str,
+                           extra: str = "") -> None:
         """Send a custom notification (its condition turned true, or
-        G-code asked for it)."""
+        G-code asked for it). `extra`: Jinja the G-code added, rendered on
+        its own and put at the end; what it sets wins over the
+        template's."""
         rid = cfgmod.custom_rid(c["name"])
         if rid not in self.rows:
             self._skip(rid, "off")
             return
         self._custom_sent[c["name"]] = time.monotonic()
         self._custom_job[c["name"]] = (self._job_number, self._resumes)
+        event = {"name": c["name"], "trigger": trigger}
+        added, sets = "", {}
+        if extra:
+            extra = extra.replace("\\n", "\n")
+            try:
+                ctx = await self._template_context([extra], event=event)
+                _t, added, sets = await self._render_pair("", extra, ctx)
+            except jj.TemplateError as e:
+                added = f"⚠️ Template error in the G-code: {e}"
+            sets = self._gcode_sets(sets, f"custom {c['name']}")
         await self._send(
             rid, f"🔔 {self.name} {c['name']}", "",
             filename=self._job_filename if self._job_active else "",
-            event={"name": c["name"], "trigger": trigger})
+            event=event, sets=sets, append=added)
 
     def _custom_due(self, c: Dict[str, Any]) -> bool:
         """Whether a condition that just turned true may send now: never
@@ -4310,6 +4343,20 @@ class PushNotifications:
             except Exception as e:
                 logging.warning("[pushraker] custom notifications: %s", e)
 
+    def _gcode_sets(self, sets: Dict[str, str], what: str
+                    ) -> Dict[str, str]:
+        """What Jinja from G-code set (which may come from a file someone
+        shared): a topic not on the public ntfy server, where anyone can
+        read any topic, so it can't send the printer's details elsewhere."""
+        sets = dict(sets)
+        st = self.settings or {}
+        if sets.get("topic") and st.get("provider") == "ntfy" and \
+                cfgmod.is_public(str(st.get("server") or "")):
+            logging.warning("[pushraker] ⚠️ %s: topic %r not used: on the "
+                            "public ntfy server G-code can't choose the "
+                            "topic", what, sets.pop("topic"))
+        return sets
+
     async def _macro(self, rid: str, title: str, message: str,
                      priority: str) -> None:
         """A notification from G-code. Its title and message may hold Jinja
@@ -4332,15 +4379,7 @@ class PushNotifications:
             except jj.TemplateError as e:
                 message = self._lines(message,
                                       f"⚠️ Template error in the G-code (sent as written): {e}")
-        # A topic set in a G-code message (which may come from a file
-        # someone shared): not on the public ntfy server, where anyone can
-        # read any topic, so it can't send the printer's details elsewhere
-        st = self.settings or {}
-        if sets.get("topic") and st.get("provider") == "ntfy" and \
-                cfgmod.is_public(str(st.get("server") or "")):
-            logging.warning("[pushraker] ⚠️ macro: topic %r not used: on the "
-                            "public ntfy server a G-code message can't "
-                            "choose its topic", sets.pop("topic"))
+        sets = self._gcode_sets(sets, "macro")
         # A priority set in it: that priority's row (each has its own
         # services, and may be off)
         want = sets.pop("priority", None)

@@ -531,15 +531,17 @@ the template sets): `now.time` (`23:05`), `.hour`, `.minute`, `.date`
 Notifications of your own, under **Custom** at the end of the table. **➕
 Add custom notification** opens the editor with three more fields:
 
-- **Name**: letters, digits and `_`, starting with a letter. It's the
-  notification's name in the table and how G-code sends it. Renaming a
-  saved one warns first: G-code and macros that use the old name stop
-  working, and pushraker can't change them.
+- **Name**: letters, digits and `_`, starting with a letter, after a fixed
+  `pushraker.`. It's the notification's name in the table, and G-code sends
+  it as `pushraker.<name>`. Renaming a saved one warns first: G-code and
+  macros that use the old name stop working, and pushraker can't change
+  them.
 - **When**: a condition, as in an `if` (without `{% if %}`), checked every
   5 seconds. The notification is sent when it turns true; a condition that
-  is already true when pushraker starts isn't. **Right now** under it shows
-  what it is with the printer's values (and the sample print job when none
-  is running). Empty: sent only from G-code.
+  is already true when pushraker starts isn't. **State** under it shows
+  what it is now, True or False, with the printer's values (and the sample
+  print job when none is running). Empty: never true; sent only from
+  G-code.
 - **Send**: each time it turns true (never more than once a minute), once
   per print job, once per print job and again after a pause, or at most
   every # minutes.
@@ -550,11 +552,25 @@ job.progress >= 90 and job.filaments.count > 1
 printer["temperature_sensor cavity"].temperature > 55
 ```
 
-From G-code or a macro, whatever its condition:
+From G-code or a macro, whatever its condition, as `pushraker.<name>` (in
+any case; a plain name does nothing, so a word can't set one off by
+chance):
 
 ```
-RESPOND PREFIX=notify_custom MSG=bed_cool
+RESPOND PREFIX=notify_custom MSG=pushraker.bed_cool
 ```
+
+Jinja after the name is added at the end of the notification. It can do
+anything a template can: values, `{% if %}`, `{% set priority = 'high' %}`
+(what it sets wins over the template's), `\n` for a line break. Inside
+`MSG="…"` use single quotes for strings, and in a macro wrap it in
+`{% raw %}…{% endraw %}`:
+
+```
+RESPOND PREFIX=notify_custom MSG="pushraker.bed_cool Layer {{ job.layer }}{% set priority = 'high' %}"
+```
+
+On the public ntfy.sh server, G-code can't set the topic.
 
 Its title, contents and image work like any other notification's, with
 `event.name` (its name) and `event.trigger` (`condition` or `gcode`). In

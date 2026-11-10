@@ -427,7 +427,8 @@ CUSTOM_DEFAULT = {
     "enabled": True, "priority": "default", "email": False,
     "when": "",
     "title": "🔔 {{ machine.name }} {{ event.name }}",
-    "contents": "{% if job.file %}\n{{ job.file }}\n{% endif %}",
+    # Empty: the editor shows an example; sent empty, the title stands alone
+    "contents": "",
     "image": "camera", "camera": "", "topic": "",
     "repeat": "change", "repeat_minutes": 10,
 }

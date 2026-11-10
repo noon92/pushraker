@@ -50,7 +50,7 @@ FONT_DIRS = ("/usr/share/fonts/truetype/dejavu", "/usr/share/fonts/dejavu",
              "/usr/share/fonts/TTF", "/usr/share/fonts")
 _fonts: Dict[Tuple[bool, int], Any] = {}
 # The printer has no font files: Pillow's built-in font (one weight) is
-# used, and bold is drawn with an outline
+# used, and bold is drawn by striking each letter twice
 _fake_bold = False
 
 
@@ -207,8 +207,9 @@ def _text(d: ImageDraw.ImageDraw, xy: Tuple[float, float], text: str,
         if center:
             x -= (sum(widths) + gap * (len(text) - 1)) / 2
         for c, w in zip(text, widths):
-            d.text((x, y), c, font=f, fill=fill, stroke_width=1,
-                   stroke_fill=fill)
+            # Struck twice, a pixel apart: bold, lighter than an outline
+            d.text((x, y), c, font=f, fill=fill)
+            d.text((x + 1, y), c, font=f, fill=fill)
             x += w + gap
         return
     if center:
