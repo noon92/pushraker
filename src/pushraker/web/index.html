@@ -617,7 +617,7 @@
 
 <div class="pr-modal pr-discard" id="pr-discard" role="alertdialog" aria-labelledby="pr-discard-title">
     <div class="pr-modal-box">
-        <h3 id="pr-discard-title">Discard changes?</h3>
+        <h3 id="pr-discard-title">⚠️ Discard changes?</h3>
         <p>The settings go back to the last saved ones. The changes you made on this page will not be kept.</p>
         <div class="pr-buttons">
             <button type="button" class="btn btn-discard" id="pr-discard-yes" disabled>Discard changes</button>
@@ -702,7 +702,7 @@
 
 <div class="pr-modal pr-discard" id="pr-reset" role="alertdialog" aria-labelledby="pr-reset-title">
     <div class="pr-modal-box">
-        <h3 id="pr-reset-title">Reset this notification?</h3>
+        <h3 id="pr-reset-title">⚠️ Reset this notification?</h3>
         <p id="pr-reset-text"></p>
         <div class="pr-buttons">
             <button type="button" class="btn btn-discard" id="pr-reset-yes" disabled>Reset</button>
@@ -1459,7 +1459,7 @@
         if (c !== draft) {
             const ok = await confirmReset(
                 `${c._saved ? `G-code and macros that send it (RESPOND PREFIX=notify_custom MSG=${c._saved}) send nothing once you save. ` : ''}Deleted on Save & Apply.`,
-                `Delete ${c.name || 'this custom notification'}?`, 'Delete');
+                `⚠️ Delete ${c.name || 'this custom notification'}?`, 'Delete');
             if (!ok) return;
             customs = customs.filter(o => o !== c);
             renderCustomRows();
@@ -1480,7 +1480,7 @@
         return new Promise(resolve => {
             const box = el('pr-reset'), yes = el('pr-reset-yes'), no = el('pr-reset-no');
             el('pr-reset-text').textContent = text;
-            el('pr-reset-title').textContent = title || 'Reset this notification?';
+            el('pr-reset-title').textContent = title || '⚠️ Reset this notification?';
             label = label || 'Reset';
             let left = 3, timer = null;
             const tick = () => {
