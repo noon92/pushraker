@@ -1602,43 +1602,48 @@ class PushNotifications:
             except Exception as e:
                 logging.warning("[pushraker] template query: %s", e)
         resolve = await self._resolver(tokens, state, sample)
-        # event.now: when the notification was set off (_send marks it)
+        # event.time: when the notification was set off (_send marks it)
         ev = dict(event or {})
         at = ev.pop("_at", None) or time.time()
         ev = jj.prune(ev)
-        ev["now"] = self._now_view(at)
+        ev["time"] = self._time_view(at)
         return {"printer": state,
                 "job": self._job_view(resolve, sample),
                 "extruders": self._extruders_view(resolve, state, sample),
                 "event": ev,
                 "machine": self._machine()}
 
-    # event.now.*: when the notification was set off, in its time zone
-    NOW_FIELDS = ("time", "hour", "minute", "date", "day", "month",
-                  "month_name", "year", "weekday", "weekday_number",
-                  "timezone")
+    # event.time: when the notification was set off, in its time zone;
+    # {{ event.time }} is the clock time, its parts are fields
+    TIME_FIELDS = ("hour", "minute", "date", "day", "month", "month_name",
+                   "year", "weekday", "weekday_number", "timezone",
+                   "timestamp")
 
-    def _now_values(self, when: Optional[float] = None) -> Dict[str, Any]:
+    def _time_values(self, when: Optional[float] = None) -> Dict[str, Any]:
         tz = self._zone()
         when = time.time() if when is None else when
         at = datetime.datetime.fromtimestamp(when, tz) if tz else \
             datetime.datetime.fromtimestamp(when)
-        return {"time": at.strftime("%H:%M"), "hour": at.hour,
+        return {"clock": tp.Clock(at, 0), "hour": at.hour,
                 "minute": at.minute, "date": at.strftime("%Y-%m-%d"),
                 "day": at.day, "month": at.month,
                 "month_name": at.strftime("%B"), "year": at.year,
                 "weekday": at.strftime("%A"),
                 "weekday_number": at.isoweekday(),
-                "timezone": str(tz) if tz else None}
+                "timezone": str(tz) if tz else None,
+                "timestamp": int(when)}
 
-    def _now_view(self, when: float) -> jj.View:
-        """The time `when`, read when the template reads it, so
+    def _time_view(self, when: float) -> jj.View:
+        """event.time at `when`, read when the template reads it, so
         {% set timezone %} applies."""
         def look(path: List[str]) -> Any:
-            if len(path) == 1 and path[0] in self.NOW_FIELDS:
-                return self._now_values(when)[path[0]]
+            if path == ["time"]:
+                return self._time_values(when)["clock"]
+            if len(path) == 2 and path[1] in self.TIME_FIELDS:
+                return self._time_values(when)[path[1]]
             return None
-        return jj.View(look, lambda p: False, lambda p: None, [], "now")
+        return jj.View(look, lambda p: p == ["time"], lambda p: None,
+                       ["time"], "event.time")
 
     def _job_view(self, resolve: Any, sample: bool) -> jj.View:
         def look(path: List[str]) -> Any:
@@ -2447,16 +2452,20 @@ class PushNotifications:
             # What the notification can also have, for the tree (the
             # preview shows the plain case)
             event.update(SAMPLE_EXTRA.get(key, {}))
-            now = self._value_tree("event.now", self._now_values())
+            tv = self._time_values()
+            parts = self._value_tree("event.time", {
+                k: v for k, v in tv.items() if k != "clock"})
             cats.insert(0, {"id": "event", "label": "⚡ This notification",
                             "hint": "event", "info": "What this notification is about. The "
                             "preview shows a sample.", "guide": "event",
                             "children": self._value_tree("event", event) + [{
-                                "name": "now", "label": "now",
+                                "name": "time", "expr": "event.time",
                                 "hint": "🕐 when it was set off",
-                                "info": "In its time zone. weekday_number: "
-                                "1 Monday to 7 Sunday.",
-                                "children": now}]})
+                                "info": "{{ event.time }}: the clock time, in "
+                                "its time zone. weekday_number: 1 Monday to "
+                                "7 Sunday; timestamp: Unix seconds.",
+                                "formats": tp.format_options(tv["clock"]),
+                                "children": parts}]})
         cats.insert(len(cats) - 1, {"id": "machine", "label": "🖥️ Machine",
                      "children": self._value_tree(
                          "machine", jj.prune(self._machine()))})
@@ -3232,7 +3241,7 @@ class PushNotifications:
         if row is None:
             return False
         key = key or rid
-        # event.now: this moment, even when the sending waits
+        # event.time: this moment, even when the sending waits
         event = dict(event or {}, _at=time.time())
         await self._parity(key, title, body, event)
         image, dests = row

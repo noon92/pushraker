@@ -3132,24 +3132,27 @@ async def test_now_values():
                                       False)]})
     import zoneinfo
     c.tz = zoneinfo.ZoneInfo("Asia/Jerusalem")
-    text = "{{ event.now.time }}|{{ event.now.weekday }}|" \
-        "{{ event.now.weekday_number }}|{{ event.now.day }}|" \
-        "{% if event.now.hour < 24 %}ok{% endif %}"
+    text = "{{ event.time }}|{{ event.time.weekday }}|" \
+        "{{ event.time.weekday_number }}|{{ event.time.day }}|" \
+        "{% if event.time.hour < 24 %}ok{% endif %}"
     ctx = await c._template_context([text])
     got = pn.jj.render(text, ctx)
     at = datetime.datetime.now(c.tz)
-    check("event.now: time, weekday, its number, day, compares as a number",
+    check("event.time: the time, weekday, its number, day, compares as a "
+          "number",
           got is not None and got.split("|")[1:] == [
               at.strftime("%A"), str(at.isoweekday()), str(at.day), "ok"]
           and re.fullmatch(r"\d\d:\d\d", got.split("|")[0]), got)
     # The moment it was set off, not when the template reads it
     then = time.time() - 3 * 3600
-    ctx = await c._template_context(["{{ event.now.time }}"],
+    ctx = await c._template_context(["{{ event.time }}"],
                                     event={"_at": then})
     want = datetime.datetime.fromtimestamp(then, c.tz).strftime("%H:%M")
-    check("event.now: when the notification was set off",
-          pn.jj.render("{{ event.now.time }}", ctx) == want)
-    check("now.* is gone (event.now.*)",
+    check("event.time: when the notification was set off",
+          pn.jj.render("{{ event.time }}", ctx) == want
+          and pn.jj.render("{{ event.time.timestamp }}", ctx)
+          == str(int(then)))
+    check("now.* is gone (event.time)",
           pn.jj.render("{{ now }}", ctx) in ("", "n/a"))
 
 

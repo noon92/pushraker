@@ -664,7 +664,7 @@
             <div class="pr-ed">
                 <div class="pr-custom" id="pr-custom" style="display:none">
                     <div class="pr-lbl">Name</div>
-                    <label class="pr-prefixed" id="pr-cname-wrap"><span class="pr-prefix">pushraker.</span><input id="pr-cname" spellcheck="false" autocomplete="off" maxlength="32" placeholder="bed_cooled" aria-label="Name"></label>
+                    <label class="pr-prefixed" id="pr-cname-wrap"><span class="pr-prefix">pushraker.</span><input id="pr-cname" spellcheck="false" autocomplete="off" maxlength="32" placeholder="benchy_detected" aria-label="Name"></label>
                     <div class="pr-lbl">When <button type="button" class="nt-i pr-info" data-info="A condition, checked every 5 seconds: sent when it turns true. Empty: sent only from G-code." data-guide="custom-notifications" aria-label="About">?</button></div>
                     <textarea class="nt-input" id="pr-when" rows="2" spellcheck="false" autocomplete="off"></textarea>
                     <div id="pr-cm-when"></div>
@@ -1196,7 +1196,7 @@
     let cmView = null, whenView = null;
     let filling = false;        // fillEditor setting the fields: no change events
     // A new custom notification's examples, shown while its fields are empty
-    const PH_WHEN = '"benchy" in job.file or "Benchy" in job.file';
+    const PH_WHEN = '"benchy" or "Benchy" in job.file';
     const PH_CONTENTS = '🚢 Benchy McBenchface{% if job.objects.count >= 2 %}s{% endif %}, coming through! ⛵';
     const phSpan = { when: document.createElement('span'), contents: document.createElement('span') };
     function setPlaceholders(custom) {

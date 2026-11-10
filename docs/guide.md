@@ -515,17 +515,18 @@ the tree lists what each one has. For example:
 `.pushraker_version`, `.moonraker_version`, `.klipper_version`,
 `.links.web_ui` `.camera` `.errors`.
 
-### event.now
+### event.time
 
 When the notification was set off (not when its template happens to be
-read), in its time zone (the page's, or one the template sets):
-`event.now.time` (`23:05`), `.hour`, `.minute`, `.date` (`2026-11-11`),
-`.day`, `.month`, `.month_name`, `.year`, `.weekday` (`Wednesday`),
-`.weekday_number` (1 Monday to 7 Sunday), `.timezone`. Every notification
-has it, custom ones' When too.
+read), in its time zone (the page's, or one the template sets).
+`{{ event.time }}` is the clock time (`23:05`); its parts: `.hour`,
+`.minute`, `.date` (`2026-11-11`), `.day`, `.month`, `.month_name`,
+`.year`, `.weekday` (`Wednesday`), `.weekday_number` (1 Monday to 7
+Sunday), `.timezone`, `.timestamp` (Unix seconds). Every notification has
+it, custom ones' When too.
 
 ```jinja
-{% if event.now.hour < 7 %}
+{% if event.time.hour < 7 %}
 {% set priority = "low" %}
 {% endif %}
 ```
