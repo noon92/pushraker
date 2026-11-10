@@ -179,6 +179,28 @@ class View:
     def __truediv__(self, o: Any) -> Any:
         return self._op(o, lambda a, b: a / b, NA(name=self._name))
 
+    def __rtruediv__(self, o: Any) -> Any:
+        return self._op(o, lambda a, b: b / a, NA(name=self._name))
+
+    def __floordiv__(self, o: Any) -> Any:
+        return self._op(o, lambda a, b: a // b, NA(name=self._name))
+
+    def __mod__(self, o: Any) -> Any:
+        return self._op(o, lambda a, b: a % b, NA(name=self._name))
+
+    def __neg__(self) -> Any:
+        value = self._value()
+        return -value if isinstance(value, (int, float)) else \
+            NA(name=self._name)
+
+    def __abs__(self) -> Any:
+        value = self._value()
+        return abs(value) if isinstance(value, (int, float)) else \
+            NA(name=self._name)
+
+    def __contains__(self, item: Any) -> bool:
+        return raw(item) in list(self.__iter__())
+
     def __int__(self) -> int:
         return int(self._value() or 0)
 
