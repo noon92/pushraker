@@ -3154,6 +3154,14 @@ async def test_camera_pictures():
         shutil.rmtree(os.path.dirname(path), ignore_errors=True)
     data, why = pn.PushNotifications._read_picture("file://" + files["snap.jpg"])
     check("a file:// address isn't read", data is None and "http" in why, why)
+    got = [pn.PushNotifications._read_picture(u)[1] for u in (
+        "rtsp://cam/live", "rtsps://cam/live", "http://cam/live.m3u8",
+        "webrtc://cam/live")]
+    check("RTSP, HLS, WebRTC streams: say they're unsupported", got == [
+        "Error: RTSP stream snapshots unsupported.",
+        "Error: RTSP stream snapshots unsupported.",
+        "Error: HLS stream snapshots unsupported.",
+        "Error: WebRTC stream snapshots unsupported."], got)
     mod = sys.modules[pn.PushNotifications.__module__]
     real, mod.SNAPSHOT_TOTAL = mod.SNAPSHOT_TOTAL, 0.5
     t0 = time.monotonic()

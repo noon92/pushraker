@@ -1202,10 +1202,9 @@ class PushNotifications:
                         except Exception:
                             if "://" not in snap:
                                 snap = "http://127.0.0.1/" + snap.lstrip("/")
-                    if not snap and stream and not stream.startswith(
-                            ("webrtc", "ws")):
-                        # No snapshot address: a frame from the stream
-                        # (an MJPEG stream; other kinds give no picture)
+                    if not snap and stream:
+                        # No snapshot address: a frame from the stream (an
+                        # MJPEG stream; RTSP, HLS and WebRTC say they can't)
                         snap = stream if "://" in stream else \
                             "http://127.0.0.1/" + stream.lstrip("/")
                     cams[str(name)] = {"snapshot": snap, "stream": stream}
@@ -2962,7 +2961,15 @@ class PushNotifications:
         """A JPEG from a camera address: a snapshot, the first frame of an
         MJPEG stream (an address that streams), or a PNG or WebP picture
         converted. Or why there's none. http and https only."""
-        if urllib.parse.urlsplit(url).scheme.lower() not in ("http", "https"):
+        parts = urllib.parse.urlsplit(url)
+        scheme = parts.scheme.lower()
+        # Video streams need a decoder (ffmpeg) or a live connection
+        kind = "RTSP" if scheme in ("rtsp", "rtsps") else \
+            "WebRTC" if scheme.startswith(("webrtc", "ws")) else \
+            "HLS" if parts.path.lower().endswith(".m3u8") else ""
+        if kind:
+            return None, f"Error: {kind} stream snapshots unsupported."
+        if scheme not in ("http", "https"):
             return None, "only http and https camera addresses are read"
         deadline = time.monotonic() + SNAPSHOT_TOTAL
         try:
