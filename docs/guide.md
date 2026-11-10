@@ -502,7 +502,7 @@ the tree lists what each one has. For example:
 | Manual calibrations | `event.calibration.name` `.result` `.next` |
 | Driver running hot | `event.limit`, `event.drivers` (each: `name`, `temperature`, `hot`) |
 | Chamber | `event.chamber.temperature` `.target`; faults: `.kind` `.stalled_minutes` `.waiting` |
-| Filament loaded / unloaded | `event.loaded`, `event.extruder`, `event.filament.name` `.grams_left` `.spool_id` |
+| Filament loaded / unloaded | `event.loaded`, `event.extruder`, `event.filament.name` `.grams_left` `.grams_full` `.spool_id` |
 | Not enough filament, Spool running low | `event.count`, `event.issues` (each: `extruder`, `name`, `grams_left`, `grams_needed`, `status`, `refill`, `backups`, `together`, `blockers`, …) |
 | Switched to backup spool | `event.ace`, `event.from` / `event.to` (`label`, `extruder`, `name`, `spool_id`, `grams_left`) |
 | Spool in ACE slot ran out | `event.extruder`, `event.slot.label` `.name`, `event.next`, `event.quad_replenish.on` `.where` |
@@ -598,7 +598,10 @@ RESPOND PREFIX=notify MSG="Print ejection failed || Plate still occupied, queue 
   renders it:
   `RESPOND PREFIX=notify MSG="{% raw %}Ejected {{ job.file }} || ETA of the next: {{ job.queue.next.eta }}{% endraw %}"`.
   `{% if %}` works, and so does `{% set %}`, as in a template: `priority`
-  (it picks that priority's row), `image`, `topic`, `timezone`.
+  (it picks that priority's row), `image`, `topic`, `timezone`. On the
+  public ntfy.sh server a G-code message can't set its topic: anyone can
+  read any topic there, and a G-code file from someone else could send your
+  printer's details to theirs.
   From the console, without a macro, no `{% raw %}` is needed:
   `RESPOND PREFIX=notify MSG="Bed {{ printer.heater_bed.temperature|round|int }}°C || {% if job.layer > 10 %}{% set priority = 'high' %}{% endif %}Line one\nLine two"`.
   Inside `MSG="…"`, write strings in single quotes: Klipper drops double

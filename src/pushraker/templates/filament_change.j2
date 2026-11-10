@@ -1,4 +1,4 @@
 {{ event.extruder|toolhead("Toolhead #") }}{% if event.filament.name %}: {{ event.filament.name }}{% endif %}
 {% if event.filament.grams_left %}
-{{ event.filament.grams_left|round|int }} g left
+{{ event.filament.grams_left|round|int }}{% if event.filament.grams_full %}/{{ event.filament.grams_full|round|int }}{% endif %} g left
 {% endif %}

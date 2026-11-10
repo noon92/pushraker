@@ -61,6 +61,7 @@ import shutil
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 from typing import (
     TYPE_CHECKING, Any, Awaitable, Dict, List, NamedTuple, Optional, Sequence, Set,
@@ -261,6 +262,7 @@ SETTINGS_POLL = 20.
 HOOKS_MACRO = "_NTFY_HOOKS"
 ORDINALS = {1: "1st", 2: "2nd", 3: "3rd"}
 SNAPSHOT_TIMEOUT = 5.
+SNAPSHOT_TOTAL = 10.        # seconds for a whole picture, however it trickles
 SNAPSHOT_MAX = 5 * 1024 * 1024
 # A pause is reported when it starts; the head moves away from the part
 # afterwards, so the snapshot waits (the bed doesn't lower on a pause).
@@ -1031,6 +1033,8 @@ class PushNotifications:
         # Resumes so far: "once per print job, again after a pause"
         self._resumes = 0
         self._custom_err: Dict[str, str] = {}
+        # A When that ran past its time, as it was: skipped until changed
+        self._custom_stuck: Dict[str, str] = {}
         self._filament_job = 0      # bumped per job; stops an old watcher
         self._job_map: List[Any] = []       # extruder_map_table at start
         self._job_tools: Set[int] = set()   # slicer filaments the job uses
@@ -1744,7 +1748,7 @@ class PushNotifications:
             return await asyncio.wait_for(self.eventloop.run_in_thread(
                 self._render_in_zone, text, ctx, tz), TEMPLATE_TIMEOUT)
         except asyncio.TimeoutError:
-            raise jj.TemplateError(
+            raise jj.TemplateTimeout(
                 f"took longer than {TEMPLATE_TIMEOUT:.0f} seconds") from None
 
     @staticmethod
@@ -2609,7 +2613,7 @@ class PushNotifications:
             name, sid, rem, _col = SAMPLE_SPOOLS[0]
             return {"loaded": True, "extruder": self._ext_name(0),
                     "filament": {"name": name, "grams_left": rem,
-                                 "spool_id": sid}}
+                                 "grams_full": 1000., "spool_id": sid}}
         if key in ("filament_short", "filament_low"):
             it = self._sample_issue(low=key == "filament_low")
             return {"file": file if key == "filament_short" else None,
@@ -2957,12 +2961,20 @@ class PushNotifications:
     def _read_picture(url: str) -> Tuple[Optional[bytes], str]:
         """A JPEG from a camera address: a snapshot, the first frame of an
         MJPEG stream (an address that streams), or a PNG or WebP picture
-        converted. Or why there's none."""
+        converted. Or why there's none. http and https only."""
+        if urllib.parse.urlsplit(url).scheme.lower() not in ("http", "https"):
+            return None, "only http and https camera addresses are read"
+        deadline = time.monotonic() + SNAPSHOT_TOTAL
         try:
             with urllib.request.urlopen(url, timeout=SNAPSHOT_TIMEOUT) as resp:
                 buf = b""
                 while len(buf) <= SNAPSHOT_MAX:
-                    chunk = resp.read(65536)
+                    if time.monotonic() > deadline:
+                        return None, ("the camera took longer than "
+                                      f"{SNAPSHOT_TOTAL:.0f} seconds")
+                    # What has arrived (read() waits for all 64 kB)
+                    chunk = resp.read1(65536) if hasattr(resp, "read1") \
+                        else resp.read(65536)
                     if not chunk:
                         break
                     buf += chunk
@@ -4170,8 +4182,10 @@ class PushNotifications:
     async def _custom_check(self) -> None:
         """One look at every custom notification's condition: one query
         for all of them; one that turns true (false before) is sent."""
+        # One whose When ran too long waits until its When is changed
         items = [c for c in (self.settings or {}).get("custom") or []
-                 if c["when"] and cfgmod.custom_rid(c["name"]) in self.rows]
+                 if c["when"] and cfgmod.custom_rid(c["name"]) in self.rows
+                 and self._custom_stuck.get(c["name"]) != c["when"]]
         live = {c["name"] for c in items}
         for name in list(self._custom_was):
             if name not in live:
@@ -4186,6 +4200,12 @@ class PushNotifications:
                 now = (await self._render(text, dict(
                     ctx, event={"name": name, "trigger": "condition"}))
                 ) == "1"
+            except jj.TemplateTimeout as e:
+                self._custom_stuck[name] = c["when"]
+                logging.warning("[pushraker] ⚠️ custom notification %s, "
+                                "When: %s; not checked again until its When "
+                                "is changed", name, e)
+                continue
             except jj.TemplateError as e:
                 if self._custom_err.get(name) != str(e):
                     logging.warning("[pushraker] custom notification %s, "
@@ -4236,11 +4256,21 @@ class PushNotifications:
             except jj.TemplateError as e:
                 message = self._lines(message,
                                       f"⚠️ Template error in the G-code (sent as written): {e}")
+        # A topic set in a G-code message (which may come from a file
+        # someone shared): not on the public ntfy server, where anyone can
+        # read any topic, so it can't send the printer's details elsewhere
+        st = self.settings or {}
+        if sets.get("topic") and st.get("provider") == "ntfy" and \
+                cfgmod.is_public(str(st.get("server") or "")):
+            logging.warning("[pushraker] ⚠️ macro: topic %r not used: on the "
+                            "public ntfy server a G-code message can't "
+                            "choose its topic", sets.pop("topic"))
         # A priority set in it: that priority's row (each has its own
         # services, and may be off)
         want = sets.pop("priority", None)
         if want:
             if f"macro_{want}" not in self.rows:
+                self._skip("macro", f"{want} notifications are off")
                 return
             rid, priority = f"macro_{want}", want
         await self._send(
@@ -4574,10 +4604,15 @@ class PushNotifications:
         if name:
             self._exist_names[ch] = name
         title = self._title("filament_loaded" if now else "filament_unloaded")
+        full = self._full_weight(spool)
+        left = ""
+        if remaining is not None and remaining > 0:
+            # 161/1000 g left: of the spool's full weight, when known
+            left = f"{remaining:.0f}/{full:.0f} g left" if full else \
+                f"{remaining:.0f} g left"
         body = self._lines(
             f"{self._toolhead(ch)}: {name}" if name else self._toolhead(ch),
-            f"{remaining:.0f} g left" if remaining is not None
-            and remaining > 0 else "")
+            left)
         # The spool picture: its colour from Spoolman or the printer, the
         # amount only when Spoolman knows it
         row = dict(toolhead=self._toolhead(ch), word="",
@@ -4593,6 +4628,7 @@ class PushNotifications:
                                           "grams_left": remaining
                                           if remaining and remaining > 0
                                           else None,
+                                          "grams_full": full or None,
                                           "spool_id": sid or None}})
 
     async def _intervention_hold(self, hold: int, what: str) -> None:

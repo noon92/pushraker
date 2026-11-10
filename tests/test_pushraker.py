@@ -1781,6 +1781,25 @@ async def test_macro_notify():
                   ("default", "📣 U1 T U", "yes")], got)
 
 
+async def test_macro_topic():
+    """A topic set in a G-code message: not on the public ntfy server."""
+    print("G-code messages: topic")
+    reset_world()
+    server, c = make({}, {"macro_default": [("ntfy", FakeService([], "ntfy"),
+                                             False)]})
+    sent = []
+
+    async def capture(*a, **k):
+        sent.append(k.get("sets"))
+    c._send = capture
+    for srv in ("https://ntfy.sh", "https://ntfy.example.com"):
+        c.settings = dict(c.settings or {}, provider="ntfy", server=srv)
+        await c._macro("macro_default", "T",
+                       "{% set topic = 'elsewhere' %}x", "default")
+    check("public ntfy.sh: dropped; a private server: kept",
+          [x.get("topic") for x in sent] == [None, "elsewhere"], sent)
+
+
 async def test_queue_line():
     print("Job queue: prints remaining, with total time")
     reset_world()
@@ -2725,6 +2744,14 @@ async def test_template_variants():
     await c._filament_change(0, True, c._exist_gen)
     check("filament loaded with grams left", log
           and "512 g left" in log[-1]["body"], log and log[-1])
+    log.clear()
+    SPOOLS[33]["initial_weight"] = 1000.
+    c._exist_seen = [False, False, False, False]
+    c._fil_said.clear()
+    c._exist_gen += 1
+    await c._filament_change(0, True, c._exist_gen)
+    check("...of the spool's full weight, when known", log
+          and "512/1000 g left" in log[-1]["body"], log and log[-1])
 
 
 async def test_templates_sending():
@@ -2961,6 +2988,78 @@ async def test_custom_notifications():
             check(f"refuses {what}", what in str(e), str(e))
 
 
+async def test_template_limits():
+    """A template (maybe from a shared G-code file) can't hold up
+    Moonraker or use up memory: the render stops itself, and what it can
+    build is limited."""
+    print("Template limits")
+    jj = pn.jj
+    refused = {
+        "string * n": "{{ 'x' * 999999999 }}",
+        "list * n": "{{ [1] * 999999999 }}",
+        "a method's number": "{{ 'x'.ljust(999999999) }}",
+        "a filter's number": "{{ 'a'|center(999999999) }}",
+        "% width": "{{ '%999999999d' % 1 }}",
+        "format() width": "{{ '{:9999999}'.format(1) }}",
+        "|format width": "{{ '%99999999d'|format(1) }}",
+        "a growing namespace": "{% set ns = namespace(s='ab') %}"
+        "{% for i in range(40) %}{% set ns.s = ns.s ~ ns.s %}{% endfor %}",
+        "huge powers": "{{ ((10 ** 100) ** 100) ** 100 }}",
+        "changing a list": "{% set l = [1] %}{{ l.append(2) }}",
+        "lipsum": "{{ lipsum(n=1000) }}",
+    }
+    bad = []
+    for what, text in refused.items():
+        try:
+            jj.render(text, {})
+            bad.append(what)
+        except jj.TemplateError:
+            pass
+    check("refused: " + ", ".join(refused), not bad, bad)
+    fine = {"{{ 'x' * 3 }}": "xxx", "{{ '%5.1f' % 2.25 }}": "  2.2",
+            "{{ '{:>4}'.format(7) }}": "   7", "{{ 2 ** 10 }}": "1024",
+            "{% set ns = namespace(n=0) %}{% for i in range(5) %}"
+            "{% set ns.n = ns.n + i %}{% endfor %}{{ ns.n }}": "10",
+            "{{ 'a'|center(5) }}|": "  a  |"}
+    got = {t: jj.render(t, {}) for t in fine}
+    check("...ordinary use still works", got == fine, got)
+    t0 = time.monotonic()
+    try:
+        jj.render("{% for a in range(1000) %}{% for b in range(1000) %}"
+                  "{% for c in range(1000) %}{% endfor %}{% endfor %}"
+                  "{% endfor %}", {}, seconds=0.3)
+        stopped = False
+    except jj.TemplateTimeout:
+        stopped = True
+    check("a loop that runs too long stops itself",
+          stopped and time.monotonic() - t0 < 1. and sys.gettrace() is None)
+
+    # A When that runs too long: not checked again until it's changed
+    reset_world()
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    loop_when = "printer.extruder.temperature > 0"
+    server, c = make({}, {"custom_slow": [("ntfy", ntfy, False)]})
+    c.settings = dict(c.settings or {}, custom=[dict(
+        pn.cfgmod.CUSTOM_DEFAULT, name="slow", when=loop_when)])
+    calls = []
+    real = c._render
+
+    async def slow_render(text, ctx):
+        calls.append(text)
+        raise jj.TemplateTimeout("took longer than 1.5 seconds")
+    c._render = slow_render
+    await c._custom_check()
+    await c._custom_check()
+    check("a When that timed out isn't checked again", len(calls) == 1,
+          len(calls))
+    c.settings["custom"][0]["when"] = "true"
+    c._render = real
+    await c._custom_check()
+    check("...until it's changed", "slow" in c._custom_was,
+          c._custom_was)
+
+
 async def test_now_values():
     """now.*: the time of sending, in the notification's time zone."""
     print("now.*")
@@ -3000,8 +3099,34 @@ async def test_camera_pictures():
         files[name] = os.path.join(WORK, name)
         with open(files[name], "wb") as f:
             f.write(data)
-    got = {n: pn.PushNotifications._read_picture("file://" + path)
-           for n, path in files.items()}
+    # The camera: a small web server (cameras are read over http(s) only)
+    import threading
+    from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+    served = {n: open(p, "rb").read() for n, p in files.items()}
+
+    class Cam(BaseHTTPRequestHandler):
+        def do_GET(self):
+            name = self.path.lstrip("/")
+            self.send_response(200)
+            self.end_headers()
+            if name == "slow":
+                # A stream that trickles a byte at a time, never a picture
+                try:
+                    for _ in range(200):
+                        self.wfile.write(b"x")
+                        self.wfile.flush()
+                        time.sleep(0.05)
+                except OSError:
+                    pass
+                return
+            self.wfile.write(served.get(name, b""))
+
+        def log_message(self, *a):
+            pass
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Cam)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}/"
+    got = {n: pn.PushNotifications._read_picture(base + n) for n in files}
     check("a snapshot as it is", got["snap.jpg"][0] == jpeg)
     check("a stream: its first frame", got["stream.mjpg"][0] == jpeg)
     check("a PNG: converted", (got["pic.png"][0] or b"")[:2] == b"\xff\xd8")
@@ -3013,7 +3138,7 @@ async def test_camera_pictures():
     server, c = make({}, {"paused": [("ntfy", FakeService([], "ntfy"),
                                       False)]})
     path = c._fetch_snapshot_sync(quiet=True,
-                                  url="file://" + files["page.html"])
+                                  url=base + "page.html")
     ok = bool(path) and os.path.exists(path)
     size = Image.open(path).size if ok else None
     check("unreadable camera: a 4:3 picture saying why",
@@ -3022,11 +3147,23 @@ async def test_camera_pictures():
     if ok:
         shutil.rmtree(os.path.dirname(path), ignore_errors=True)
     path = c._fetch_snapshot_sync(quiet=True,
-                                  url="file://" + files["snap.jpg"])
+                                  url=base + "snap.jpg")
     check("readable camera: its own picture",
           path and open(path, "rb").read() == jpeg)
     if path:
         shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+    data, why = pn.PushNotifications._read_picture("file://" + files["snap.jpg"])
+    check("a file:// address isn't read", data is None and "http" in why, why)
+    mod = sys.modules[pn.PushNotifications.__module__]
+    real, mod.SNAPSHOT_TOTAL = mod.SNAPSHOT_TOTAL, 0.5
+    t0 = time.monotonic()
+    data, why = await asyncio.get_running_loop().run_in_executor(
+        None, pn.PushNotifications._read_picture, base + "slow")
+    mod.SNAPSHOT_TOTAL = real
+    check("a camera that trickles: given up after the total time",
+          data is None and "longer than" in why
+          and time.monotonic() - t0 < 2., (why, time.monotonic() - t0))
+    httpd.shutdown()
 
 async def test_codemirror():
     """CodeMirror: installed from this version's build (checksum checked),
@@ -3416,7 +3553,7 @@ async def run_component_tests():
     for t in (test_order_and_priority, test_expiry_and_independence,
               test_fault_dedup, test_same_preparation_everywhere,
               test_email_threads, test_filament_measured, test_filament_alerts,
-              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_now_values, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
+              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_macro_topic, test_template_limits, test_now_values, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
               test_driver_hot,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,

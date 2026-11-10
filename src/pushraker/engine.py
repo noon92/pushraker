@@ -15,13 +15,17 @@ A missing value reads "n/a" and is false in an {% if %}. A line holding only
 lines written in the template stay.
 """
 
+import functools
 import re
+import sys
+import time
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, \
     Set, Tuple
 
 import jinja2
 from jinja2 import nodes
-from jinja2.sandbox import SandboxedEnvironment
+from jinja2.sandbox import ImmutableSandboxedEnvironment
+from jinja2.utils import Namespace
 
 from . import templating as tp
 
@@ -30,6 +34,13 @@ ROOTS = ("printer", "job", "extruders", "event", "machine", "now")
 MAX_OUTPUT = 20000          # characters: a runaway loop stops here
 MAX_RANGE = 1000            # range() in a template (Jinja's own: 100000)
 MAX_POWER = 100             # the largest exponent ** takes
+# A template can come from a G-code file someone shared: nothing it does may
+# hold up Moonraker or use up the printer's memory
+RENDER_SECONDS = 1.5        # then the render stops itself
+MAX_SIZE = 100000           # a string or list built: characters / items
+MAX_ARG = 100000            # a number passed to a filter or method
+MAX_BITS = 4096             # an integer computed (about 1200 digits)
+MAX_WIDTH = 1000            # a width or precision in a format string
 
 
 class NA(jinja2.ChainableUndefined):
@@ -284,23 +295,96 @@ def _finalize(value: Any) -> Any:
     return tp.fmt_value(value, "")
 
 
-class _Sandbox(SandboxedEnvironment):
+def _limit(text: str) -> jinja2.exceptions.SecurityError:
+    return jinja2.exceptions.SecurityError(text)
+
+
+def _sized(value: Any) -> Any:
+    """A string or list no longer than MAX_SIZE."""
+    if isinstance(value, (str, list, tuple)) and len(value) > MAX_SIZE:
+        raise _limit(f"a text or list is limited to {MAX_SIZE} "
+                     "characters or items")
+    if isinstance(value, int) and not isinstance(value, bool) and \
+            value.bit_length() > MAX_BITS:
+        raise _limit("a number is limited to about 1200 digits")
+    return value
+
+
+def _arg(value: Any) -> None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool) \
+            and abs(value) > MAX_ARG:
+        raise _limit(f"a number given to a filter or method is limited to "
+                     f"{MAX_ARG}")
+
+
+# A width or precision in "%9999d" or "{:9999}"
+RX_WIDTH = re.compile(r"(?:%[-+ #0]*|\{[^{}]*:[^{}]*?)(\d+)(?:\.(\d+))?|"
+                      r"%[-+ #0]*\.(\d+)")
+
+
+def _format_ok(text: Any) -> None:
+    if not isinstance(text, str):
+        return
+    for m in RX_WIDTH.finditer(text):
+        for g in m.groups():
+            if g and int(g) > MAX_WIDTH:
+                raise _limit(f"a width in a format is limited to {MAX_WIDTH}")
+
+
+class _Namespace(Namespace):
+    """namespace(): what a loop builds up in it stays within MAX_SIZE."""
+
+    def __setitem__(self, name: str, value: Any) -> None:
+        super().__setitem__(name, _sized(value))
+
+
+class _Sandbox(ImmutableSandboxedEnvironment):
     """Jinja's sandbox (no _attributes, no unsafe callables, str.format
-    checked), with smaller limits: range() up to MAX_RANGE, ** up to
-    MAX_POWER."""
-    intercepted_binops = frozenset(["**"])
+    checked; lists and dicts can't be changed), with limits on what a
+    template can make: range() up to MAX_RANGE, ** up to MAX_POWER,
+    strings and lists up to MAX_SIZE, integers up to MAX_BITS, numbers
+    given to methods up to MAX_ARG, format widths up to MAX_WIDTH."""
+    intercepted_binops = frozenset(["**", "*", "%"])
 
     def call_binop(self, context: Any, operator: str, left: Any,
                    right: Any) -> Any:
+        a, b = raw(left), raw(right)
         if operator == "**":
             try:
-                if abs(float(raw(right))) > MAX_POWER:
-                    raise jinja2.exceptions.SecurityError(
-                        f"** is limited to powers up to {MAX_POWER}")
+                if abs(float(b)) > MAX_POWER:
+                    raise _limit(f"** is limited to powers up to "
+                                 f"{MAX_POWER}")
             except (TypeError, ValueError):
                 pass
-            return raw(left) ** raw(right)
+            if isinstance(a, int) and isinstance(b, int) and b > 0 and \
+                    a.bit_length() * b > MAX_BITS:
+                raise _limit("a number is limited to about 1200 digits")
+            return _sized(a ** b)
+        if operator == "*":
+            for seq, n in ((a, b), (b, a)):
+                if isinstance(seq, (str, list, tuple)) and \
+                        isinstance(n, int) and len(seq) * n > MAX_SIZE:
+                    raise _limit(f"a text or list is limited to {MAX_SIZE} "
+                                 "characters or items")
+            if isinstance(a, int) and isinstance(b, int) and \
+                    a.bit_length() + b.bit_length() > MAX_BITS:
+                raise _limit("a number is limited to about 1200 digits")
+            return super().call_binop(context, operator, left, right)
+        if operator == "%" and isinstance(a, str):
+            _format_ok(a)
         return super().call_binop(context, operator, left, right)
+
+    def call(__self, __context: Any, __obj: Any, *args: Any,
+             **kwargs: Any) -> Any:
+        for v in list(args) + list(kwargs.values()):
+            _arg(raw(v))
+        return super().call(__context, __obj, *args, **kwargs)
+
+    def wrap_str_format(self, value: Any) -> Any:
+        """"{:9999}".format(): its widths checked when it's read."""
+        if getattr(value, "__name__", "") in ("format", "format_map"):
+            _format_ok(getattr(value, "__self__", None))
+        return super().wrap_str_format(value)
 
 
 def _range(*args: int) -> range:
@@ -314,6 +398,23 @@ def _range(*args: int) -> range:
 ENV = _Sandbox(undefined=NA, keep_trailing_newline=False,
                autoescape=False, finalize=_finalize)
 ENV.globals["range"] = _range
+ENV.globals["namespace"] = _Namespace
+ENV.globals.pop("lipsum", None)
+
+
+def _guarded(f: Callable[..., Any]) -> Callable[..., Any]:
+    """A filter whose numbers (not the value it filters) are within
+    MAX_ARG, and whose format string's widths within MAX_WIDTH."""
+    skip = 2 if getattr(f, "jinja_pass_arg", None) else 1
+
+    @functools.wraps(f)
+    def run(*args: Any, **kwargs: Any) -> Any:
+        for v in list(args[skip:]) + list(kwargs.values()):
+            _arg(raw(v))
+        if f.__name__ == "do_format" and len(args) >= skip:
+            _format_ok(args[skip - 1])
+        return f(*args, **kwargs)
+    return run
 
 # A line holding only {% %} tags and {# #} comments (and spaces)
 RX_TAG_LINE = re.compile(
@@ -334,6 +435,8 @@ def _tag_lines(text: str) -> str:
             out.append(line + ("" if last else "\n"))
     return "".join(out)
 ENV.filters.update(FILTERS)
+for _name in list(ENV.filters):
+    ENV.filters[_name] = _guarded(ENV.filters[_name])
 
 
 class TemplateError(Exception):
@@ -361,18 +464,43 @@ def check(text: str) -> Optional[str]:
     return None
 
 
-def render(text: str, context: Dict[str, Any]) -> str:
+def render(text: str, context: Dict[str, Any],
+           seconds: float = RENDER_SECONDS) -> str:
     """The template's text. Raises TemplateError on a mistake."""
-    return render_vars(text, context)[0]
+    return render_vars(text, context, seconds)[0]
 
 
-def render_vars(text: str, context: Dict[str, Any]
+class TemplateTimeout(TemplateError):
+    """A template that ran past its time."""
+
+
+def _deadline_tracer(deadline: float) -> Callable[..., Any]:
+    """A trace function stopping the template's own code (its lines, not
+    the Python it calls) once the deadline passes."""
+    def line(frame: Any, event: str, _arg: Any) -> Any:
+        if event == "line" and time.monotonic() > deadline:
+            raise TemplateTimeout(
+                f"took longer than {RENDER_SECONDS:g} seconds (a loop "
+                "that runs too long?)")
+        return line
+
+    def call(frame: Any, event: str, _arg: Any) -> Any:
+        if frame.f_code.co_filename == "<template>":
+            return line
+        return None
+    return call
+
+
+def render_vars(text: str, context: Dict[str, Any],
+                seconds: float = RENDER_SECONDS
                 ) -> Tuple[str, Dict[str, Any]]:
     """The template's text, and the variables it set at its top level
     ({% set priority = "max" %}, also inside an if). Raises TemplateError
-    on a mistake."""
+    on a mistake; TemplateTimeout when it runs past `seconds`."""
     tpl = compile_template(text)
     ctx = tpl.new_context(dict(context))
+    before = sys.gettrace()
+    sys.settrace(_deadline_tracer(time.monotonic() + seconds))
     try:
         out: List[str] = []
         size = 0
@@ -397,6 +525,8 @@ def render_vars(text: str, context: Dict[str, Any]
     except Exception as e:
         line = _error_line(e)
         raise TemplateError(f"{line}{type(e).__name__}: {e}") from None
+    finally:
+        sys.settrace(before)
     return text.strip("\n"), {k: ctx.vars[k] for k in ctx.exported_vars
                                if k in ctx.vars}
 
