@@ -2778,7 +2778,11 @@ class PushNotifications:
             if tmp is None:
                 logging.info("[pushraker] editor snapshot from %s: %s",
                              url, why)
-                return {"image": None, "error": why}
+                # The picture a notification would carry instead
+                tmp = await self.eventloop.run_in_thread(
+                    self._problem_picture, why)
+                if tmp is None:
+                    return {"image": None, "error": why}
             path = tmp
         elif kind == "graphic" and key in cfgmod.TEMPLATE:
             rows = self._sample_rows(key)
@@ -2888,7 +2892,7 @@ class PushNotifications:
             if not quiet:
                 logging.warning("[pushraker] no snapshot from %s: %s", url,
                                 why)
-            return None
+            return self._problem_picture(why)
         tmpdir = tempfile.mkdtemp(prefix="pushraker_")
         path = os.path.join(tmpdir, "snapshot.jpg")
         try:
@@ -2937,6 +2941,21 @@ class PushNotifications:
             return None, ("the camera sent something that isn't a picture"
                           + (f" (it starts: {head!r})" if head else
                              " (nothing)"))
+
+    @staticmethod
+    def _problem_picture(why: str) -> Optional[str]:
+        """In place of a camera picture that couldn't be read: a picture
+        saying why, so the notification shows what went wrong."""
+        if images is None:
+            return None
+        tmpdir = tempfile.mkdtemp(prefix="pushraker_")
+        try:
+            return images.problem("No camera picture", why,
+                                  os.path.join(tmpdir, "snapshot.jpg"))
+        except Exception as e:
+            logging.warning("[pushraker] problem picture: %s", e)
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return None
 
     def _snapshot_why(self, url: str) -> Tuple[Optional[str], str]:
         """A snapshot for the editor, or why there's none."""
@@ -2994,6 +3013,7 @@ class PushNotifications:
         snapshot_ready: bool = False, delay: float = 0.,
         camera_wait: float = 0., event: Optional[Dict[str, Any]] = None,
         key: Optional[str] = None,
+        sets: Optional[Dict[str, str]] = None,
     ) -> bool:
         """Send one notification to each of its destinations; images are
         optional and never block it.
@@ -3015,7 +3035,10 @@ class PushNotifications:
         try:
             if delay:
                 await asyncio.sleep(delay)
+            given = sets or {}
             title, body, sets = await self._compose(key, title, body, event)
+            # What the G-code message itself set wins over the template's
+            sets = dict(sets, **given)
             topic = sets.get("topic") or self._template(key).get("topic") \
                 or ""
             if sets.get("priority") or topic:
@@ -4125,22 +4148,33 @@ class PushNotifications:
         {% endraw %}, so Klipper passes it on): rendered here, with the same
         values as any template. One that fails is sent as written, with
         why."""
+        # \n in a G-code message: a line break
+        title, message = title.replace("\\n", " "), \
+            message.replace("\\n", "\n")
         texts = [t for t in (title, message) if "{{" in t or "{%" in t]
+        sets: Dict[str, str] = {}
         if texts:
             try:
                 ctx = await self._template_context(texts)
-                if title in texts:
-                    title = await self._render(title, ctx)
-                if message in texts:
-                    message = await self._render(message, ctx)
+                # priority, image, topic, timezone set in it: as in any
+                # template
+                title, message, sets = await self._render_pair(
+                    title, message, ctx)
             except jj.TemplateError as e:
                 message = self._lines(message,
                                       f"⚠️ Template error in the G-code (sent as written): {e}")
+        # A priority set in it: that priority's row (each has its own
+        # services, and may be off)
+        want = sets.pop("priority", None)
+        if want:
+            if f"macro_{want}" not in self.rows:
+                return
+            rid, priority = f"macro_{want}", want
         await self._send(
             rid, self._title("macro", title=title), message,
             filename=self._job_filename if self._job_active else "",
             key="macro", event={"title": title, "message": message or None,
-                                "priority": priority})
+                                "priority": priority}, sets=sets)
 
     def _track_calibration(self) -> None:
         """Manual calibrations (touchscreen: bed levelling, XYZ offset,

@@ -286,8 +286,10 @@ def _warning(d: ImageDraw.ImageDraw, x: float, y: float, size: int) -> None:
                (x, top + size - 1)], fill=(242, 184, 0),
               outline=(150, 110, 0))
     cx = x + size / 2
-    d.line([cx, top + size * 0.32, cx, top + size * 0.66], fill=INK, width=2)
-    d.ellipse([cx - 1.2, top + size * 0.75, cx + 1.2, top + size * 0.88],
+    lw = max(2, round(size / 11))
+    d.line([cx, top + size * 0.32, cx, top + size * 0.66], fill=INK, width=lw)
+    r = max(1.2, lw * 0.6)
+    d.ellipse([cx - r, top + size * 0.81 - r, cx + r, top + size * 0.81 + r],
               fill=INK)
 
 
@@ -421,3 +423,29 @@ def grams_text(remaining: float, full: Optional[float]) -> str:
     if full and full > 0:
         return f"{remaining:.0f} of {full:.0f} g left"
     return f"{remaining:.0f} g left"
+
+
+def problem(title: str, reason: str, path: str) -> str:
+    """A 4:3 picture saying why there's no picture (like a browser's
+    broken image): sent in place of a camera snapshot that couldn't be
+    read, so the notification says what went wrong."""
+    w, h = 800, 600
+    img = Image.new("RGB", (w, h), (34, 34, 34))
+    d = ImageDraw.Draw(img)
+    d.rectangle([12, 12, w - 13, h - 13], outline=(90, 90, 90), width=3)
+    size = 84
+    _warning(d, (w - size) / 2, 150, size)
+    _text(d, (w / 2, 270), title, True, 40, (235, 235, 235), center=True)
+    f = font(False, 26)
+    reason = reason[:1].upper() + reason[1:]
+    lines: List[str] = []
+    for word in reason.split():
+        if lines and d.textlength(lines[-1] + " " + word, font=f) <= w - 120:
+            lines[-1] += " " + word
+        else:
+            lines.append(word)
+    for i, line in enumerate(lines[:6]):
+        _text(d, (w / 2, 340 + i * 36), _fit(d, line, f, w - 120), False, 26,
+              (190, 190, 190), center=True)
+    img.save(path, "JPEG", quality=88)
+    return path

@@ -1769,6 +1769,16 @@ async def test_macro_notify():
                   ("high", "📣 U1 Print ejection failed", "Plate occupied"),
                   ("default", "📣 U1 Only a title", "📣 U1 Only a title")],
           got)
+    # Jinja in a console message: rendered, its sets applied, \\n a line
+    log.clear()
+    h('notify Lines || one\\ntwo{% set priority = "high" %}')
+    h('notify T\\nU || {% if 1 > 2 %}no{% else %}yes{% endif %}')
+    await asyncio.sleep(0.4)
+    got = [(e["channel"], e["title"], e["body"]) for e in log]
+    check("console Jinja: {% set priority %} applies, \\n breaks the "
+          "message (a space in the title), {% if %} renders",
+          got == [("high", "📣 U1 Lines", "one\ntwo"),
+                  ("default", "📣 U1 T U", "yes")], got)
 
 
 async def test_queue_line():
@@ -2907,6 +2917,26 @@ async def test_camera_pictures():
     check("a PNG: converted", (got["pic.png"][0] or b"")[:2] == b"\xff\xd8")
     check("something else: what it starts with", got["page.html"][0] is None
           and "<html>404" in got["page.html"][1], got["page.html"])
+    # A notification's camera picture that can't be read: a 4:3 picture
+    # saying why, in its place
+    reset_world()
+    server, c = make({}, {"paused": [("ntfy", FakeService([], "ntfy"),
+                                      False)]})
+    path = c._fetch_snapshot_sync(quiet=True,
+                                  url="file://" + files["page.html"])
+    ok = bool(path) and os.path.exists(path)
+    size = Image.open(path).size if ok else None
+    check("unreadable camera: a 4:3 picture saying why",
+          ok and size[0] * 3 == size[1] * 4
+          and open(path, "rb").read(2) == b"\xff\xd8", (path, size))
+    if ok:
+        shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+    path = c._fetch_snapshot_sync(quiet=True,
+                                  url="file://" + files["snap.jpg"])
+    check("readable camera: its own picture",
+          path and open(path, "rb").read() == jpeg)
+    if path:
+        shutil.rmtree(os.path.dirname(path), ignore_errors=True)
 
 async def test_codemirror():
     """CodeMirror: installed from this version's build (checksum checked),

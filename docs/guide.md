@@ -572,8 +572,9 @@ RESPOND PREFIX=notify MSG="Print ejection failed || Plate still occupied, queue 
   the first separator), the message, and optionally a priority (`min`, `low`,
   `default`, `high` or `max`) as the last field. Without one, the row's
   **Default** priority is used. The image is the one set in the row's
-  editor, not up to the macro; the row's title and contents templates
-  wrap what the macro sends (`event.title`, `event.message`).
+  editor; the row's title and contents templates wrap what the macro sends
+  (`event.title`, `event.message`).
+- `\n` in the message is a line break (in the title, a space).
 - Keep file names in the message, not the title. Don't use `;` anywhere:
   Klipper ends the line there.
 - In macros, Klipper's own Jinja works (`{printer.print_stats.filename}`);
@@ -582,6 +583,12 @@ RESPOND PREFIX=notify MSG="Print ejection failed || Plate still occupied, queue 
   inside `{% raw %}…{% endraw %}` so Klipper passes it on, and pushraker
   renders it:
   `RESPOND PREFIX=notify MSG="{% raw %}Ejected {{ job.file }} || ETA of the next: {{ job.queue.next.eta }}{% endraw %}"`.
+  `{% if %}` works, and so does `{% set %}`, as in a template: `priority`
+  (it picks that priority's row), `image`, `topic`, `timezone`.
+  From the console, without a macro, no `{% raw %}` is needed:
+  `RESPOND PREFIX=notify MSG="Bed {{ printer.heater_bed.temperature|round|int }}°C || {% if job.layer > 10 %}{% set priority = 'high' %}{% endif %}Line one\nLine two"`.
+  Inside `MSG="…"`, write strings in single quotes: Klipper drops double
+  quotes. `#` ends the line for Klipper, so no `{# comments #}`.
 - On a printer without push notifications, or with them off, the line is only
   console output: nothing fails.
 

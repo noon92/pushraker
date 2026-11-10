@@ -188,7 +188,7 @@
     .nt-greyed .nt-field > *:not(label), .nt-greyed label { opacity: .5; }
     .nt-greyed label .nt-i { opacity: 1; }
     .pr-topicwrap.off input { cursor: not-allowed; }
-    /* Values: no taller than the contents box starts out */
+    /* Objects: no taller than the contents box starts out */
     .pr-data .pr-pick { max-height: 260px; }
     #pr-t-title { height: auto; min-height: 0; resize: none; overflow: hidden; line-height: 1.4; margin-bottom: 10px; }
     .pr-rec { font-size: 12px; color: var(--muted); }
@@ -675,7 +675,7 @@
                         <button type="button" class="pr-j" data-op=" == ">==</button><button type="button" class="pr-j" data-op=" != ">!=</button><button type="button" class="pr-j" data-op=" > ">&gt;</button><button type="button" class="pr-j" data-op=" < ">&lt;</button><button type="button" class="pr-j" data-op=" >= ">&gt;=</button><button type="button" class="pr-j" data-op=" <= ">&lt;=</button><button type="button" class="pr-j" data-op="not ">not</button><button type="button" class="pr-j" data-op=" and ">and</button><button type="button" class="pr-j" data-op=" or ">or</button><button type="button" class="pr-j" data-op=" in ">in</button><button type="button" class="pr-j" data-op=" is defined">is defined</button><button type="button" class="pr-j" data-op='""'>"string"</button>
                     </div>
                 </div>
-                <div class="pr-lbl">Values</div>
+                <div class="pr-lbl">Objects</div>
                 <div class="pr-pick" id="pr-pick"><div class="pr-any">Loading the printer's objects…</div></div>
             </div>
             <div class="pr-imgwrap">
@@ -1623,12 +1623,25 @@
     }
     const KEYWORDS = ['if', 'elif', 'else', 'endif', 'for', 'in', 'endfor', 'not', 'and', 'or', 'is', 'defined', 'true', 'false', 'none', 'set'];
     const FILTERS = ['round', 'int', 'float', 'default', 'join', 'length', 'upper', 'lower', 'title', 'replace', 'list', 'map', 'first', 'last', 'sort', 'sum', 'max', 'min', 'abs', 'trim', 'string', 'duration', 'clock', 'toolhead', 'pct', 'plural', 'ordinal', 'lines'];
+    const SET_NAMES = [['priority', 'this notification\'s priority'], ['image', 'its image'], ['topic', 'its topic (ntfy, Telegram)'], ['timezone', 'times in this zone']];
+    const SET_VALUES = { priority: ['min', 'low', 'default', 'high', 'max'], image: ['none', 'render', 'camera', 'graphic'] };
     function completions(ctx) {
         const word = ctx.matchBefore(/[\w.]*$/);
         if (!word || (word.from === word.to && !ctx.explicit)) return null;
         const before = ctx.state.doc.sliceString(Math.max(0, word.from - 2), word.from);
         const v = ctx.state.doc.toString(), tag = tagAt(v, word.from);
         let options;
+        // {% set name = "value" %}: the names a template can set, then their values
+        const line = ctx.state.doc.lineAt(word.from), head = v.slice(line.from, word.from);
+        const setVal = /\bset\s+(priority|image)\s*=\s*["']$/.exec(head);
+        if (tag && tag.kind === 'stmt' && /\bset\s+$/.test(head)) {
+            options = SET_NAMES.map(([n, d], i) => ({ label: n, type: 'variable', detail: d, boost: -i }));
+            return { from: word.from, options, validFor: /^\w*$/ };
+        }
+        if (setVal) {
+            options = SET_VALUES[setVal[1]].map((x, i) => ({ label: x, type: 'constant', boost: -i }));
+            return { from: word.from, options, validFor: /^\w*$/ };
+        }
         if (/\|\s?$/.test(before)) options = FILTERS.map(f => ({ label: f, type: 'function' }));
         else if (tag) options = completionNames().map(n => ({ label: n, type: 'variable' })).concat(tag.kind === 'stmt' ? KEYWORDS.map(k => ({ label: k, type: 'keyword' })) : []);
         else return null;
