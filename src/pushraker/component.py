@@ -3565,15 +3565,15 @@ class PushNotifications:
                 return title, body, {}
             if d is None:       # a custom notification: no default
                 return title, self._lines(
-                    body, f"⚠️ Your template failed: {e}"), {}
+                    body, f"⚠️ Template error: {e}"), {}
             try:
                 ctx = await self._template_context(list(d), False, event)
                 t, c, sets = await self._render_pair(d[0], d[1], ctx)
-                return t, self._lines(c, f"⚠️ Your template failed: {e}"), \
+                return t, self._lines(c, f"⚠️ Template error (sent the default): {e}"), \
                     sets
             except jj.TemplateError:
                 return title, self._lines(
-                    body, f"⚠️ Your template failed: {e}"), {}
+                    body, f"⚠️ Template error (sent the default): {e}"), {}
 
     async def _parity(self, key: str, title: str, body: str,
                       event: Optional[Dict[str, Any]]) -> None:
@@ -4006,7 +4006,7 @@ class PushNotifications:
                     message = await self._render(message, ctx)
             except jj.TemplateError as e:
                 message = self._lines(message,
-                                      f"⚠️ Template in the G-code failed: {e}")
+                                      f"⚠️ Template error in the G-code (sent as written): {e}")
         await self._send(
             rid, self._title("macro", title=title), message,
             filename=self._job_filename if self._job_active else "",

@@ -2694,7 +2694,7 @@ async def test_templates_sending():
     check("an edited template that fails: the default's text, and why",
           log and log[-1]["title"] == "▶️ U1 resumed"
           and body.startswith("Benchy\n")
-          and "⚠️ Your template failed: line 2: ZeroDivisionError" in body,
+          and "⚠️ Template error (sent the default): line 2: ZeroDivisionError" in body,
           log and log[-1])
     # Images: the template's choice reaches the destinations
     base = pn.cfgmod.defaults("U1")

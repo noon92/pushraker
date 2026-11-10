@@ -340,7 +340,7 @@ Bed {{ printer.heater_bed.temperature|round|int }}°C, cavity {{ printer["temper
 - A value that isn't available reads `n/a` and counts as false:
   `{% if job.plate %}` skips it, `|default("none")` replaces it.
 - A template with a mistake can't be saved (the editor says where). One
-  that fails when sent sends the default instead, with why.
+  that fails when sent (a value of the wrong kind, say) sends the default instead, with "⚠️ Template error (sent the default): line …" under it.
 - Templates run sandboxed, with a time and size limit: they read values,
   they can't change anything.
 - Templates never delay a notification: everything is read in one query
