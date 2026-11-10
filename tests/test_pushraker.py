@@ -1173,8 +1173,8 @@ async def test_file_pauses():
                           "paused": [("ntfy", ntfy, False)]})
     prios = []
     real_at = c._at_priority
-    c._at_priority = lambda rid, dests, p: (prios.append((rid, p)),
-                                            real_at(rid, dests, p))[1]
+    c._at_priority = lambda rid, dests, p, *a: (prios.append((rid, p)),
+                                                real_at(rid, dests, p, *a))[1]
     body = ["; start\n", "G28\n"]
     for layer in range(1, 60):
         body.append(";LAYER_CHANGE\n;Z:%d\n" % layer)
@@ -2668,6 +2668,22 @@ async def test_templates_sending():
     t, b, sets = await c._render_pair(
         "", '{% set priority = "urgent" %}{% set image = "photo" %}x', {})
     check("...only to what exists", sets == {}, sets)
+    t, b, sets = await c._render_pair(
+        "", '{% set topic = "u1-errors" %}x', {})
+    check("a template sets the topic", sets == {"topic": "u1-errors"}, sets)
+    c.priority_urls = dict(c.priority_urls, started="ntfys://ntfy.sh/u1"
+                           "?priority=default",
+                           **{"started@high": "ntfys://ntfy.sh/u1"
+                              "?priority=high"})
+    push = pn.Destination("ntfy", object(), False)
+    mail = pn.Destination("email", object(), True)
+    moved = c._at_priority("started", [push, mail], "high", "u1-errors")
+    urls = [srv.url(privacy=False) for srv in moved[0].ap]
+    check("...the push address goes to that topic at that priority; email "
+          "stays", moved[1] is mail and len(urls) == 1
+          and "/u1-errors" in urls[0] and "priority=high" in urls[0], urls)
+    check("...an unknown topic (or service) keeps the default",
+          c._at_priority("started", [push], None, "bad topic")[0] is push)
     c.settings = dict(c.settings, templates={
         "paused": {"title": "⏸ {{ machine.name }} on hold",
                    "contents": "{{ job.file }} paused\n"

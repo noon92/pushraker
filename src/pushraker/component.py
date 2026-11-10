@@ -917,6 +917,7 @@ class PushNotifications:
         rows: Dict[str, Tuple[str, List[Destination]]] = {}
         customs = [cfgmod.custom_rid(c["name"])
                    for c in (self.settings or {}).get("custom") or []]
+        push_base: Dict[str, str] = {}
         for rid in list(ROW_IDS) + customs:
             image = ""
             dests: List[Destination] = []
@@ -948,6 +949,8 @@ class PushNotifications:
                     channel, channel)
                 image = image or kind
                 dests.append(Destination(channel, ap, email))
+                if key == rid:
+                    push_base[rid] = url
             if dests:
                 rows[rid] = (image, dests)
         self.rows = rows
@@ -967,6 +970,8 @@ class PushNotifications:
         # sets its own ({% set priority = "max" %}): "<row>@<priority>"
         self.priority_urls: Dict[str, str] = {
             k: v for k, v in opts.items() if "@" in k and v}
+        # ...and each row's own (for a topic a template or the editor sets)
+        self.priority_urls.update(push_base)
         # Which of loaded / unloaded the Filament loaded / unloaded row sends
         self.filament_change_events = {
             e.strip() for e in get(
@@ -1693,6 +1698,9 @@ class PushNotifications:
             v = str(cv.get(name, tv.get(name, "")) or "").strip().lower()
             if v in allowed:
                 sets[name] = v
+        topic = str(cv.get("topic", tv.get("topic", "")) or "").strip()
+        if cfgmod.RX_TOPIC.fullmatch(topic):
+            sets["topic"] = topic
         return self._one_line(t), c, sets
 
     async def _resolver(self, tokens: Sequence[tp.Token],
@@ -2908,8 +2916,11 @@ class PushNotifications:
             if delay:
                 await asyncio.sleep(delay)
             title, body, sets = await self._compose(key, title, body, event)
-            if sets.get("priority"):
-                dests = self._at_priority(rid, dests, sets["priority"])
+            topic = sets.get("topic") or self._template(key).get("topic") \
+                or ""
+            if sets.get("priority") or topic:
+                dests = self._at_priority(rid, dests, sets.get("priority"),
+                                          topic)
             # The image a template set (a spool picture only where the
             # notification draws one)
             if sets.get("image") and IMAGE_SET[sets["image"]] != "spool":
@@ -2937,19 +2948,29 @@ class PushNotifications:
         return all(results)
 
     def _at_priority(self, rid: str, dests: List[Destination],
-                     prio: str) -> List[Destination]:
-        """The push destinations of a row at the priority a template set
-        (email and the webhook have none)."""
-        if rid.startswith("macro_"):
-            other = self.rows.get(f"macro_{prio}")
-            if other is None:
-                return dests
-            push = [d for d in other[1] if not d.email
-                    and d.channel != "webhook"]
-            return push + [d for d in dests if d.email
-                           or d.channel == "webhook"]
-        url = self.priority_urls.get(f"{rid}@{prio}")
+                     prio: Optional[str] = None,
+                     topic: str = "") -> List[Destination]:
+        """The push destinations of a row at the priority and topic a
+        template or the editor set (email and the webhook have neither).
+        A topic the service doesn't have is left out."""
+        base = self.priority_urls.get(rid)
+        url = None
+        if prio:
+            url = self.priority_urls.get(
+                f"macro_{prio}" if rid.startswith("macro_")
+                else f"{rid}@{prio}")
+        url = url or base
         if not url:
+            return dests
+        if topic:
+            moved = cfgmod.with_topic(url, topic)
+            if moved is None:
+                logging.info("[pushraker] %s: topic %r isn't one this "
+                             "service takes; sent to the default", rid,
+                             topic)
+            else:
+                url = moved
+        if url == base:
             return dests
         ap = apprise.Apprise()
         if not ap.add(url):
@@ -6350,6 +6371,7 @@ class PushNotifications:
             sent_to: List[Destination] = []
             for d in dests:
                 prio: Optional[str] = None
+                d_topic = ""
                 d_kind = kind
                 if packer is None:
                     msgs = []
@@ -6357,6 +6379,7 @@ class PushNotifications:
                         await self._parity(rid, t, b, event)
                         t, b, sets = await self._compose(rid, t, b, event)
                         prio = prio or sets.get("priority")
+                        d_topic = d_topic or sets.get("topic", "")
                         d_kind = IMAGE_SET.get(sets.get("image", ""), d_kind)
                         msgs.append((t, b, rows))
                     keyed = [((k,), m) for k, m in enumerate(msgs)]
@@ -6378,6 +6401,7 @@ class PushNotifications:
                             t, body, sets = await self._compose(
                                 rid, t, body, ev)
                             prio = prio or sets.get("priority")
+                            d_topic = d_topic or sets.get("topic", "")
                             d_kind = IMAGE_SET.get(sets.get("image", ""),
                                                    d_kind)
                         keyed.append((tuple(idx), (
@@ -6399,9 +6423,11 @@ class PushNotifications:
                         path = paths[key]
                     out.append((t, b, path))
                 per_dest.append(out)
-                # The priority a template set, for this destination
-                sent_to.append(self._at_priority(rid, [d], prio)[0]
-                               if prio else d)
+                # The priority and topic a template set, for this
+                # destination
+                topic = d_topic or self._template(rid).get("topic") or ""
+                sent_to.append(self._at_priority(rid, [d], prio, topic)[0]
+                               if prio or topic else d)
             report: List[Dict[str, Any]] = []
             results = self._outcomes(rid, dests, await asyncio.gather(*(
                 self._deliver(rid, d, t, msgs, report)

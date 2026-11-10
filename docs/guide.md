@@ -375,6 +375,16 @@ the title or the contents, outside any `for` loop:
 Print paused's default template does exactly that for pauses written into
 the print job's file.
 
+### Topic
+
+ntfy and Telegram only, with push notifications on. **Topic** under the
+image sends one notification somewhere else than the default: on ntfy,
+another topic on the same server; on Telegram, a topic of the chat, by its
+ID, in groups with topics turned on (forum-style groups). Empty: the
+default. A template can set it too, like the priority:
+`{% set topic = "u1-errors" %}`. Email and the webhook aren't affected. In
+`pushraker.conf`: `<notification>_topic`.
+
 ### Filters
 
 Jinja's own (`round`, `int`, `default`, `join`, `length`, `upper`,

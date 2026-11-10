@@ -178,6 +178,9 @@
     .pr-data-grid { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) !important; }
     .pr-prevwrap { margin-top: 12px; }
     .pr-imgwrap { margin-top: 12px; }
+    .pr-topicwrap { margin-top: 4px; max-width: 340px; }
+    .pr-topicwrap.off { opacity: .45; }
+    .pr-topicwrap.off input { cursor: not-allowed; }
     /* Values: no taller than the contents box starts out */
     .pr-data .pr-pick { max-height: 260px; }
     #pr-t-title { height: auto; min-height: 0; resize: none; overflow: hidden; line-height: 1.4; margin-bottom: 10px; }
@@ -282,7 +285,7 @@
     @media (max-width: 600px) {
         .pr-data-grid { grid-template-columns: minmax(0, 1fr) !important; }
         .pr-col-l, .pr-col-r { display: contents; }
-        .pr-side { order: 1; } .pr-ed { order: 2; } .pr-imgwrap { order: 3; } .pr-prevwrap { order: 4; }
+        .pr-side { order: 1; } .pr-ed { order: 2; } .pr-imgwrap { order: 3; } .pr-topicwrap { order: 3; max-width: none; } .pr-prevwrap { order: 4; }
         .pr-pick { max-height: 260px; }
         .pr-data .pr-modal-box { padding: 12px 10px; max-width: 100%; }
         .pr-modal { padding: 6px; }
@@ -670,6 +673,10 @@
                 <div class="pr-imgs" id="pr-imgs"></div>
                 <div class="pr-imgopts" id="pr-imgopts"></div>
             </div>
+            <div class="pr-topicwrap" id="pr-topicwrap">
+                <div class="pr-lbl"><span id="pr-topic-lbl">Topic</span> <button type="button" class="nt-i pr-info" id="pr-topic-info" data-info="" aria-label="About">?</button></div>
+                <input class="nt-input pr-code" id="pr-topic" maxlength="64" spellcheck="false" autocomplete="off">
+            </div>
             </div>
         </div>
         <div class="pr-buttons">
@@ -932,14 +939,14 @@
     const progressMarks = () => String(state.progress_marks || '').split(',').map(Number).filter(Boolean);
     let tplEdits = {};
     let savedTpl = '{}';
-    const TPL_FIELDS = ['title', 'contents', 'image', 'camera', 'remaining'];
+    const TPL_FIELDS = ['title', 'contents', 'image', 'camera', 'remaining', 'topic'];
     // Custom notifications: the page's copy (_id: this page's, _saved: the
     // name as saved, null for a new one)
     let customs = [];
     let savedCustoms = '{}';
     let customSeq = 0;
     let draft = null;       // a new one, until Done
-    const CUSTOM_FIELDS = ['name', 'enabled', 'priority', 'email', 'when', 'title', 'contents', 'image', 'camera', 'repeat', 'repeat_minutes'];
+    const CUSTOM_FIELDS = ['name', 'enabled', 'priority', 'email', 'when', 'title', 'contents', 'image', 'camera', 'topic', 'repeat', 'repeat_minutes'];
     const RX_CUSTOM_NAME = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
     const isCustom = key => String(key).startsWith('custom:');
     const customById = id => customs.find(c => c._id === id) || (draft && draft._id === id ? draft : null);
@@ -1298,6 +1305,8 @@
         const msgs = [];
         if (r && r.placeholders && r.placeholders.length) msgs.push(`Replace # in <code>${esc(r.placeholders[0])}</code> with a number.`);
         if (r && r.error) msgs.push(`${r.error.field === 'title' ? 'Title' : r.error.field === 'when' ? 'When' : 'Contents'}, ${esc(r.error.message)}`);
+        if (editing && editing.topic && !/^[A-Za-z0-9_-]{1,64}$/.test(editing.topic)) msgs.push('Topic: up to 64 letters, digits, - and _.');
+        else if (editing && editing.topic && el('nt-provider').value === 'telegram' && !/^\d+$/.test(editing.topic)) msgs.push('Topic ID: a number (the topic\'s ID).');
         if (editing && isCustom(editing.key)) {
             const c = customById(Number(editing.key.slice(7)));
             const bad = !RX_CUSTOM_NAME.test(editing.name) ? 'Name: up to 32 letters, digits and _, starting with a letter.'
@@ -1372,7 +1381,39 @@
             else if (th) th.innerHTML = k === 'camera' && !(t.camera || el('nt-camera').value) ? '<small>No camera</small>' : '—';
         }
     }
+    // The topic: ntfy and Telegram only, with push on; empty: the default
+    function renderTopic() {
+        const provider = el('nt-provider').value;
+        const on = el('nt-push-enabled').checked && (provider === 'ntfy' || provider === 'telegram');
+        const wrap = el('pr-topicwrap'), input = el('pr-topic'), info = el('pr-topic-info');
+        wrap.classList.toggle('off', !on);
+        input.disabled = !on;
+        input.value = editing.topic || '';
+        const set = ' A template can set it: {% set topic = "…" %}.';
+        if (!on) {
+            el('pr-topic-lbl').textContent = 'Topic';
+            input.placeholder = '';
+            info.dataset.info = 'Supported by ntfy and Telegram only (push notifications on).';
+        } else if (provider === 'ntfy') {
+            el('pr-topic-lbl').textContent = 'Topic';
+            input.placeholder = `${el('nt-topic').value || 'printer'} (default)`;
+            info.dataset.info = 'Sends this notification to another topic on the same ntfy server. Empty: the default topic.' + set;
+        } else {
+            el('pr-topic-lbl').textContent = 'Topic ID';
+            input.placeholder = 'the chat (default)';
+            info.dataset.info = 'Sends this notification to a topic of the chat, by its ID (a number). Only in groups with topics turned on (forum-style groups). Empty: the chat itself.' + set;
+        }
+    }
+    el('pr-topic').oninput = () => {
+        if (!editing) return;
+        editing.topic = el('pr-topic').value.trim();
+        clearTimeout(previewTimer);
+        previewTimer = setTimeout(preview, 400);
+    };
+    wireTips(el('pr-topicwrap'));
+
     function fillEditor() {
+        renderTopic();
         const custom = isCustom(editing.key);
         el('pr-custom').style.display = custom ? '' : 'none';
         el('pr-data-reset').style.display = custom ? 'none' : '';

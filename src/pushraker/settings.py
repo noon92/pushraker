@@ -159,7 +159,30 @@ TEMPLATES = [
 ]
 TEMPLATE_KEYS = [t[0] for t in TEMPLATES]
 TEMPLATE = {t[0]: t for t in TEMPLATES}
-TEMPLATE_FIELDS = ("title", "contents", "image", "camera", "remaining")
+TEMPLATE_FIELDS = ("title", "contents", "image", "camera", "remaining",
+                   "topic")
+# A notification's own topic (ntfy: a topic on the same server; Telegram:
+# a topic of the chat, by ID, in groups with topics on); "": the default.
+# Other services have none.
+TOPIC_PROVIDERS = ("ntfy", "telegram")
+RX_TOPIC = re.compile(r"[A-Za-z0-9_-]{1,64}")
+RX_NTFY_URL = re.compile(r"(ntfys?://[^/?]+/)[^?]*(\?.*)?")
+RX_TGRAM_URL = re.compile(r"(tgram://[^/?]+/[^?:]+)(?::\d+)?(\?.*)?")
+
+
+def with_topic(url: str, topic: str) -> Optional[str]:
+    """A push address sent to another topic (None: the service has none,
+    or the topic isn't one it takes)."""
+    topic = str(topic or "").strip()
+    if not RX_TOPIC.fullmatch(topic):
+        return None
+    m = RX_NTFY_URL.fullmatch(url)
+    if m:
+        return f"{m.group(1)}{topic}{m.group(2) or ''}"
+    m = RX_TGRAM_URL.fullmatch(url)
+    if m and topic.isdigit():
+        return f"{m.group(1)}:{topic}{m.group(2) or ''}"
+    return None
 TITLE_MAX = 1000          # the template, not the title it writes
 CONTENTS_MAX = 5000
 # The component's names for a row's notifications, to their templates
@@ -387,7 +410,7 @@ CUSTOM_DEFAULT = {
     "when": "",
     "title": "🔔 {{ machine.name }} {{ event.name }}",
     "contents": "{% if job.file %}\n{{ job.file }}\n{% endif %}",
-    "image": "camera", "camera": "",
+    "image": "camera", "camera": "", "topic": "",
     "repeat": "change", "repeat_minutes": 10,
 }
 
@@ -443,6 +466,11 @@ def clean_custom(items: Any, strict: bool = False) -> List[Dict[str, Any]]:
             if not RX_CAMERA.fullmatch(cam):
                 raise ConfigError("Invalid camera")
             c["camera"] = cam
+            topic = str(raw.get("topic") or "").strip()
+            if topic and not RX_TOPIC.fullmatch(topic):
+                raise ConfigError(f"{name}: a topic is up to 64 letters, "
+                                  "digits, - and _")
+            c["topic"] = topic
             repeat = str(raw.get("repeat") or "change")
             if repeat not in CUSTOM_REPEATS:
                 raise ConfigError(f"{name}: no such repeat")
@@ -488,6 +516,7 @@ def custom_lines(s: Dict[str, Any]) -> List[str]:
                   f"contents: {escape_text(c['contents'])}",
                   f"image: {c['image']}",
                   f"camera: {c['camera']}",
+                  f"topic: {c['topic']}",
                   "repeat: " + (str(c["repeat_minutes"])
                                 if c["repeat"] == "minutes"
                                 else c["repeat"])]
@@ -509,7 +538,7 @@ def parse_custom(cfg: Any) -> List[Dict[str, Any]]:
         for key in ("when", "title", "contents"):
             if key in sec:
                 c[key] = unescape_text(sec.get(key).strip())
-        for key in ("image", "camera"):
+        for key in ("image", "camera", "topic"):
             if key in sec:
                 c[key] = sec.get(key).strip()
         repeat = (sec.get("repeat") or "change").strip().lower()
@@ -554,7 +583,8 @@ def section_lines(s: Dict[str, Any]) -> List[str]:
     lines.append("# defaults: <notification>_title, _contents, _image "
                  "(none|render|camera|graphic),")
     lines.append("# _camera (a Moonraker webcam name), _remaining "
-                 "(true|false: filament left on the graphic)")
+                 "(true|false: filament left on the graphic), _topic "
+                 "(ntfy, Telegram)")
     for key in TEMPLATE_KEYS:
         t = s["templates"].get(key) or {}
         for field in TEMPLATE_FIELDS:
@@ -1064,7 +1094,8 @@ def template_default(key: str) -> Dict[str, Any]:
     from . import defaults
     title, contents = defaults.default(key) or ("", "")
     return {"title": title, "contents": contents,
-            "image": TEMPLATE[key][3], "camera": "", "remaining": True}
+            "image": TEMPLATE[key][3], "camera": "", "remaining": True,
+            "topic": ""}
 
 
 def clean_templates(tpls: Dict[str, Any],
@@ -1098,6 +1129,14 @@ def clean_templates(tpls: Dict[str, Any],
                 v = str(v or "")
                 if not RX_CAMERA.fullmatch(v):
                     raise ConfigError("Invalid camera")
+            elif field == "topic":
+                v = str(v or "").strip()
+                if v and not RX_TOPIC.fullmatch(v):
+                    if strict:
+                        raise ConfigError(f"{TEMPLATE[key][2]}: a topic is "
+                                          "up to 64 letters, digits, - "
+                                          "and _")
+                    continue
             else:
                 v = bool(v)
             if field in ("title", "contents") and strict:
