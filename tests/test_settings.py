@@ -513,7 +513,23 @@ def run_installer_tests():
     return _failures
 
 
+def run_secret_guard_tests():
+    """The settings problem the page shows never carries a secret's value."""
+    real = st.validate
+
+    def bad(_old, _s, _env=None):
+        raise st.ConfigError("The token is wrong", "secret")
+    st.validate = bad
+    try:
+        got = st.stored_problem({"secret": "tk_live_value"})
+    finally:
+        st.validate = real
+    check("stored problem: a secret field is named, its value never sent",
+          got["field"] == "secret" and got["value"] == "", got)
+
+
 if __name__ == "__main__":
+    run_secret_guard_tests()
     run_settings_tests()
     run_hidden_rows_tests()
     run_installer_tests()

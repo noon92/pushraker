@@ -421,14 +421,35 @@ RX_TAG_LINE = re.compile(
     r"[ \t]*(?:(?:\{%(?:(?!%\}).)*%\}|\{#(?:(?!#\}).)*#\})[ \t]*)+")
 
 
+RX_RAW = re.compile(r"\{%-?\s*raw\s*-?%\}")
+RX_ENDRAW = re.compile(r"\{%-?\s*endraw\s*-?%\}")
+
+
 def _tag_lines(text: str) -> str:
     """A line holding only tags leaves nothing behind: its spaces go and its
     line break moves into a comment (so error line numbers still match).
     Tags in a line with text keep the line as written."""
     lines = (text or "").split("\n")
     out = []
+    in_raw = False
     for i, line in enumerate(lines):
         last = i == len(lines) - 1
+        # {% raw %} ... {% endraw %}: kept exactly as written
+        starts = [m.end() for m in RX_RAW.finditer(line)]
+        ends = [m.end() for m in RX_ENDRAW.finditer(line)]
+        if in_raw or starts:
+            # A line of only {% raw %} / {% endraw %} leaves no blank line:
+            # the tag takes the line break before / after it
+            only = line.strip()
+            if RX_RAW.fullmatch(only) and "{%-" not in only:
+                line = only.replace("{%", "{%-", 1)
+            elif RX_ENDRAW.fullmatch(only) and "-%}" not in only:
+                line = only[:-2].rstrip() + " -%}"
+            out.append(line + ("" if last else "\n"))
+            opened = max(starts) if starts else -1
+            closed = max(ends) if ends else -1
+            in_raw = opened > closed if (starts or ends) else in_raw
+            continue
         if RX_TAG_LINE.fullmatch(line):
             out.append(line.strip() + ("" if last else "{#\n#}"))
         else:

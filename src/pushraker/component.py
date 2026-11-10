@@ -59,12 +59,13 @@ import os
 import re
 import shutil
 import tempfile
+import concurrent.futures
 import threading
 import time
 import urllib.parse
 import urllib.request
 from typing import (
-    TYPE_CHECKING, Any, Awaitable, Dict, List, NamedTuple, Optional, Sequence, Set,
+    TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, NamedTuple, Optional, Sequence, Set,
     Tuple
 )
 
@@ -1036,6 +1037,9 @@ class PushNotifications:
         # A When that ran past its time, as it was: skipped until changed
         self._custom_stuck: Dict[str, str] = {}
         self._filament_job = 0      # bumped per job; stops an old watcher
+        # Print jobs started: "once per print job" (the time after a print
+        # job ends still counts as that job)
+        self._job_number = 0
         self._job_map: List[Any] = []       # extruder_map_table at start
         self._job_tools: Set[int] = set()   # slicer filaments the job uses
         self._job_weights: Dict[int, float] = {}  # grams per slicer filament
@@ -1644,7 +1648,7 @@ class PushNotifications:
             if path == ["pauses"]:
                 return list((base.get("pauses") or {}).get("items") or [])
             return list(base.get("extruders") or [])
-        return jj.View(look, branch, items, [], "job")
+        return self._live_view(look, branch, items, "job")
 
     @staticmethod
     def _job_path(path: List[str]) -> List[str]:
@@ -1686,7 +1690,7 @@ class PushNotifications:
                 d["name"] = self._ext_name(ch)
                 out.append(d)
             return out
-        return jj.View(look, branch, items, [], "extruders")
+        return self._live_view(look, branch, items, "extruders")
 
     def _machine(self) -> Dict[str, Any]:
         import socket
@@ -1729,13 +1733,48 @@ class PushNotifications:
         return getattr(self._tz_here, "tz", None) or self.tz
 
     def _render_in_zone(self, text: str, ctx: Dict[str, Any],
-                        tz: Optional[datetime.tzinfo]
+                        tz: Optional[datetime.tzinfo],
+                        loop: Optional[asyncio.AbstractEventLoop] = None,
+                        loop_thread: Optional[int] = None
                         ) -> Tuple[str, Dict[str, Any]]:
         self._tz_here.tz = tz
+        # Off the loop: live values are read on it (_live)
+        self._tz_here.loop = loop if loop_thread is not None and \
+            threading.get_ident() != loop_thread else None
         try:
             return jj.render_vars(text, ctx)
         finally:
             self._tz_here.tz = None
+            self._tz_here.loop = None
+
+    def _live(self, fn: Callable[..., Any], *args: Any) -> Any:
+        """A live value (the print job's, the toolheads'), read on
+        Moonraker's event loop while a template renders in a thread, so it
+        never sees the printer's state half updated. In the template's
+        time zone."""
+        loop = getattr(self._tz_here, "loop", None)
+        if loop is None:
+            return fn(*args)
+        tz = getattr(self._tz_here, "tz", None)
+        fut: "concurrent.futures.Future[Any]" = concurrent.futures.Future()
+
+        def run() -> None:
+            before = getattr(self._tz_here, "tz", None)
+            self._tz_here.tz = tz
+            try:
+                fut.set_result(fn(*args))
+            except BaseException as e:
+                fut.set_exception(e)
+            finally:
+                self._tz_here.tz = before
+        loop.call_soon_threadsafe(run)
+        return fut.result(timeout=TEMPLATE_TIMEOUT)
+
+    def _live_view(self, look: Callable[..., Any], branch: Callable[..., Any],
+                   items: Callable[..., Any], name: str) -> jj.View:
+        return jj.View(lambda p: self._live(look, p),
+                       lambda p: self._live(branch, p),
+                       lambda p: self._live(items, p), [], name)
 
     async def _render_vars(self, text: str, ctx: Dict[str, Any],
                            tz: Optional[datetime.tzinfo] = None
@@ -1745,7 +1784,9 @@ class PushNotifications:
         what the template set ({% set priority = ... %})."""
         try:
             return await asyncio.wait_for(self.eventloop.run_in_thread(
-                self._render_in_zone, text, ctx, tz), TEMPLATE_TIMEOUT)
+                self._render_in_zone, text, ctx, tz,
+                asyncio.get_running_loop(), threading.get_ident()),
+                TEMPLATE_TIMEOUT)
         except asyncio.TimeoutError:
             raise jj.TemplateTimeout(
                 f"took longer than {TEMPLATE_TIMEOUT:.0f} seconds") from None
@@ -3967,6 +4008,7 @@ class PushNotifications:
         can't report old progress."""
         self._job_active = False
         self._job_done_sent = False
+        self._job_number += 1
         if query:
             state = await self._query(
                 {"print_stats": ["info"], "virtual_sdcard": ["file_position"],
@@ -4188,7 +4230,7 @@ class PushNotifications:
             self._skip(rid, "off")
             return
         self._custom_sent[c["name"]] = time.monotonic()
-        self._custom_job[c["name"]] = (self._filament_job, self._resumes)
+        self._custom_job[c["name"]] = (self._job_number, self._resumes)
         await self._send(
             rid, f"🔔 {self.name} {c['name']}", "",
             filename=self._job_filename if self._job_active else "",
@@ -4205,9 +4247,9 @@ class PushNotifications:
             return False
         if c["repeat"] == "job":
             return self._custom_job.get(name, (None,))[0] != \
-                self._filament_job
+                self._job_number
         if c["repeat"] == "job_pause":
-            return self._custom_job.get(name) != (self._filament_job,
+            return self._custom_job.get(name) != (self._job_number,
                                                   self._resumes)
         if c["repeat"] == "minutes" and last is not None:
             return now - last >= c["repeat_minutes"] * 60.

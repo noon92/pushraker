@@ -166,7 +166,6 @@ TEMPLATE_FIELDS = ("title", "contents", "image", "camera", "remaining",
 # a topic of the chat, by ID, in groups with topics on); "": the default.
 # Other services have none.
 TOPIC_PROVIDERS = ("ntfy", "telegram")
-RX_TOPIC = re.compile(r"[A-Za-z0-9_-]{1,64}")
 RX_NTFY_URL = re.compile(r"(ntfys?://[^/?]+/)[^?]*(\?.*)?")
 RX_TGRAM_URL = re.compile(r"(tgram://[^/?]+/[^?:]+)(?::\d+)?(\?.*)?")
 
@@ -1297,7 +1296,9 @@ def stored_problem(s: Dict[str, Any], env: Optional[Env] = None
         validate({}, s, env)
     except ConfigError as e:
         field = getattr(e, "field", "")
-        value = s.get(field) if field and field in s else None
+        # Never a token or password: the page shows the value
+        value = s.get(field) if field and field in s \
+            and field not in SECRET_FIELDS else None
         return {"message": str(e), "field": field,
                 "value": "" if value is None else str(value)}
     return {"message": "", "field": "", "value": ""}

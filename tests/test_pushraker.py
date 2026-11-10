@@ -28,6 +28,7 @@ import sys
 # The build copies root/ as it is: no bytecode left in it by a test run
 sys.dont_write_bytecode = True
 import tempfile
+import threading
 import time
 import types
 
@@ -2933,6 +2934,12 @@ async def test_custom_notifications():
     await c._custom_check()
     await asyncio.sleep(0.2)
     check("once per print job: not twice in one", not log, log)
+    c._custom_sent["bed_cool"] -= 120
+    c._filament_job += 1        # what a print job ending does
+    check("...nor after the print job ends", not c._custom_due(cust[0]))
+    c._job_number += 1          # the next print job starts
+    check("...the next print job: again", c._custom_due(cust[0]))
+    c._job_number -= 1
     cust[0]["repeat"] = "job_pause"
     c._custom_sent["bed_cool"] -= 120
     check("once per print job, again after a pause: not before one",
@@ -3058,6 +3065,39 @@ async def test_template_limits():
     await c._custom_check()
     check("...until it's changed", "slow" in c._custom_was,
           c._custom_was)
+
+
+async def test_render_thread():
+    """A template renders in a worker thread; the print job's values are
+    read on the event loop (never half updated), in the template's time
+    zone. {% raw %} blocks are kept as written."""
+    print("Templates: rendering off the loop")
+    reset_world()
+    server, c = make({}, {"paused": [("ntfy", FakeService([], "ntfy"),
+                                      False)]})
+    loop = asyncio.get_running_loop()
+
+    async def in_thread(fn, *args):
+        return await loop.run_in_executor(None, fn, *args)
+    c.eventloop.run_in_thread = in_thread
+    where = []
+    real = c._job_base
+
+    def spy(sample):
+        where.append(threading.get_ident())
+        return real(sample)
+    c._job_base = spy
+    text = "{{ job.file }}|{% for f in job.filaments %}x{% endfor %}"
+    ctx = await c._template_context([text], True)
+    got, _sets = await c._render_vars(text, ctx)
+    check("job values read on the loop while rendering in a thread",
+          got.startswith(pn.SAMPLE_FILE) and where
+          and set(where) == {threading.get_ident()}, (got, where))
+    raw = "a\n{% raw %}\n{% if x %}\n{{ y }}\n{% endraw %}\n" \
+        "{% if 1 %}\nb\n{% endif %}"
+    check("{% raw %}: kept as written, no blank lines from its tags",
+          pn.jj.render(raw, {}) == "a\n{% if x %}\n{{ y }}\nb",
+          pn.jj.render(raw, {}))
 
 
 async def test_now_values():
@@ -3561,7 +3601,7 @@ async def run_component_tests():
     for t in (test_order_and_priority, test_expiry_and_independence,
               test_fault_dedup, test_same_preparation_everywhere,
               test_email_threads, test_filament_measured, test_filament_alerts,
-              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_macro_topic, test_template_limits, test_now_values, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
+              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_render_thread, test_macro_topic, test_template_limits, test_now_values, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
               test_driver_hot,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
