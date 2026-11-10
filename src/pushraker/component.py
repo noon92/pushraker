@@ -1950,10 +1950,13 @@ class PushNotifications:
             if m:
                 items = (base.get("pauses") or {}).get("items") or []
                 n = int(m.group(1))
-                if not 0 < n <= len(items):
+                # The sample job has any pause asked for, like its filaments
+                it = items[n - 1] if 0 < n <= len(items) else (
+                    self._sample_pause(n) if sample and not active and n > 0
+                    else None)
+                if it is None:
                     return None
-                return tp.dig(items[n - 1], rest) if rest else \
-                    items[n - 1].get("layer")
+                return tp.dig(it, rest) if rest else it.get("layer")
             m = re.fullmatch(r"filament(\d+)", head)
             if m:
                 f = filament(int(m.group(1)))
@@ -2123,6 +2126,11 @@ class PushNotifications:
             files = files[1:]
         return files
 
+    @staticmethod
+    def _sample_pause(n: int) -> Dict[str, Any]:
+        return {"layer": 42 + 30 * (n - 1), "message": "Insert the magnets",
+                "kind": "filament change"}
+
     def _job_sample(self) -> Dict[str, Any]:
         methods = self._time_methods()
         # Each method a little off the others, as on a real print
@@ -2139,9 +2147,9 @@ class PushNotifications:
                 "layer": 120, "layers": 285, "plate": "Textured PEI Plate",
                 "queue": self._queue_summary(queue, SAMPLE_LEFT, sample=True),
                 "preprint": ["Bed levelling", "Flow calibration"],
-                "pauses": self._pauses_values([
-                    {"layer": 42, "message": "Insert the magnets",
-                     "kind": "filament change"}]),
+                "pauses": self._pauses_values([self._sample_pause(1)]),
+                "objects": {"count": 3, "names": ["Base", "Lid", "Hinge"],
+                            "current": "Lid", "by_object": True},
                 "time": dict(self._times(spread, SAMPLE_LEFT,
                                          18 * 3600 + 51 * 60, sample=True),
                              estimated=self._dur(46 * 3600 + 3 * 60)),
@@ -2503,6 +2511,25 @@ class PushNotifications:
                 leaf("queue.grams", info="All waiting print jobs."),
                 leaf("queue.meters", info="All waiting print jobs."),
             ]),
+            n("objects", hint="exclude-object objects", children=[
+                leaf("objects.count"), leaf("objects.names"),
+                leaf("objects.current", info="The one printing now."),
+                leaf("objects.by_object", info="True when printing by "
+                     "object (Orca's Print sequence: By object).")]),
+            n("pauses", hint="pauses in the file", info="M600, PAUSE, "
+              "M601… written into the print job. Loop over job.pauses for "
+              "each.", children=[
+                  leaf("pauses.count"),
+                  leaf("pauses.layers", info="When every pause's layer is "
+                       "known.")]),
+            n("pause#", hint="a pause by number", info="Replace # with "
+              "the pause's number (1 = first).", children=[
+                  leaf("pause#.layer"), leaf("pause#.message",
+                                             info="Any message the slicer "
+                                             "put with it."),
+                  leaf("pause#.kind")]),
+            leaf("preprint", info="Pre-print calibrations chosen "
+                 "(Snapmaker U1)."),
         ]
 
     async def _ep_preview(self, web_request: Any) -> Dict[str, Any]:
