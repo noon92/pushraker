@@ -1812,9 +1812,25 @@ async def test_queue_line():
     check("at start, after the queue took it off: the same",
           c._queue_line("Benchy.gcode", starting=True)
           == "Print 1/3 remaining in queue (total 3h 00m)")
-    check("at the end: what is still queued",
-          c._queue_line("Benchy.gcode", starting=False)
-          == "2 prints remaining in queue (total 2h 00m)")
+    end = c._queue_line("Benchy.gcode", starting=False)
+    check("at the end: what is still queued, its totals, the next job",
+          end == "2 prints remaining in queue (Estimated print time: "
+          "2h 00m)\nNext job: A", end)
+    q.queued_jobs = {"2": Job("A.gcode")}
+    end = c._queue_line("Benchy.gcode", starting=False)
+    check("...one left: no totals", end == "1 print remaining in queue"
+          "\nNext job: A", end)
+    real_qv = c._queue_values
+    c._queue_values = lambda f, left: c._queue_summary(
+        [c._queue_item("A", 3600., 12.4, 4., ["PLA"], 0.),
+         c._queue_item("B", 1800., 30.2, 10., ["PETG", "PLA"], 3600.)],
+        None)
+    q.queued_jobs = {"2": Job("A.gcode"), "3": Job("B.gcode")}
+    end = c._queue_line("Benchy.gcode", starting=False)
+    check("...materials once each, grams rounded", end ==
+          "2 prints remaining in queue (Estimated print time: 1h 30m, "
+          "Materials: PLA/PETG, Filament: 43 g)\nNext job: A", end)
+    c._queue_values = real_qv
     q.queued_jobs = {}
     check("empty queue: nothing",
           c._queue_line("Benchy.gcode", starting=True) == ""
@@ -2890,6 +2906,25 @@ async def test_custom_notifications():
             check(f"refuses {what}", what in str(e), str(e))
 
 
+async def test_now_values():
+    """now.*: the time of sending, in the notification's time zone."""
+    print("now.*")
+    reset_world()
+    server, c = make({}, {"paused": [("ntfy", FakeService([], "ntfy"),
+                                      False)]})
+    import zoneinfo
+    c.tz = zoneinfo.ZoneInfo("Asia/Jerusalem")
+    text = "{{ now.time }}|{{ now.weekday }}|{{ now.weekday_number }}|" \
+        "{{ now.day }}|{% if now.hour < 24 %}ok{% endif %}"
+    ctx = await c._template_context([text])
+    got = pn.jj.render(text, ctx)
+    at = datetime.datetime.now(c.tz)
+    check("now: time, weekday, its number, day, compares as a number",
+          got is not None and got.split("|")[1:] == [
+              at.strftime("%A"), str(at.isoweekday()), str(at.day), "ok"]
+          and re.fullmatch(r"\d\d:\d\d", got.split("|")[0]), got)
+
+
 async def test_camera_pictures():
     """A camera's picture: a snapshot, the first frame of an MJPEG stream,
     or a PNG converted; something else says what it was."""
@@ -3239,7 +3274,8 @@ async def test_data():
           [f["label"] for f in rem["children"][0]["formats"]])
     check("queue: remaining, list, next, by position, time, eta, grams",
           names(job["queue"]["children"]) == ["remaining", "list", "next",
-                                               "#", "time", "eta", "grams",
+                                               "#", "time", "eta",
+                                               "materials", "grams",
                                                "meters"],
           names(job["queue"]["children"]))
     check("a driver without a temperature isn't offered; nor a value "
@@ -3325,7 +3361,7 @@ async def run_component_tests():
     for t in (test_order_and_priority, test_expiry_and_independence,
               test_fault_dedup, test_same_preparation_everywhere,
               test_email_threads, test_filament_measured, test_filament_alerts,
-              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
+              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_now_values, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
               test_driver_hot,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,

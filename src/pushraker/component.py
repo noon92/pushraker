@@ -1576,7 +1576,32 @@ class PushNotifications:
                 "job": self._job_view(resolve, sample),
                 "extruders": self._extruders_view(resolve, state, sample),
                 "event": jj.prune(event or {}),
-                "machine": self._machine()}
+                "machine": self._machine(),
+                "now": self._now_view()}
+
+    # now.*: the time when the notification is sent, in its time zone
+    NOW_FIELDS = ("time", "hour", "minute", "date", "day", "month",
+                  "month_name", "year", "weekday", "weekday_number",
+                  "timezone")
+
+    def _now_values(self) -> Dict[str, Any]:
+        tz = self._zone()
+        at = datetime.datetime.now(tz) if tz else datetime.datetime.now()
+        return {"time": at.strftime("%H:%M"), "hour": at.hour,
+                "minute": at.minute, "date": at.strftime("%Y-%m-%d"),
+                "day": at.day, "month": at.month,
+                "month_name": at.strftime("%B"), "year": at.year,
+                "weekday": at.strftime("%A"),
+                "weekday_number": at.isoweekday(),
+                "timezone": str(tz) if tz else None}
+
+    def _now_view(self) -> jj.View:
+        """Read when the template reads it, so {% set timezone %} applies."""
+        def look(path: List[str]) -> Any:
+            if len(path) == 1 and path[0] in self.NOW_FIELDS:
+                return self._now_values()[path[0]]
+            return None
+        return jj.View(look, lambda p: False, lambda p: None, [], "now")
 
     def _job_view(self, resolve: Any, sample: bool) -> jj.View:
         def look(path: List[str]) -> Any:
@@ -2035,7 +2060,13 @@ class PushNotifications:
         secs = sum(float(i["time"]) for i in items if i.get("time"))
         grams = [i["grams"] for i in items if i.get("grams")]
         meters = [i["meters"] for i in items if i.get("meters")]
+        mats: List[str] = []
+        for i in items:
+            for m in i.get("materials") or []:
+                if m not in mats:
+                    mats.append(m)
         return {"remaining": len(items), "items": items,
+                "materials": mats or None,
                 "list": [i["name"] for i in items] or None,
                 "time": self._dur(secs) if items else None,
                 "eta": self._eta((left or 0.) + secs, sample) if items
@@ -2299,6 +2330,11 @@ class PushNotifications:
         cats.insert(len(cats) - 1, {"id": "machine", "label": "🖥️ Machine",
                      "children": self._value_tree(
                          "machine", jj.prune(self._machine()))})
+        cats.insert(len(cats) - 1, {
+            "id": "now", "label": "🕐 Now", "hint": "now",
+            "info": "When the notification is sent, in its time zone. "
+            "weekday_number: 1 Monday to 7 Sunday.",
+            "children": self._value_tree("now", self._now_values())})
         return {"categories": [c for c in cats if c["children"]]}
 
     def _value_tree(self, prefix: str, value: Dict[str, Any]
@@ -2448,6 +2484,8 @@ class PushNotifications:
                 leaf("queue.time", info="All waiting print jobs, slicer "
                      "estimates."),
                 leaf("queue.eta", info="When the last one should finish."),
+                leaf("queue.materials", info="All waiting print jobs, "
+                     "each material once."),
                 leaf("queue.grams", info="All waiting print jobs."),
                 leaf("queue.meters", info="All waiting print jobs."),
             ]),
@@ -4005,6 +4043,8 @@ class PushNotifications:
             jq = None
         if jq is None:
             return ""
+        if not starting:
+            return self._queue_end_lines(filename)
         files = [str(j) for j in list(getattr(jq, "queued_jobs", {})
                                       .values())]
         state = getattr(jq, "queue_state", "")
@@ -4022,6 +4062,28 @@ class PushNotifications:
                 else f"{n} print{'s' if n != 1 else ''} remaining in queue")
         return line + (f" (total {format_duration(total)})" if total > 0
                        else "")
+
+    def _queue_end_lines(self, filename: str) -> str:
+        """When a print ends: "1 print remaining in queue", or "3 prints
+        remaining in queue (Estimated print time: 5h 10m, Materials:
+        PLA/PETG, Filament: 212 g)", then "Next job: <file>"."""
+        q = self._queue_values(filename, None)
+        n = q["remaining"]
+        if not n:
+            return ""
+        line = f"{n} print{'s' if n != 1 else ''} remaining in queue"
+        if n > 1:
+            parts = []
+            if q["time"]:
+                parts.append("Estimated print time: "
+                             + tp.fmt_value(q["time"], ""))
+            if q["materials"]:
+                parts.append("Materials: " + "/".join(q["materials"]))
+            if q["grams"]:
+                parts.append(f"Filament: {int(q['grams'] + 0.5)} g")
+            if parts:
+                line += " (" + ", ".join(parts) + ")"
+        return line + "\nNext job: " + q["items"][0]["name"]
 
     # ---- exceptions ----------------------------------------------------
 

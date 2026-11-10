@@ -9,6 +9,7 @@ Object {{ event.object.number }} of {{ event.object.count }}: {{ event.object.na
 Print time: {{ job.time.elapsed|default("0m") }}
 {# Moonraker's job queue: what is still waiting #}
 {% if job.queue.remaining %}
-{{ job.queue.remaining|plural("1 print", "prints") }} remaining in queue{% if job.queue.time %} (total {{ job.queue.time }}){% endif %}
+{{ job.queue.remaining|plural("1 print", "prints") }} remaining in queue{% if job.queue.remaining > 1 and (job.queue.time or job.queue.materials or job.queue.grams) %} ({% if job.queue.time %}Estimated print time: {{ job.queue.time }}{% endif %}{% if job.queue.materials %}{% if job.queue.time %}, {% endif %}Materials: {{ job.queue.materials|join("/") }}{% endif %}{% if job.queue.grams %}{% if job.queue.time or job.queue.materials %}, {% endif %}Filament: {{ job.queue.grams|round|int }} g{% endif %}){% endif %}
+Next job: {{ job.queue.next.name }}
 {% endif %}
 {% endif %}

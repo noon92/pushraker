@@ -144,7 +144,9 @@
     .nt-port { display: grid; grid-template-columns: 90px 1fr; gap: 6px; }
     .nt-hint a { color: var(--accent); }
     .nt-table tr.nt-nopush .nt-dim-push { opacity: 0.4; }
-    .nt-no-push .nt-col-push, .nt-no-email .nt-col-email { display: none; }
+    .nt-no-push .nt-col-push { display: none; }
+    /* Email off: the column stays, greyed, as a reminder it's there */
+    .nt-no-email .nt-col-email input { opacity: .35; cursor: not-allowed; }
     /* Time-left method: one row of radio buttons, each with an (i) that
        opens the method's explanation (hover on a computer, tap on a phone) */
     .nt-eta { background: var(--item); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; position: relative; }
@@ -183,7 +185,9 @@
     .pr-data-grid { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) !important; }
     .pr-prevwrap { margin-top: 12px; }
     .pr-imgwrap { margin-top: 12px; }
-    .pr-topicwrap { margin-top: 4px; max-width: 340px; }
+    .pr-topicwrap, .pr-priowrap { margin-top: 4px; max-width: 340px; }
+    .pr-priowrap.off { opacity: .45; }
+    .pr-priowrap.off select { cursor: not-allowed; }
     .pr-topicwrap.off { opacity: .45; }
     .nt-greyed .nt-field > *:not(label), .nt-greyed label { opacity: .5; }
     .nt-greyed label .nt-i { opacity: 1; }
@@ -298,7 +302,7 @@
     @media (max-width: 600px) {
         .pr-data-grid { grid-template-columns: minmax(0, 1fr) !important; }
         .pr-col-l, .pr-col-r { display: contents; }
-        .pr-side { order: 1; } .pr-ed { order: 2; } .pr-imgwrap { order: 3; } .pr-topicwrap { order: 3; max-width: none; } .pr-prevwrap { order: 4; }
+        .pr-side { order: 1; } .pr-ed { order: 2; } .pr-imgwrap { order: 3; } .pr-priowrap, .pr-topicwrap { order: 3; max-width: none; } .pr-prevwrap { order: 4; }
         .pr-pick { max-height: 260px; }
         .pr-data .pr-modal-box { padding: 12px 10px; max-width: 100%; }
         .pr-modal { padding: 6px; }
@@ -573,7 +577,7 @@
         <div class="nt-table-wrap">
             <table class="nt-table" id="nt-table">
                 <thead>
-                    <tr><th>Notification</th><th class="nt-c nt-col-push">Push</th><th class="nt-col-push nt-ch">Priority</th><th class="nt-c nt-col-email">Email</th><th class="nt-data"></th></tr>
+                    <tr><th>Notification</th><th class="nt-c nt-col-push">Push</th><th class="nt-c nt-col-email" id="nt-th-email">Email</th><th class="nt-data"></th></tr>
                 </thead>
                 <tbody id="nt-rows"></tbody>
                 <tbody id="nt-crows"></tbody>
@@ -682,6 +686,10 @@
                 <div class="pr-lbl">Image <button type="button" class="nt-i pr-info" data-info="The image sent. A template can change it for one notification: {% set image = &quot;render&quot; %} (none, render, camera, graphic)." data-guide="images" aria-label="About">?</button></div>
                 <div class="pr-imgs" id="pr-imgs"></div>
                 <div class="pr-imgopts" id="pr-imgopts"></div>
+            </div>
+            <div class="pr-priowrap" id="pr-priowrap">
+                <div class="pr-lbl">Priority <button type="button" class="nt-i pr-info" id="pr-prio-info" data-info="" aria-label="About">?</button></div>
+                <select class="nt-input" id="pr-prio"></select>
             </div>
             <div class="pr-topicwrap" id="pr-topicwrap">
                 <div class="pr-lbl"><span id="pr-topic-lbl">Topic</span> <button type="button" class="nt-i pr-info" id="pr-topic-info" data-info="" aria-label="About">?</button></div>
@@ -823,11 +831,9 @@
             if (g !== group) {
                 group = g;
                 if (GROUP_LABELS[group]) {
-                    html += `<tr class="nt-group"><td colspan="5">${GROUP_LABELS[group]}</td></tr>`;
+                    html += `<tr class="nt-group"><td colspan="4">${GROUP_LABELS[group]}</td></tr>`;
                 }
             }
-            const prio = state.meta.priorities.map(p =>
-                `<option value="${p}"${p === row.priority ? ' selected' : ''}>${PRIORITY_LABELS[p] || p}</option>`).join('');
             const layer = meta.id === 'first_layer'
                 ? `<select class="nt-input nt-layer" id="nt-layers">${[1, 2, 3].map(n =>
                     `<option value="${n}"${n === state.layers_complete ? ' selected' : ''}>${['1st', '2nd', '3rd'][n - 1]}</option>`).join('')}</select>`
@@ -872,7 +878,6 @@
             return html + `<tr data-row="${meta.id}">
                 <td><span class="nt-icon">${meta.icon}</span>${layer ? `${layer} <span class="nt-name">layer complete</span>` : `<span class="nt-name">${esc(meta.label)}</span>`}${objects}${marks}${driver}${report}${calib}<span class="nt-sub nt-data-inline"><span class="nt-dim">${editButton(meta.id)}</span></span></td>
                 <td class="nt-c nt-col-push"><input type="checkbox" data-enabled="${meta.id}"${row.enabled ? ' checked' : ''}></td>
-                <td class="nt-col-push"><select class="nt-input nt-dim-push" data-priority="${meta.id}">${prio}</select></td>
                 <td class="nt-c nt-col-email"><input type="checkbox" data-email="${meta.id}"${row.email ? ' checked' : ''}></td>
                 <td class="nt-data"><span class="nt-dim">${editButton(meta.id)}</span></td>
             </tr>`;
@@ -886,10 +891,8 @@
 
     // Custom notifications' rows, and ➕ Add
     function renderCustomRows() {
-        const prio = p => state.meta.priorities.map(x =>
-            `<option value="${x}"${x === p ? ' selected' : ''}>${PRIORITY_LABELS[x] || x}</option>`).join('');
         const max = state.meta.custom_max || 20;
-        el('nt-crows').innerHTML = `<tr class="nt-group"><td colspan="5">Custom</td></tr>` + customs.map(c => {
+        el('nt-crows').innerHTML = `<tr class="nt-group"><td colspan="4">Custom</td></tr>` + customs.map(c => {
             const id = c._id;
             const when = c.when.trim()
                 ? `<span class="nt-sub">When <code>${esc(c.when.length > 70 ? c.when.slice(0, 70) + '…' : c.when)}</code></span>`
@@ -897,16 +900,14 @@
             return `<tr class="nt-crow" data-crow="${id}">
                 <td><span class="nt-icon">🔔</span><span class="nt-name">${esc(c.name)}</span>${when}<span class="nt-sub nt-data-inline"><span class="nt-dim"><button type="button" class="btn btn-secondary nt-data-btn" data-ctpl="${id}">Edit</button></span></span></td>
                 <td class="nt-c nt-col-push"><input type="checkbox" data-cenabled="${id}"${c.enabled ? ' checked' : ''}></td>
-                <td class="nt-col-push"><select class="nt-input nt-dim-push" data-cpriority="${id}">${prio(c.priority)}</select></td>
                 <td class="nt-c nt-col-email"><input type="checkbox" data-cemail="${id}"${c.email ? ' checked' : ''}></td>
                 <td class="nt-data"><span class="nt-dim"><button type="button" class="btn btn-secondary nt-data-btn" data-ctpl="${id}">Edit</button></span><button type="button" class="nt-x" data-cdel="${id}" aria-label="Delete">✕</button></td>
             </tr>`;
         }).join('') + (customs.length < max
-            ? '<tr class="nt-add"><td colspan="5"><button type="button" class="btn btn-secondary nt-data-btn" id="nt-add-custom">➕ Add custom notification</button></td></tr>' : '');
+            ? '<tr class="nt-add"><td colspan="4"><button type="button" class="btn btn-secondary nt-data-btn" id="nt-add-custom">➕ Add custom notification</button></td></tr>' : '');
         const rows = el('nt-crows');
         rows.querySelectorAll('[data-cenabled]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cenabled)).enabled = b.checked; updateRowDimming(); }; });
         rows.querySelectorAll('[data-cemail]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cemail)).email = b.checked; updateRowDimming(); }; });
-        rows.querySelectorAll('[data-cpriority]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cpriority)).priority = b.value; }; });
         rows.querySelectorAll('[data-ctpl]').forEach(b => { b.onclick = e => { e.preventDefault(); openEditor('custom:' + b.dataset.ctpl); }; });
         rows.querySelectorAll('[data-cdel]').forEach(b => { b.onclick = async e => { e.preventDefault(); await deleteCustom(customById(Number(b.dataset.cdel))); }; });
         if (el('nt-add-custom')) el('nt-add-custom').onclick = e => {
@@ -1436,7 +1437,23 @@
     };
     wireTips(el('pr-topicwrap'));
 
+    // The notification's priority (push only); a template can change it
+    // for one notification
+    function renderPriority() {
+        const on = el('nt-push-enabled').checked;
+        const wrap = el('pr-priowrap'), sel = el('pr-prio');
+        sel.innerHTML = state.meta.priorities.map(p =>
+            `<option value="${p}"${p === editing.priority ? ' selected' : ''}>${PRIORITY_LABELS[p] || p}</option>`).join('');
+        wrap.classList.toggle('off', !on);
+        sel.disabled = !on;
+        el('pr-prio-info').dataset.info = (on ? 'The priority push notifications are sent at.' : 'Push notifications are off.') +
+            ' A template can change it for one notification: {% set priority = "high" %} (min, low, default, high, max).';
+    }
+    el('pr-prio').onchange = () => { if (editing) editing.priority = el('pr-prio').value; };
+    wireTips(el('pr-priowrap'));
+
     function fillEditor() {
+        renderPriority();
         renderTopic();
         const custom = isCustom(editing.key);
         el('pr-custom').style.display = custom ? '' : 'none';
@@ -1459,6 +1476,7 @@
         const meta = tplMeta(key);
         if (!meta) return;
         editing = Object.assign({ key }, effective(key));
+        if (!isCustom(key)) editing.priority = (state.rows[key] || {}).priority || 'default';
         delete imgCache['camera:' + (editing.camera || '')];
         el('pr-data-title').textContent = meta.label;
         el('pr-prev').innerHTML = '';
@@ -1494,6 +1512,7 @@
             const diff = diffFromDefault(editing.key, t);
             if (Object.keys(diff).length) tplEdits[editing.key] = diff;
             else delete tplEdits[editing.key];
+            if (state.rows[editing.key]) state.rows[editing.key].priority = editing.priority;
             refreshEditButtons();
             setTimeout(markDirty, 0);
         }
@@ -1614,7 +1633,7 @@
     }
     // Every name a template can start from, for autocomplete
     function completionNames() {
-        const out = new Set(['printer', 'job', 'extruders', 'event', 'machine', 'loop.index', 'loop.first', 'loop.last']);
+        const out = new Set(['printer', 'job', 'extruders', 'event', 'machine', 'now', 'loop.index', 'loop.first', 'loop.last']);
         const walk = n => { if (n.expr) out.add(n.expr.replace(/#/g, '1')); (n.children || []).forEach(walk); };
         (catalogues[editing && editing.key] || []).forEach(c => (c.children || []).forEach(walk));
         const loop = editing ? loopAt(field('contents').get(), field('contents').sel()[0]) : null;
@@ -1745,6 +1764,9 @@
         });
         el('nt-table').classList.toggle('nt-no-push', !push);
         el('nt-table').classList.toggle('nt-no-email', !email);
+        const why = email ? '' : 'Turn on "Send email notifications" below to use this';
+        el('nt-table').querySelectorAll('[data-email], [data-cemail]').forEach(cb => { cb.disabled = !email; cb.title = why; });
+        el('nt-th-email').title = why;
     }
 
     // The user guide, and the section of it for each push service
@@ -2260,7 +2282,7 @@
             if (!document.querySelector(`[data-enabled="${meta.id}"]`)) return;
             rows[meta.id] = {
                 enabled: document.querySelector(`[data-enabled="${meta.id}"]`).checked,
-                priority: document.querySelector(`[data-priority="${meta.id}"]`).value,
+                priority: state.rows[meta.id].priority,
                 email: document.querySelector(`[data-email="${meta.id}"]`).checked
             };
         });
