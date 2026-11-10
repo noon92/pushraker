@@ -1187,6 +1187,12 @@ class PushNotifications:
                         except Exception:
                             if "://" not in snap:
                                 snap = "http://127.0.0.1/" + snap.lstrip("/")
+                    if not snap and stream and not stream.startswith(
+                            ("webrtc", "ws")):
+                        # No snapshot address: a frame from the stream
+                        # (an MJPEG stream; other kinds give no picture)
+                        snap = stream if "://" in stream else \
+                            "http://127.0.0.1/" + stream.lstrip("/")
                     cams[str(name)] = {"snapshot": snap, "stream": stream}
         except Exception as e:
             logging.warning("[pushraker] webcams: %s", e)

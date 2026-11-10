@@ -964,16 +964,18 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     s["email_password"] = s["email_password"].strip()
     # The push secret is one field for every service (ntfy token or
     # password, Pushover app token, Telegram bot token, Discord token or
-    # webhook). A stored one is only reused for the service, server and
-    # account it was entered for: switching services means entering the
-    # new one, and a saved token is never sent to another host.
+    # webhook). A stored one is only reused for the service it was entered
+    # for: switching services means entering the new one. (Settings from
+    # before kept the server too: "ntfy|token|https://…|"; the service is
+    # the part that counts.)
     scope = secret_scope(s)
-    if s["secret"] and s.get("secret_for", "") not in ("", scope):
+    if s["secret"] and s.get("secret_for", "").split("|")[0] \
+            not in ("", scope):
         s["secret"] = ""
         if s["push_enabled"]:
             raise ConfigError(
                 "The saved token or password was entered for another "
-                "service or server. Enter the one for this one.")
+                "service. Enter the one for this one.")
     s["secret_for"] = scope if s["secret"] else ""
     if s["provider"] not in PROVIDERS:
         raise ConfigError("Invalid notification service")
@@ -1245,11 +1247,8 @@ def email_scope(s: Dict[str, Any]) -> str:
 
 
 def secret_scope(s: Dict[str, Any]) -> str:
-    """What a stored push secret is bound to."""
-    if s["provider"] == "ntfy":
-        return f"ntfy|{s['auth']}|{s['server'].lower()}|{s['username']}"
-    if s["provider"] == "gotify":
-        return f"gotify|{s['gotify_server'].lower().rstrip('/')}"
+    """What a stored push secret is bound to: the service it was entered
+    for (fixing the server's address keeps it)."""
     return s["provider"]
 
 

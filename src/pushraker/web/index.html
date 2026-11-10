@@ -206,7 +206,9 @@
     .nt-crow code { font-size: 11px; }
     .nt-add td { padding-top: 10px; }
     tr.nt-topic-bad, tr.nt-bad { outline: 2px solid var(--error); outline-offset: -2px; }
-    input.nt-bad, select.nt-bad { outline: 2px solid var(--error); }
+    input.nt-bad, select.nt-bad, input.nt-live-bad { outline: 2px solid var(--error); }
+    .nt-live-msg { color: var(--error); font-size: 12px; margin-left: 8px; }
+    .nt-field > .nt-live-msg { display: block; margin: 4px 0 0; }
     #nt-stored-error { border-color: var(--error); }
     .pr-cm .pr-console { height: auto; min-height: 0; max-height: 200px; margin: 12px 0 0; display: none; }
     .pr-cm .pr-console.on { display: block; }
@@ -2054,6 +2056,7 @@
             el('nt-stored-error').innerHTML = `⚠️ ${sending} ${where} ${esc(pb.message)}. Change it here (outlined in red) and Save &amp; Apply, or in the file.`;
             // Outlined once the rows are drawn
             setTimeout(() => {
+                liveCheckAll();
                 const FIELD_INPUT = { driver_temp: 'nt-driver-hot', report_interval: 'nt-report-interval', layers_complete: 'nt-layers', email_port: 'nt-email-port', filament_low_percent: 'nt-fl-percent' };
                 const input = el(FIELD_INPUT[pb.field] || '');
                 if (input) {
@@ -2066,6 +2069,7 @@
             el('nt-stored-error').innerHTML = '';
         }
         el('nt-stored-error').style.display = pb.message ? '' : 'none';
+        setTimeout(liveCheckAll, 0);
         el('nt-fl-percent').value = data.filament_low_percent;
         el('nt-fl-grams').value = data.filament_low_grams;
         el('nt-fl-unknown').checked = !!data.filament_unknown;
@@ -2338,9 +2342,44 @@
         if (what) el('pr-status').textContent = what;
     }
 
+    // Live checks, as you type: a number outside its range, a printer name
+    // with characters it can't have; outlined in red with what it must be
+    function liveCheck(input) {
+        let bad = '';
+        if (input.type === 'number' && input.min !== '' && input.max !== '') {
+            const v = Number(input.value), lo = Number(input.min), hi = Number(input.max);
+            if (input.value === '' || !Number.isInteger(v) || v < lo || v > hi) bad = `Must be ${lo} to ${hi}.`;
+        } else if (input.id === 'nt-name') {
+            if (input.value && !/^[\p{L}\p{N}_ .()\-]{1,32}$/u.test(input.value)) bad = 'Up to 32 letters, digits, spaces and . ( ) - _';
+        }
+        input.classList.toggle('nt-live-bad', !!bad);
+        let msg = input.parentElement.querySelector(':scope > .nt-live-msg');
+        if (bad && !msg) {
+            msg = document.createElement('span');
+            msg.className = 'nt-live-msg';
+            input.after(msg);
+        }
+        if (msg) { msg.textContent = bad ? '⚠️ ' + bad : ''; msg.style.display = bad ? '' : 'none'; }
+        return !bad;
+    }
+    const LIVE = 'input[type="number"][min][max], #nt-name';
+    document.addEventListener('input', e => {
+        if (e.target.matches && e.target.matches(LIVE) && !e.target.closest('.pr-modal')) liveCheck(e.target);
+    });
+    function liveCheckAll() {
+        return [...document.querySelectorAll(LIVE)].filter(i => !i.closest('.pr-modal') && i.offsetParent !== null && !i.disabled)
+            .map(liveCheck).every(Boolean);
+    }
+
     async function save() {
         showError('');
         let payload;
+        if (!liveCheckAll()) {
+            runStart('Save & Apply', 'Checking the settings…');
+            showConsole(['!! ⚠️ Not saved.', '!! A setting outlined in red can\'t be used: it says what it must be. Change it, then save again.']);
+            runEnd('Not saved', false);
+            return;
+        }
         const bad = badTopics();
         if (bad.length) {
             runStart('Save & Apply', 'Checking the settings…');

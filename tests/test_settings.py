@@ -259,7 +259,7 @@ def run_settings_tests():
           cfg_text[:300])
     back = store.load()
     check("everything comes back", back["secret"] == "tk_secret123"
-          and back["secret_for"] == "ntfy|token|https://ntfy.example.com|"
+          and back["secret_for"] == "ntfy"
           and back["server"] == "https://ntfy.example.com"
           and back["rows"] == tok["rows"] and back["auth"] == "token",
           (back["secret_for"], back["auth"]))
@@ -279,13 +279,14 @@ def run_settings_tests():
         check("...and asks for the new service's own token", False)
     except st.ConfigError as e:
         check("...and asks for the new service's own token",
-              "another service or server" in str(e), str(e))
-    try:
-        st.validate(dict(server="https://other.example.com"), back, ENV)
-        check("so does another ntfy server", False)
-    except st.ConfigError as e:
-        check("so does another ntfy server",
-              "another service or server" in str(e), str(e))
+              "another service" in str(e), str(e))
+    moved = st.validate(dict(server="https://other.example.com"), back, ENV)
+    check("fixing the server's address keeps it",
+          moved["secret"] == "tk_secret123")
+    old = st.validate({}, dict(back, secret_for="ntfy|token|https://a.example|"),
+                      ENV)
+    check("...also as saved before (the service with its server)",
+          old["secret"] == "tk_secret123" and old["secret_for"] == "ntfy")
     same = st.validate(dict(topic="u2"), back, ENV)
     check("the same service keeps it", same["secret"] == "tk_secret123")
     mail = dict(enabled=True, provider="ntfy", auth="none",
