@@ -30,7 +30,7 @@ from jinja2.utils import Namespace
 from . import templating as tp
 
 # The names a template starts from
-ROOTS = ("printer", "job", "extruders", "event", "machine", "now")
+ROOTS = ("printer", "job", "extruders", "event", "machine")
 MAX_OUTPUT = 20000          # characters: a runaway loop stops here
 MAX_RANGE = 1000            # range() in a template (Jinja's own: 100000)
 MAX_POWER = 100             # the largest exponent ** takes

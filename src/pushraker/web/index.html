@@ -1695,7 +1695,7 @@
     }
     // Every name a template can start from, for autocomplete
     function completionNames() {
-        const out = new Set(['printer', 'job', 'extruders', 'event', 'machine', 'now', 'loop.index', 'loop.first', 'loop.last']);
+        const out = new Set(['printer', 'job', 'extruders', 'event', 'machine', 'loop.index', 'loop.first', 'loop.last']);
         const walk = n => { if (n.expr) out.add(n.expr.replace(/#/g, '1')); (n.children || []).forEach(walk); };
         const ck = editing ? (isCustom(editing.key) ? 'custom' : editing.key) : '';
         (catalogues[ck] || []).forEach(c => (c.children || []).forEach(walk));
