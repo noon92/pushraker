@@ -170,6 +170,19 @@ RX_NTFY_URL = re.compile(r"(ntfys?://[^/?]+/)[^?]*(\?.*)?")
 RX_TGRAM_URL = re.compile(r"(tgram://[^/?]+/[^?:]+)(?::\d+)?(\?.*)?")
 
 
+def topics_not_for(s: Dict[str, Any]) -> List[str]:
+    """The notifications whose own topic the push service can't take
+    (Telegram: a topic ID, a number)."""
+    if s.get("provider") != "telegram":
+        return []
+    bad = [TEMPLATE[key][2] for key, t in (s.get("templates") or {}).items()
+           if key in TEMPLATE and (t or {}).get("topic")
+           and not str(t["topic"]).isdigit()]
+    bad += [c["name"] for c in s.get("custom") or []
+            if c.get("topic") and not str(c["topic"]).isdigit()]
+    return bad
+
+
 def with_topic(url: str, topic: str) -> Optional[str]:
     """A push address sent to another topic (None: the service has none,
     or the topic isn't one it takes)."""
@@ -921,6 +934,10 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
         s["templates"] = clean_templates(s["templates"], strict=True)
     if "custom" in data:
         s["custom"] = clean_custom(data["custom"], strict=True)
+    bad = topics_not_for(s)
+    if bad:
+        raise ConfigError("Telegram topics are IDs (numbers): change or "
+                          "clear the topic of " + ", ".join(bad))
     if s["time_left"] == "first_layer":       # 0.3.1's name
         s["time_left"] = "slicer_first_layer"
     if s["time_left"] and env is not None and env.time_methods and \

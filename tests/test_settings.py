@@ -120,6 +120,12 @@ def run_settings_tests():
     check("...and false turns it off",
           not m["rows"]["preprint_done"]["enabled"]
           and not m["rows"]["preprint_done"]["email"])
+    t = st.defaults("U1")
+    t.update(provider="telegram", templates={"error": {"topic": "u1-errors"}},
+             custom=[dict(st.CUSTOM_DEFAULT, name="bed", topic="7")])
+    check("Telegram: the notifications whose topic isn't an ID",
+          st.topics_not_for(t) == ["Error"], st.topics_not_for(t))
+    check("...none on ntfy", st.topics_not_for(dict(t, provider="ntfy")) == [])
     m = st.parse_section({"timezone": "Europe/London",
                           "browser_timezone": "Asia/Jerusalem"},
                          st.defaults("U1"))

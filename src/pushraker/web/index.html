@@ -335,6 +335,7 @@
                     <option value="telegram">Telegram</option>
                 </select>
                 <div class="nt-hint" id="nt-provider-hint"></div>
+                <div class="nt-warn" id="nt-topic-warn" style="display:none"></div>
             </div>
         </div>
         <div class="nt-grid" id="nt-gotify">
@@ -1397,11 +1398,11 @@
         } else if (provider === 'ntfy') {
             el('pr-topic-lbl').textContent = 'Topic';
             input.placeholder = `${el('nt-topic').value || 'printer'} (default)`;
-            info.dataset.info = 'Sends this notification to another topic on the same ntfy server. Empty: the default topic.' + set;
+            info.dataset.info = 'Sends this notification to another topic on the same ntfy server. Leave empty for the default topic.' + set;
         } else {
             el('pr-topic-lbl').textContent = 'Topic ID';
             input.placeholder = 'the chat (default)';
-            info.dataset.info = 'Sends this notification to a topic of the chat, by its ID (a number). Only in groups with topics turned on (forum-style groups). Empty: the chat itself.' + set;
+            info.dataset.info = 'Sends this notification to a topic of the chat, by its ID (a number). Only in groups with topics turned on (forum-style groups). Leave empty for the default (the chat itself).' + set;
         }
     }
     el('pr-topic').oninput = () => {
@@ -1877,8 +1878,24 @@
         updatePublicWarning();
     }
 
+    // Telegram's topics are IDs: the notifications whose topic isn't one
+    function badTopics() {
+        if (el('nt-provider').value !== 'telegram') return [];
+        const bad = (state.meta.templates || []).filter(t => {
+            const v = (tplEdits[t.key] || {}).topic;
+            return v && !/^\d+$/.test(v);
+        }).map(t => t.label);
+        return bad.concat(customs.filter(c => c.topic && !/^\d+$/.test(c.topic)).map(c => c.name));
+    }
+    function renderTopicWarning() {
+        const bad = badTopics();
+        el('nt-topic-warn').innerHTML = bad.length
+            ? `⚠️ Telegram topics are IDs (numbers). Change or clear the topic of: ${bad.map(esc).join(', ')}. Saving is blocked until then.` : '';
+        el('nt-topic-warn').style.display = bad.length ? '' : 'none';
+    }
     function updateProvider() {
         const provider = el('nt-provider').value;
+        renderTopicWarning();
         el('nt-ntfy').style.display = provider === 'ntfy' ? '' : 'none';
         const g = PROVIDER_GUIDE[provider];
         el('nt-provider-hint').innerHTML = (PROVIDER_HINTS[provider] || '') + (g ? guideLink(g[0], g[1]) : '');
@@ -2256,6 +2273,8 @@
     async function save() {
         showError('');
         let payload;
+        const bad = badTopics();
+        if (bad.length) { showError(`⚠️ Telegram topics are IDs (numbers). Change or clear the topic of: ${bad.join(', ')}.`); return; }
         try { payload = collect(true); } catch (e) { showError(e.message); return; }
         busy(true, 'Saving…');
         runStart('Save & Apply', 'Saving and applying settings…');
@@ -2324,7 +2343,7 @@
     // Only with unsaved changes (the button is greyed out otherwise)
     let closing = false;
     const dirty = () => !!state && JSON.stringify(collect(false)) !== saved;
-    const markDirty = () => { el('pr-close').disabled = !dirty(); markChanged(); };
+    const markDirty = () => { el('pr-close').disabled = !dirty(); markChanged(); renderTopicWarning(); };
     document.addEventListener('input', markDirty);
     document.addEventListener('change', markDirty);
     // Buttons that fill a field in (Fill in, Random, Use public server)
