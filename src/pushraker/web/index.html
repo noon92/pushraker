@@ -205,7 +205,9 @@
     .nt-x:hover { border-color: var(--error); background: rgba(229,115,115,.12); }
     .nt-crow code { font-size: 11px; }
     .nt-add td { padding-top: 10px; }
-    tr.nt-topic-bad { outline: 2px solid var(--error); outline-offset: -2px; }
+    tr.nt-topic-bad, tr.nt-bad { outline: 2px solid var(--error); outline-offset: -2px; }
+    input.nt-bad, select.nt-bad { outline: 2px solid var(--error); }
+    #nt-stored-error { border-color: var(--error); }
     .pr-cm .pr-console { height: auto; min-height: 0; max-height: 200px; margin: 12px 0 0; display: none; }
     .pr-cm .pr-console.on { display: block; }
     .pr-data h3 { font-size: 18px; margin-bottom: 10px; }
@@ -2040,10 +2042,30 @@
         };
         el('nt-wh-enabled').onchange = () => { updateWebhook(); updateRowDimming(); };
         updateWebhook();
-        el('nt-stored-error').textContent = data.meta.stored_error
-            ? `⚠️ pushraker.conf couldn't be applied: ${data.meta.stored_error}. Notifications still use the settings from before that change. Fix it in the file, or save from this page.`
-            : '';
-        el('nt-stored-error').style.display = data.meta.stored_error ? '' : 'none';
+        // pushraker.conf has a setting that can't be used: what is (not)
+        // being sent, which setting, what it must be; outlined in red
+        const pb = data.meta.stored_problem || { message: data.meta.stored_error || '' };
+        document.querySelectorAll('.nt-bad').forEach(n => n.classList.remove('nt-bad'));
+        if (pb.message) {
+            const sending = data.meta.sending === 'nothing'
+                ? '<b>Nothing is being sent</b> until this is fixed.'
+                : '<b>Notifications are sent with the settings from before this change</b> until it is fixed.';
+            const where = pb.field ? `pushraker.conf has <code>${esc(pb.field)}: ${esc(pb.value)}</code>.` : "pushraker.conf has a setting that can't be used.";
+            el('nt-stored-error').innerHTML = `⚠️ ${sending} ${where} ${esc(pb.message)}. Change it here (outlined in red) and Save &amp; Apply, or in the file.`;
+            // Outlined once the rows are drawn
+            setTimeout(() => {
+                const FIELD_INPUT = { driver_temp: 'nt-driver-hot', report_interval: 'nt-report-interval', layers_complete: 'nt-layers', email_port: 'nt-email-port', filament_low_percent: 'nt-fl-percent' };
+                const input = el(FIELD_INPUT[pb.field] || '');
+                if (input) {
+                    input.classList.add('nt-bad');
+                    const tr = input.closest('tr');
+                    if (tr) tr.classList.add('nt-bad');
+                }
+            }, 0);
+        } else {
+            el('nt-stored-error').innerHTML = '';
+        }
+        el('nt-stored-error').style.display = pb.message ? '' : 'none';
         el('nt-fl-percent').value = data.filament_low_percent;
         el('nt-fl-grams').value = data.filament_low_grams;
         el('nt-fl-unknown').checked = !!data.filament_unknown;

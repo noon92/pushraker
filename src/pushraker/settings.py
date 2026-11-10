@@ -278,7 +278,12 @@ SETTINGS_FORMAT = 1
 
 
 class ConfigError(Exception):
-    pass
+    """A setting that can't be used; `field`: which (its pushraker.conf
+    name), when it's one."""
+
+    def __init__(self, message: str, field: str = "") -> None:
+        super().__init__(message)
+        self.field = field
 
 
 class Env:
@@ -879,33 +884,33 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
             try:
                 s[key] = int(data[key] or 0)
             except (TypeError, ValueError):
-                raise ConfigError("Filament alert values must be numbers")
+                raise ConfigError("Filament alert values must be numbers", "filament_low_percent")
         if not lo <= s[key] <= hi:
-            raise ConfigError("Filament alert: 0-90 % and 0-5000 g")
+            raise ConfigError("Filament alert: 0-90 % and 0-5000 g", "filament_low_percent")
     if "email_port" in data:
         try:
             s["email_port"] = int(data["email_port"])
         except (TypeError, ValueError):
-            raise ConfigError("Email port must be a number")
+            raise ConfigError("Email port must be a number", "email_port")
     if "layers_complete" in data:
         try:
             s["layers_complete"] = int(data["layers_complete"])
         except (TypeError, ValueError):
-            raise ConfigError("Layer must be 1, 2 or 3")
+            raise ConfigError("Layer must be 1, 2 or 3", "layers_complete")
     if "driver_temp" in data:
         try:
             s["driver_temp"] = int(data["driver_temp"])
         except (TypeError, ValueError):
-            raise ConfigError("Driver temperature must be a number")
+            raise ConfigError("Driver temperature must be a number", "driver_temp")
     if not 40 <= s["driver_temp"] <= 150:
-        raise ConfigError("Driver temperature alert: 40 to 150 °C")
+        raise ConfigError("Driver running hot: the temperature must be 40 to 150 °C", "driver_temp")
     if "report_interval" in data:
         try:
             s["report_interval"] = int(data["report_interval"])
         except (TypeError, ValueError):
-            raise ConfigError("Status report interval must be a number")
+            raise ConfigError("Status report interval must be a number", "report_interval")
     if not 5 <= s["report_interval"] <= 720:
-        raise ConfigError("Status report: every 5 to 720 minutes")
+        raise ConfigError("Status report: every 5 to 720 minutes of print time", "report_interval")
     rows = data.get("rows") or {}
     if not isinstance(rows, dict):
         raise ConfigError("Invalid request")
@@ -938,7 +943,7 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     bad = topics_not_for(s)
     if bad:
         raise ConfigError("Telegram topics are IDs (numbers): change or "
-                          "clear the topic of " + ", ".join(bad))
+                          "clear the topic of " + ", ".join(bad), "topic")
     if s["time_left"] == "first_layer":       # 0.3.1's name
         s["time_left"] = "slicer_first_layer"
     if s["time_left"] and env is not None and env.time_methods and \
@@ -978,7 +983,7 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     if not RX_CAMERA.fullmatch(s["camera"]):
         raise ConfigError("Invalid camera")
     if s["layers_complete"] not in (1, 2, 3):
-        raise ConfigError("Layer must be 1, 2 or 3")
+        raise ConfigError("Layer must be 1, 2 or 3", "layers_complete")
     for key in ("first_layer_objects", "complete_objects"):
         if s[key] not in ("each", "once"):
             raise ConfigError("When printing by object: once per object "
@@ -1281,12 +1286,22 @@ def configured(s: Dict[str, Any]) -> bool:
 
 def stored_error(s: Dict[str, Any], env: Optional[Env] = None) -> str:
     """Why the stored settings no longer pass validation (e.g. after an
-    update), or ""."""
+    update or an edit by hand), or ""."""
+    return stored_problem(s, env)["message"]
+
+
+def stored_problem(s: Dict[str, Any], env: Optional[Env] = None
+                   ) -> Dict[str, Any]:
+    """stored_error, with the setting it's about and its value in
+    pushraker.conf (for the page to point at)."""
     try:
         validate({}, s, env)
     except ConfigError as e:
-        return str(e)
-    return ""
+        field = getattr(e, "field", "")
+        value = s.get(field) if field and field in s else None
+        return {"message": str(e), "field": field,
+                "value": "" if value is None else str(value)}
+    return {"message": "", "field": "", "value": ""}
 
 
 # ---- the printer's address and cameras --------------------------------
@@ -1768,6 +1783,7 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
         "busy": busy,
         "default_name": env.name,
         "stored_error": stored_error(s, env),
+        "stored_problem": stored_problem(s, env),
         "summary": summary(s, env),
     }
     return out

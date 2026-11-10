@@ -1281,8 +1281,14 @@ class PushNotifications:
 
     async def _view(self) -> Dict[str, Any]:
         assert self.store is not None
-        return cfgmod.public_view(self.settings, self.env, self._busy(),
-                                  __version__)
+        out = cfgmod.public_view(self.settings, self.env, self._busy(),
+                                 __version__)
+        # What is being sent right now: the file's settings, the ones from
+        # before a change that can't be applied, or nothing (it couldn't
+        # be applied since the start)
+        out["meta"]["sending"] = "nothing" if not self.rows else \
+            "previous" if out["meta"].get("stored_error") else "current"
+        return out
 
     async def _refresh(self) -> None:
         """Before answering the page: pick up a hand edit (and apply it,
