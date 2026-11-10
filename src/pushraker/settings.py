@@ -21,7 +21,7 @@ import os
 import re
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import quote, urlparse
 
 PROVIDERS = ["ntfy", "gotify", "pushover", "telegram", "discord",
@@ -355,6 +355,8 @@ def _defaults(name: str) -> Dict[str, Any]:
         # the default: {key: {title, contents, image, camera, remaining}}.
         # What isn't here follows the default, also after an upgrade.
         "templates": {},
+        # Notifications of the user's own: [pushraker custom <name>]
+        "custom": [],
     }
 
 
@@ -369,6 +371,156 @@ def unescape_text(text: str) -> str:
 
 
 SECTION = "pushraker"
+CUSTOM_SECTION = "pushraker custom "
+
+# Custom notifications: a name (letters, digits, _; it's how G-code fires
+# one: RESPOND PREFIX=notify_custom MSG=<name>), a condition (a Jinja
+# expression, checked every few seconds: sent when it turns true), and a
+# template like the built-in ones
+CUSTOM_MAX = 20
+RX_CUSTOM_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,31}")
+CUSTOM_IMAGES = ("none", "render", "camera")
+CUSTOM_REPEATS = ("change", "job", "minutes")
+WHEN_MAX = 1000
+CUSTOM_DEFAULT = {
+    "enabled": True, "priority": "default", "email": False,
+    "when": "",
+    "title": "🔔 {{ machine.name }} {{ event.name }}",
+    "contents": "{% if job.file %}\n{{ job.file }}\n{% endif %}",
+    "image": "camera", "camera": "",
+    "repeat": "change", "repeat_minutes": 10,
+}
+
+
+def custom_rid(name: str) -> str:
+    """The component's name for a custom notification."""
+    return f"custom_{name}"
+
+
+def when_template(when: str) -> str:
+    """A condition as a template that reads "1" when it's true."""
+    return "{% if (" + (when or "false") + ") %}1{% endif %}"
+
+
+def clean_custom(items: Any, strict: bool = False) -> List[Dict[str, Any]]:
+    """The custom notifications, checked. strict (saving from the page):
+    a mistake is refused with what and where; otherwise the bad one is
+    left out."""
+    from . import engine
+    if not isinstance(items, list):
+        if strict:
+            raise ConfigError("Invalid request")
+        return []
+    out: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for raw in items[:CUSTOM_MAX] if not strict else items:
+        try:
+            if not isinstance(raw, dict):
+                raise ConfigError("Invalid request")
+            c = dict(CUSTOM_DEFAULT)
+            name = str(raw.get("name") or "").strip()
+            if not RX_CUSTOM_NAME.fullmatch(name):
+                raise ConfigError(
+                    f'Custom notification "{name}": the name is up to 32 '
+                    "letters, digits and _, starting with a letter")
+            if name.lower() in seen:
+                raise ConfigError(f'Two custom notifications are named '
+                                  f'"{name}"')
+            c["name"] = name
+            c["enabled"] = bool(raw.get("enabled", c["enabled"]))
+            c["email"] = bool(raw.get("email", c["email"]))
+            if raw.get("priority") in PRIORITIES:
+                c["priority"] = raw["priority"]
+            c["when"] = clean_text(raw.get("when", ""), WHEN_MAX).strip()
+            c["title"] = clean_text(raw.get("title", c["title"]), TITLE_MAX)
+            c["contents"] = clean_text(raw.get("contents", c["contents"]),
+                                       CONTENTS_MAX)
+            image = str(raw.get("image") or c["image"])
+            if image not in CUSTOM_IMAGES:
+                raise ConfigError(f"{name}: no such image")
+            c["image"] = image
+            cam = str(raw.get("camera") or "")
+            if not RX_CAMERA.fullmatch(cam):
+                raise ConfigError("Invalid camera")
+            c["camera"] = cam
+            repeat = str(raw.get("repeat") or "change")
+            if repeat not in CUSTOM_REPEATS:
+                raise ConfigError(f"{name}: no such repeat")
+            c["repeat"] = repeat
+            try:
+                minutes = int(raw.get("repeat_minutes", 10))
+            except (TypeError, ValueError):
+                minutes = 0
+            if not 1 <= minutes <= 1440:
+                raise ConfigError(f"{name}: repeat every 1 to 1440 minutes")
+            c["repeat_minutes"] = minutes
+            for field, text in (("When", when_template(c["when"])),
+                                ("title", c["title"]),
+                                ("contents", c["contents"])):
+                left = engine.RX_PLACEHOLDER.search(
+                    c["when"] if field == "When" else text)
+                if left:
+                    raise ConfigError(f"{name}: replace # in "
+                                      f"{left.group(0)} with a number")
+                bad = engine.check(text)
+                if bad:
+                    raise ConfigError(f"{name}, {field}: {bad}")
+        except ConfigError:
+            if strict:
+                raise
+            continue
+        seen.add(name.lower())
+        out.append(c)
+    if strict and len(out) > CUSTOM_MAX:
+        raise ConfigError(f"Up to {CUSTOM_MAX} custom notifications")
+    return out
+
+
+def custom_lines(s: Dict[str, Any]) -> List[str]:
+    """The custom notifications as [pushraker custom <name>] sections."""
+    lines: List[str] = []
+    for c in s.get("custom") or []:
+        lines += ["", f"[{CUSTOM_SECTION}{c['name']}]",
+                  f"notification: {'on' if c['enabled'] else 'off'}, "
+                  f"{c['priority']}, {'email' if c['email'] else 'no_email'}",
+                  f"when: {escape_text(c['when'])}",
+                  f"title: {escape_text(c['title'])}",
+                  f"contents: {escape_text(c['contents'])}",
+                  f"image: {c['image']}",
+                  f"camera: {c['camera']}",
+                  "repeat: " + (str(c["repeat_minutes"])
+                                if c["repeat"] == "minutes"
+                                else c["repeat"])]
+    return lines
+
+
+def parse_custom(cfg: Any) -> List[Dict[str, Any]]:
+    """The [pushraker custom <name>] sections of pushraker.conf."""
+    items = []
+    for sec_name in cfg.sections():
+        if not sec_name.startswith(CUSTOM_SECTION):
+            continue
+        sec = cfg[sec_name]
+        c: Dict[str, Any] = {"name": sec_name[len(CUSTOM_SECTION):].strip()}
+        row = {"enabled": True, "priority": "default", "email": False}
+        if sec.get("notification"):
+            _parse_row(row, sec.get("notification"))
+        c.update(row)
+        for key in ("when", "title", "contents"):
+            if key in sec:
+                c[key] = unescape_text(sec.get(key).strip())
+        for key in ("image", "camera"):
+            if key in sec:
+                c[key] = sec.get(key).strip()
+        repeat = (sec.get("repeat") or "change").strip().lower()
+        if repeat.isdigit():
+            c["repeat"], c["repeat_minutes"] = "minutes", int(repeat)
+        else:
+            c["repeat"] = repeat
+        items.append(c)
+    return clean_custom(items)
+
+
 SECRETS_SECTION = "pushraker"
 CONF_NAME = "pushraker.conf"
 SECRETS_NAME = "pushraker.secrets"
@@ -412,6 +564,7 @@ def section_lines(s: Dict[str, Any]) -> List[str]:
             v = ("true" if v else "false") if field == "remaining" else \
                 escape_text(v) if field in ("title", "contents") else v
             lines.append(f"{key}_{field}: {v}")
+    lines += custom_lines(s)
     return [ln + "\n" for ln in lines]
 
 
@@ -552,6 +705,7 @@ class Store:
         cfg = read_ini(self.settings_path)
         if cfg.has_section(SECTION):
             parse_section(cfg[SECTION], s)
+        s["custom"] = parse_custom(cfg)
         secrets = _read_ini_or_json_section(self.secrets_path, SECRETS_SECTION)
         for key in SECRET_FIELDS + ("secret_for", "email_password_for"):
             if secrets.get(key):
@@ -735,6 +889,8 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
                     new[field] = t[field]
             s["templates"][key] = new
         s["templates"] = clean_templates(s["templates"], strict=True)
+    if "custom" in data:
+        s["custom"] = clean_custom(data["custom"], strict=True)
     if s["time_left"] == "first_layer":       # 0.3.1's name
         s["time_left"] = "slicer_first_layer"
     if s["time_left"] and env is not None and env.time_methods and \
@@ -928,7 +1084,7 @@ def clean_templates(tpls: Dict[str, Any],
                 continue
             v = t[field]
             if field == "title":
-                v = clean_text(v, TITLE_MAX).replace("\n", " ")
+                v = clean_text(v, TITLE_MAX)
             elif field == "contents":
                 v = clean_text(v, CONTENTS_MAX)
             elif field == "image":
@@ -1335,6 +1491,27 @@ def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
         cam = template_camera(s, key, env)
         if cam and cam.get("snapshot") and template(s, key)["camera"]:
             out[f"snapshot_url_{key}"] = cam["snapshot"]
+    # Custom notifications: like a row
+    for c in s.get("custom") or []:
+        rid = custom_rid(c["name"])
+        kind = IMAGE_KIND[c["image"]]
+        if kind == "snapshot" and not (
+                env.cameras.get(c["camera"]) or camera(s, env) or {}
+        ).get("snapshot"):
+            kind = "none"
+        if c["camera"] and (env.cameras.get(c["camera"]) or {}).get(
+                "snapshot"):
+            out[f"snapshot_url_{rid}"] = env.cameras[c["camera"]]["snapshot"]
+        if c["enabled"] and push_configured(s):
+            pkind = "none" if s["provider"] == "gotify" else kind
+            out[rid] = f"{pkind}, {row_url(s, rid, c['priority'], env)}"
+            for p in PRIORITIES:
+                if p != c["priority"]:
+                    out[f"{rid}@{p}"] = row_url(s, rid, p, env)
+        if c["email"] and email_configured(s):
+            out[f"{rid}_email"] = f"{kind}, {email_url(s)}"
+        if webhook_configured(s):
+            out[f"{rid}_webhook"] = f"{kind}, {webhook_url(s, rid, env)}"
     for rid in rows:
         kind = image_kind(s, rid, env)
         if rid == "progress":
@@ -1525,6 +1702,7 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
                        "default": template_default(t[0])}
                       for t in TEMPLATES],
         "title_max": TITLE_MAX, "contents_max": CONTENTS_MAX,
+        "custom_default": CUSTOM_DEFAULT, "custom_max": CUSTOM_MAX,
         "priorities": PRIORITIES,
         "providers": PROVIDERS,
         "cameras": {name: {"snapshot": bool(c.get("snapshot")),

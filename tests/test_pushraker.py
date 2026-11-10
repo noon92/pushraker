@@ -2742,6 +2742,107 @@ async def test_templates_sending():
           and rows[0]["remaining"] == 12., plain)
 
 
+async def test_custom_notifications():
+    """Notifications of the user's own: sent when their condition turns
+    true (not when it already was), not again within a minute, once per
+    print job when asked; from G-code by name; stored in their own
+    sections of pushraker.conf."""
+    print("Custom notifications")
+    reset_world()
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    server, c = make({}, {"custom_bed_cool": [("ntfy", ntfy, False)]})
+    await server.handlers["server:klippy_ready"]()
+    cust = pn.cfgmod.clean_custom([{
+        "name": "bed_cool", "when": "printer.heater_bed.temperature < 40",
+        "title": "🧊 {{ machine.name }} {{ event.name }}",
+        "contents": "Bed {{ printer.heater_bed.temperature|round|int }}°C"
+                    "{% if event.trigger == 'gcode' %} (asked){% endif %}"}])
+    c.settings = dict(c.settings or pn.cfgmod.defaults("U1"), custom=cust)
+    STATE["heater_bed"] = {"temperature": 30., "target": 0.}
+    await c._custom_check()
+    await asyncio.sleep(0.2)
+    check("a condition already true at the start isn't news", not log, log)
+    STATE["heater_bed"]["temperature"] = 60.
+    await c._custom_check()
+    STATE["heater_bed"]["temperature"] = 35.
+    await c._custom_check()
+    await asyncio.sleep(0.3)
+    check("sent when it turns true, from its template",
+          [(e["title"], e["body"]) for e in log]
+          == [("🧊 U1 bed_cool", "Bed 35°C")], log)
+    log.clear()
+    STATE["heater_bed"]["temperature"] = 60.
+    await c._custom_check()
+    STATE["heater_bed"]["temperature"] = 35.
+    await c._custom_check()
+    await asyncio.sleep(0.2)
+    check("not again within a minute", not log, log)
+    c._custom_sent["bed_cool"] -= 120
+    STATE["heater_bed"]["temperature"] = 60.
+    await c._custom_check()
+    STATE["heater_bed"]["temperature"] = 35.
+    await c._custom_check()
+    await asyncio.sleep(0.2)
+    check("...after that, again", len(log) == 1, log)
+    log.clear()
+    cust[0]["repeat"] = "job"
+    c._custom_sent["bed_cool"] -= 120
+    STATE["heater_bed"]["temperature"] = 60.
+    await c._custom_check()
+    STATE["heater_bed"]["temperature"] = 35.
+    await c._custom_check()
+    await asyncio.sleep(0.2)
+    check("once per print job: not twice in one", not log, log)
+    cust[0]["repeat"] = "change"
+    c._on_gcode_response("notify_custom bed_cool")
+    c._on_gcode_response("notify_custom nobody")
+    await asyncio.sleep(0.3)
+    check("from G-code by name, whatever the condition",
+          [e["body"] for e in log] == ["Bed 35°C (asked)"], log)
+    log.clear()
+    cust[0]["when"] = "printer.heater_bed.temperature <"
+    await c._custom_check()
+    check("a condition that can't be read is logged, nothing sent",
+          not log and "bed_cool" in c._custom_err, c._custom_err)
+
+    # Stored in their own sections, read back the same
+    st = pn.cfgmod
+    s = st.defaults("U1")
+    s["custom"] = st.clean_custom([{"name": "Bed_cool", "when": "x > 1\nand y",
+                                    "repeat": "minutes",
+                                    "repeat_minutes": 15,
+                                    "priority": "high", "email": True}])
+    text = "".join(st.section_lines(s))
+    check("its own section in pushraker.conf",
+          "[pushraker custom Bed_cool]" in text
+          and "notification: on, high, email" in text
+          and "when: x > 1\\nand y" in text and "repeat: 15" in text, text)
+    path = os.path.join(WORK, "custom-test.conf")
+    with open(path, "w") as f:
+        f.write(text)
+    back = st.parse_custom(st.read_ini(path))
+    check("...and read back the same", back == s["custom"],
+          (back, s["custom"]))
+    s.update(enabled=True, provider="ntfy", server="https://ntfy.example.com",
+             topic="t")
+    opts = st.render_options(s, st.Env())
+    check("its destinations, like a row's, at each priority",
+          opts["custom_Bed_cool"].startswith("none, ntfys://")
+          and "custom_Bed_cool@max" in opts
+          and "custom_Bed_cool_email" not in opts, sorted(
+              k for k in opts if k.startswith("custom")))
+    for bad, what in (([{"name": "bed cool"}], "the name"),
+                      ([{"name": "a"}, {"name": "A"}], "Two custom"),
+                      ([{"name": "a", "when": "1 +"}], "When"),
+                      ([{"name": "a", "contents": "{% if %}"}], "contents")):
+        try:
+            st.clean_custom(bad, strict=True)
+            check(f"refuses {what}", False)
+        except st.ConfigError as e:
+            check(f"refuses {what}", what in str(e), str(e))
+
+
 async def test_codemirror():
     """CodeMirror: installed from this version's build (checksum checked),
     served to the page, updated after an upgrade, removed."""
@@ -3133,7 +3234,7 @@ async def run_component_tests():
               test_driver_hot,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
-              test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_codemirror,
+              test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_codemirror,
               test_data):
         try:
             await t()

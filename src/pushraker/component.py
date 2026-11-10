@@ -276,6 +276,12 @@ ACE_FIELDS = ["head_source", "aces", "mode", "head_ace",
               "quad_replenish", "quad_first", "swap_in_progress"]
 ACE_REFILL_WAIT = 180.
 MACRO_PREFIX = "notify "
+# RESPOND PREFIX=notify_custom MSG=<name>: send a custom notification
+CUSTOM_PREFIX = "notify_custom "
+# Custom notifications' conditions are checked this often (seconds); one
+# isn't sent again within CUSTOM_GAP of the last
+CUSTOM_INTERVAL = 5.
+CUSTOM_GAP = 60.
 MACRO_SEP = " || "
 MACRO_LEVELS = ("min", "low", "default", "high", "max")
 # (runout_exception_id: printers.py)
@@ -863,6 +869,7 @@ class PushNotifications:
                         logging.error("[pushraker] endpoint "
                                       "%s/%s: %s", base, path, e)
             self._spawn(self._watch_settings())
+            self._spawn(self._custom_watch())
             self._spawn(self._cm_follow())
             self._retire()
 
@@ -908,7 +915,9 @@ class PushNotifications:
                 return default
         # The destinations first: a bad address leaves everything as it was
         rows: Dict[str, Tuple[str, List[Destination]]] = {}
-        for rid in ROW_IDS:
+        customs = [cfgmod.custom_rid(c["name"])
+                   for c in (self.settings or {}).get("custom") or []]
+        for rid in list(ROW_IDS) + customs:
             image = ""
             dests: List[Destination] = []
             for key, email in ((rid, False), (f"{rid}_email", True),
@@ -1002,6 +1011,12 @@ class PushNotifications:
 
     def _init_state(self) -> None:
         self._driver_hot_sent = False
+        # Custom notifications: each condition's last state, when each was
+        # last sent (and in which print job), the last error logged
+        self._custom_was: Dict[str, bool] = {}
+        self._custom_sent: Dict[str, float] = {}
+        self._custom_job: Dict[str, int] = {}
+        self._custom_err: Dict[str, str] = {}
         self._filament_job = 0      # bumped per job; stops an old watcher
         self._job_map: List[Any] = []       # extruder_map_table at start
         self._job_tools: Set[int] = set()   # slicer filaments the job uses
@@ -1305,7 +1320,7 @@ class PushNotifications:
             if "," not in value or not value.split(",", 1)[1].strip():
                 continue
             if key in ROW_IDS or key.endswith(("_email", "_webhook")) \
-                    or key.startswith(("macro_", "object_", "file_pause")):
+                    or key.startswith(("macro_", "custom_")):
                 url = value.split(",", 1)[1].strip()
                 if not apprise.Apprise().add(url):
                     what = ("email" if key.endswith("_email") else
@@ -2215,7 +2230,7 @@ class PushNotifications:
             {"id": "other", "label": "❔ Other", "children": other},
         ]
         key = str(dict(web_request.get_args()).get("key") or "")
-        if key in cfgmod.TEMPLATE:
+        if key in cfgmod.TEMPLATE or key.startswith("custom"):
             event = jj.prune(self._sample_event(key))
             # What the notification can also have, for the tree (the
             # preview shows the plain case)
@@ -2396,8 +2411,22 @@ class PushNotifications:
                                "placeholders": [m.group(0) for m in
                                                 jj.RX_PLACEHOLDER.finditer(
                                                     title + contents)]}
-        ctx = await self._template_context([title, contents], True,
+        when = cfgmod.clean_text(args.get("when", ""), cfgmod.WHEN_MAX)
+        texts = [title, contents] + ([cfgmod.when_template(when)]
+                                     if when.strip() else [])
+        ctx = await self._template_context(texts, True,
                                            self._sample_event(key))
+        if when.strip():
+            # The condition with the printer's values now (the print job's
+            # values: the sample's when none is running)
+            try:
+                out["when_now"] = (await self._render(
+                    cfgmod.when_template(when), ctx)) == "1"
+            except jj.TemplateError as e:
+                out["error"] = {"field": "when", "message": str(e)}
+            left = jj.RX_PLACEHOLDER.search(when)
+            if left:
+                out["placeholders"].append(left.group(0))
         for field, text in (("title", title), ("text", contents)):
             try:
                 out[field] = await self._render(text, ctx)
@@ -2449,6 +2478,9 @@ class PushNotifications:
             return {"progress": 50}
         if key == "paused":
             return {"planned": False}
+        if key.startswith("custom"):
+            return {"name": str(key[len("custom_"):] or "my_notification"),
+                    "trigger": "condition"}
         if key == "macro":
             return {"title": "Bed ready", "message": "60 °C, levelled",
                     "priority": "default"}
@@ -3493,9 +3525,19 @@ class PushNotifications:
         return f"Estimated print time {format_duration(est)}" + (
             f", ETA {clock}" if clock else "")
 
+    def _custom(self, rid: str) -> Optional[Dict[str, Any]]:
+        """A custom notification's settings, by the component's name for
+        it (custom_<name>)."""
+        for c in (self.settings or {}).get("custom") or []:
+            if cfgmod.custom_rid(c["name"]) == rid:
+                return c
+        return None
+
     def _template(self, key: str) -> Dict[str, Any]:
         """A notification's template as set (its edits over the
         default)."""
+        if key.startswith("custom_"):
+            return dict(self._custom(key) or {})
         if key not in cfgmod.TEMPLATE:
             return {}
         return cfgmod.template(self.settings or {}, key)
@@ -3521,6 +3563,9 @@ class PushNotifications:
             logging.warning("[pushraker] %s template: %s", key, e)
             if not edited:
                 return title, body, {}
+            if d is None:       # a custom notification: no default
+                return title, self._lines(
+                    body, f"⚠️ Your template failed: {e}"), {}
             try:
                 ctx = await self._template_context(list(d), False, event)
                 t, c, sets = await self._render_pair(d[0], d[1], ctx)
@@ -3534,7 +3579,8 @@ class PushNotifications:
                       event: Optional[Dict[str, Any]]) -> None:
         """Moving to templates: with PUSHRAKER_PARITY set (the tests), the
         notification's default template must give what was built here."""
-        if not os.environ.get("PUSHRAKER_PARITY") or key.startswith("_"):
+        if not os.environ.get("PUSHRAKER_PARITY") or \
+                key.startswith(("_", "custom_")):
             return
         d = dflt.default(key)
         if d is None:
@@ -3840,6 +3886,16 @@ class PushNotifications:
         message everything in between. On printers without this component
         the line is only console output."""
         for line in str(response or "").splitlines():
+            if line.startswith(CUSTOM_PREFIX):
+                name = line[len(CUSTOM_PREFIX):].strip()
+                c = next((c for c in (self.settings or {}).get("custom")
+                          or [] if c["name"] == name), None)
+                if c is None:
+                    logging.info("[pushraker] notify_custom: no custom "
+                                 "notification named %s", name)
+                    continue
+                self._spawn(self._send_custom(c, "gcode"))
+                continue
             if not line.startswith(MACRO_PREFIX):
                 continue
             parts = line[len(MACRO_PREFIX):].split(MACRO_SEP)
@@ -3854,6 +3910,84 @@ class PushNotifications:
                     self._skip("macro", f"{priority} notifications are off")
                 continue
             self._spawn(self._macro(rid, title, message, priority))
+
+    # ---- custom notifications ------------------------------------------
+
+    async def _send_custom(self, c: Dict[str, Any], trigger: str) -> None:
+        """Send a custom notification (its condition turned true, or
+        G-code asked for it)."""
+        rid = cfgmod.custom_rid(c["name"])
+        if rid not in self.rows:
+            self._skip(rid, "off")
+            return
+        self._custom_sent[c["name"]] = time.monotonic()
+        self._custom_job[c["name"]] = self._filament_job
+        await self._send(
+            rid, f"🔔 {self.name} {c['name']}", "",
+            filename=self._job_filename if self._job_active else "",
+            event={"name": c["name"], "trigger": trigger})
+
+    def _custom_due(self, c: Dict[str, Any]) -> bool:
+        """Whether a condition that just turned true may send now: never
+        within a minute of the last one; once per print job, or at most
+        every N minutes, when asked."""
+        name = c["name"]
+        last = self._custom_sent.get(name)
+        now = time.monotonic()
+        if last is not None and now - last < CUSTOM_GAP:
+            return False
+        if c["repeat"] == "job":
+            return self._custom_job.get(name) != self._filament_job
+        if c["repeat"] == "minutes" and last is not None:
+            return now - last >= c["repeat_minutes"] * 60.
+        return True
+
+    async def _custom_check(self) -> None:
+        """One look at every custom notification's condition: one query
+        for all of them; one that turns true (false before) is sent."""
+        items = [c for c in (self.settings or {}).get("custom") or []
+                 if c["when"] and cfgmod.custom_rid(c["name"]) in self.rows]
+        live = {c["name"] for c in items}
+        for name in list(self._custom_was):
+            if name not in live:
+                del self._custom_was[name]
+        if not items:
+            return
+        texts = [cfgmod.when_template(c["when"]) for c in items]
+        ctx = await self._template_context(texts)
+        for c, text in zip(items, texts):
+            name = c["name"]
+            try:
+                now = (await self._render(text, dict(
+                    ctx, event={"name": name, "trigger": "condition"}))
+                ) == "1"
+            except jj.TemplateError as e:
+                if self._custom_err.get(name) != str(e):
+                    logging.warning("[pushraker] custom notification %s, "
+                                    "When: %s", name, e)
+                    self._custom_err[name] = str(e)
+                continue
+            self._custom_err.pop(name, None)
+            # The first look only learns the state: a condition already
+            # true when pushraker starts isn't news
+            was = self._custom_was.get(name)
+            self._custom_was[name] = now
+            if now and was is False and self._custom_due(c):
+                self._spawn(self._send_custom(c, "condition"))
+
+    async def _custom_watch(self) -> None:
+        """Custom notifications' conditions, every CUSTOM_INTERVAL
+        seconds while Klipper is up."""
+        while True:
+            await asyncio.sleep(CUSTOM_INTERVAL)
+            if not self._ready_once or self._klippy_shutdown():
+                continue
+            try:
+                await self._custom_check()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logging.warning("[pushraker] custom notifications: %s", e)
 
     async def _macro(self, rid: str, title: str, message: str,
                      priority: str) -> None:
