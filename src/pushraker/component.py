@@ -232,6 +232,9 @@ INTERVENTION_HOLD = 15.
 # is fed, so a change is reported once it has held this long. Not during
 # a print job: runouts and refills have their own notifications.
 FILAMENT_CHANGE_SETTLE = 3.
+FEED_PREFIX = "filament_feed "      # Snapmaker U1: left, right
+# The same change from the feeder and from filament_exist: reported once
+FILAMENT_CHANGE_SAME = 120.
 FAULT_ROWS = ("error", "warning", "shutdown")
 # Chamber temperature, whatever heats the chamber: a print job "waits" when,
 # before its first layer, there is a chamber target and the chamber is below
@@ -1113,6 +1116,14 @@ class PushNotifications:
         self._exist_seen: Optional[List[bool]] = None
         self._exist_names: Dict[int, str] = {}
         self._exist_gen = 0
+        # The Snapmaker U1's feeders (filament_feed left/right): each
+        # toolhead's channel_state; loading and unloading from the screen
+        # end in load_finish / unload_finish while filament_exist stays
+        # true (the filament is still in the inlet)
+        self._feeds: List[str] = []
+        self._feed_state: Dict[Tuple[str, str], str] = {}
+        # Last filament change reported per toolhead: (loaded, when)
+        self._fil_said: Dict[int, Tuple[bool, float]] = {}
         # Chamber: the printer's heater_generic objects, whether it has
         # Snapmaker's chamber sensor / purifier / a DragonBreath (found at
         # klippy_ready), and this job's chamber state (see _track_chamber)
@@ -4514,6 +4525,39 @@ class PushNotifications:
         if self._exist_seen[ch] == now:
             return      # already reported (e.g. the same change twice)
         self._exist_seen[ch] = now
+        await self._report_filament_change(ch, now)
+
+    def _track_feed(self, obj: str, values: Dict[str, Any]) -> None:
+        """A feeder's toolheads: a load or unload from the screen ending."""
+        for key, v in (values or {}).items():
+            ch = self._ext_index(key)
+            if ch is None or not isinstance(v, dict) or \
+                    "channel_state" not in v:
+                continue
+            state = str(v.get("channel_state") or "")
+            was = self._feed_state.get((obj, key))
+            self._feed_state[(obj, key)] = state
+            if was is None or was == state:
+                continue        # the first look only learns the state
+            logging.info("[pushraker] %s %s: %s -> %s", obj, key, was, state)
+            if state == "unload_finish":
+                self._spawn(self._feed_change(ch, False))
+            elif state.endswith("_finish") and "load" in state and \
+                    not state.startswith("unload"):
+                self._spawn(self._feed_change(ch, True))
+
+    async def _feed_change(self, ch: int, now: bool) -> None:
+        # The printer's filament info arrives shortly after
+        await asyncio.sleep(FILAMENT_CHANGE_SETTLE)
+        await self._report_filament_change(ch, now)
+
+    async def _report_filament_change(self, ch: int, now: bool) -> None:
+        said = self._fil_said.get(ch)
+        if said and said[0] == now and \
+                time.monotonic() - said[1] < FILAMENT_CHANGE_SAME:
+            return      # the feeder and the sensor saw the same change
+        self._fil_said[ch] = (now, time.monotonic())
+        ptc = self._status["print_task_config"]
         if self._job_active or "filament_change" not in self.rows or \
                 ("loaded" if now else "unloaded") \
                 not in self.filament_change_events:
@@ -4682,6 +4726,9 @@ class PushNotifications:
         for obj in list(self.printer.drivers) + self.printer.extruders:
             self._status.setdefault(obj, {})
         self._ace_on = ACE_OBJECT in objs
+        self._feeds = [o for o in objs if o.startswith(FEED_PREFIX)]
+        for obj in self._feeds:
+            self._status.setdefault(obj, {})
         # Subscribed whether or not their rows are on: the rows can be
         # turned on from the page at any time (the objects are cheap)
         if True:
@@ -4720,6 +4767,7 @@ class PushNotifications:
                         if "machine_state_manager" in objs else {}),
                      **{"idle_timeout": ["state"]},
                      **({ACE_OBJECT: ACE_FIELDS} if self._ace_on else {}),
+                     **{f: None for f in self._feeds},
                      **chamber),
                 self._on_status_update, default={})
         except Exception as e:
@@ -4732,6 +4780,9 @@ class PushNotifications:
         self._exist_seen = None
         self._exist_gen += 1
         self._track_filament_change()
+        self._feed_state.clear()
+        for obj in self._feeds:
+            self._track_feed(obj, self._status[obj])
         self._cal_hold += 1
         ps = self._status["print_stats"]
         if ps.get("state") in ("printing", "paused"):
@@ -4766,6 +4817,9 @@ class PushNotifications:
             self._track_preprint()
         if "filament_exist" in (data.get("print_task_config") or {}):
             self._track_filament_change()
+        for obj in self._feeds:
+            if obj in data:
+                self._track_feed(obj, data[obj])
         if ACE_OBJECT in data:
             self._track_ace()
         if self._job_active and self._ch:

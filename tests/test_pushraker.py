@@ -2160,6 +2160,61 @@ async def test_filament_change():
     await asyncio.sleep(0.5)
     check("nothing during a print job", log == [])
 
+    # The U1 unloading or loading from the screen: filament_exist stays
+    # true (the filament is still in the inlet); the feeder's
+    # channel_state ends in unload_finish / load_finish
+    reset_world()
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    server, c = make({}, {"filament_change": [("ntfy", ntfy, False)]})
+    sys.modules[type(c).__module__].FILAMENT_CHANGE_SETTLE = 0.2
+    STATE["print_stats"] = ps("standby")
+    STATE["print_task_config"] = {
+        "filament_exist": [True, True, True, True],
+        "filament_vendor": ["Elegoo", "Sunlu", "Elegoo", "Elegoo"],
+        "filament_type": ["PLA", "TPU", "PETG", "PLA"]}
+
+    def feed(e0, e1):
+        return {"extruder0": {"channel_state": e0,
+                              "channel_action_state": e0},
+                "extruder1": {"channel_state": e1,
+                              "channel_action_state": e1}}
+    STATE["filament_feed left"] = feed("load_finish", "load_finish")
+    STATE["filament_feed right"] = {
+        "extruder2": {"channel_state": "load_finish"},
+        "extruder3": {"channel_state": "load_finish"}}
+    await server.handlers["server:klippy_ready"]()
+    await asyncio.sleep(0.4)
+    check("feeders: subscribed, nothing at start",
+          "filament_feed left" in c._feeds and log == [], c._feeds)
+    for st in ("unload_homing", "unload_finish"):
+        await c._on_status_update(
+            {"filament_feed left": feed("load_finish", st)}, 0)
+    await asyncio.sleep(0.5)
+    check("unloaded from the screen: sent when it finishes",
+          [(e["title"], e["body"]) for e in log]
+          == [("🧵 U1 filament unloaded", "Toolhead 2: Sunlu TPU")],
+          [(e["title"], e["body"]) for e in log])
+    log.clear()
+    for st in ("load_homing", "load_finish"):
+        await c._on_status_update(
+            {"filament_feed left": feed("load_finish", st)}, 0)
+    await asyncio.sleep(0.5)
+    check("loaded from the screen",
+          [e["title"] for e in log] == ["🧵 U1 filament loaded"],
+          [e["title"] for e in log])
+    log.clear()
+    # Pulled out by hand: the sensor and the feeder both see it, once sent
+    await c._on_status_update(
+        {"print_task_config": {"filament_exist": [True, False, True,
+                                                  True]}}, 0)
+    await c._on_status_update(
+        {"filament_feed left": feed("load_finish", "unload_finish")}, 0)
+    await asyncio.sleep(0.6)
+    check("the sensor and the feeder: one notification",
+          [e["title"] for e in log] == ["🧵 U1 filament unloaded"],
+          [e["title"] for e in log])
+
 
 async def test_driver_hot():
     print("Driver temperature: once per print job, again after a pause")
