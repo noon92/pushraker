@@ -184,11 +184,10 @@
     .pr-data .pr-modal-box { max-width: min(1600px, 96vw); border-radius: 12px; padding: 20px 24px; max-height: 94vh; overflow-y: auto; }
     .pr-data-grid { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) !important; }
     .pr-prevwrap { margin-top: 12px; }
-    .pr-imgwrap { margin-top: 12px; }
-    .pr-topicwrap, .pr-priowrap { margin-top: 4px; max-width: 340px; }
-    .pr-priowrap.off { opacity: .45; }
+    .pr-imgwrap { margin-top: 18px; }
+    .pr-topicwrap, .pr-priowrap { margin-top: 18px; max-width: 340px; }
+    .pr-priowrap.off select, .pr-topicwrap.off input, .pr-priowrap.off .pr-lbl > span, .pr-topicwrap.off .pr-lbl > span { opacity: .45; }
     .pr-priowrap.off select { cursor: not-allowed; }
-    .pr-topicwrap.off { opacity: .45; }
     .nt-greyed .nt-field > *:not(label), .nt-greyed label { opacity: .5; }
     .nt-greyed label .nt-i { opacity: 1; }
     .pr-topicwrap.off input { cursor: not-allowed; }
@@ -577,7 +576,7 @@
         <div class="nt-table-wrap">
             <table class="nt-table" id="nt-table">
                 <thead>
-                    <tr><th>Notification</th><th class="nt-c nt-col-push">Push</th><th class="nt-c nt-col-email" id="nt-th-email">Email</th><th class="nt-data"></th></tr>
+                    <tr><th>Notification</th><th class="nt-c nt-col-push">Push</th><th class="nt-c nt-col-email" id="nt-th-email">Email <button type="button" class="nt-i pr-info" id="nt-email-info" data-info="Email notifications are off. Turn on &quot;Send email notifications&quot; below to use this column." aria-label="About">?</button></th><th class="nt-data"></th></tr>
                 </thead>
                 <tbody id="nt-rows"></tbody>
                 <tbody id="nt-crows"></tbody>
@@ -688,7 +687,7 @@
                 <div class="pr-imgopts" id="pr-imgopts"></div>
             </div>
             <div class="pr-priowrap" id="pr-priowrap">
-                <div class="pr-lbl">Priority <button type="button" class="nt-i pr-info" id="pr-prio-info" data-info="" aria-label="About">?</button></div>
+                <div class="pr-lbl"><span>Priority</span> <button type="button" class="nt-i pr-info" id="pr-prio-info" data-info="" aria-label="About">?</button></div>
                 <select class="nt-input" id="pr-prio"></select>
             </div>
             <div class="pr-topicwrap" id="pr-topicwrap">
@@ -1446,7 +1445,14 @@
             `<option value="${p}"${p === editing.priority ? ' selected' : ''}>${PRIORITY_LABELS[p] || p}</option>`).join('');
         wrap.classList.toggle('off', !on);
         sel.disabled = !on;
-        el('pr-prio-info').dataset.info = (on ? 'The priority push notifications are sent at.' : 'Push notifications are off.') +
+        const provider = el('nt-provider').value;
+        const how = {
+            telegram: 'Telegram: Min and Low arrive silently; the others are the same.',
+            discord: 'Discord: Min and Low arrive silently; High and Max mention whoever is set in Mention.',
+            discord_dm: 'Discord: Min and Low arrive silently; the others are the same.',
+            pushover: 'Pushover: High and Max are both Pushover\'s high priority.'
+        }[provider] || '';
+        el('pr-prio-info').dataset.info = (on ? 'The priority this notification is sent at. ' + how : 'Not used: push notifications are off.') +
             ' A template can change it for one notification: {% set priority = "high" %} (min, low, default, high, max).';
     }
     el('pr-prio').onchange = () => { if (editing) editing.priority = el('pr-prio').value; };
@@ -1764,9 +1770,8 @@
         });
         el('nt-table').classList.toggle('nt-no-push', !push);
         el('nt-table').classList.toggle('nt-no-email', !email);
-        const why = email ? '' : 'Turn on "Send email notifications" below to use this';
-        el('nt-table').querySelectorAll('[data-email], [data-cemail]').forEach(cb => { cb.disabled = !email; cb.title = why; });
-        el('nt-th-email').title = why;
+        el('nt-table').querySelectorAll('[data-email], [data-cemail]').forEach(cb => { cb.disabled = !email; });
+        el('nt-email-info').style.display = email ? 'none' : '';
     }
 
     // The user guide, and the section of it for each push service
