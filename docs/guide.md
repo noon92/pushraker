@@ -548,7 +548,7 @@ Add custom notification** opens the editor with three more fields:
   print job when none is running). Empty: never true; sent only from
   G-code.
 - **Send**: each time it turns true (never more than once a minute), once
-  per print job, once per print job and again after a pause, or at most
+  per print job, once per print job (resets after a pause), or at most
   every # minutes.
 
 ```jinja

@@ -181,7 +181,9 @@
     .nt-ast.blue { color: var(--accent); }
     /* On a phone the Data button is the row's last line instead of a column */
     .nt-data-inline { display: none; }
-    .pr-data .pr-modal-box { max-width: min(1600px, 96vw); border-radius: 12px; padding: 20px 24px; max-height: 94vh; overflow-y: auto; }
+    .pr-data .pr-modal-box { max-width: min(1600px, 96vw); border-radius: 12px; padding: 20px 24px; max-height: 94vh; overflow-y: auto; overscroll-behavior: contain; }
+    .pr-data, .pr-data .cm-scroller { overscroll-behavior: contain; }
+    body.pr-locked { overflow: hidden; }
     .pr-data-grid { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) !important; }
     .pr-prevwrap { margin-top: 12px; }
     .pr-imgwrap { margin-top: 18px; }
@@ -453,7 +455,7 @@
                     <input class="nt-input" id="nt-server" placeholder="https://ntfy.example.com" autocomplete="off" spellcheck="false">
                     <button type="button" class="btn btn-secondary" id="nt-use-public">Use public server</button>
                 </div>
-                <div class="nt-hint">Your own ntfy server (hostname or IP, optional port), or the public ntfy.sh.</div>
+                <div class="nt-hint">Your own ntfy server (hostname or IP, optional port), or the public ntfy.sh</div>
                 <div class="nt-public" id="nt-public-warn" style="display:none">
                     Public server: anyone who knows or guesses your topic can read your notifications, including
                     camera images, model previews and file names. Fine for testing; for everyday use, set up your own
@@ -461,12 +463,11 @@
                 </div>
             </div>
             <div class="nt-field">
-                <label for="nt-topic">Topic</label>
+                <label for="nt-topic">Topic (default)</label>
                 <div class="nt-inline">
                     <input class="nt-input" id="nt-topic" placeholder="printer" maxlength="64" autocomplete="off" spellcheck="false">
                     <button type="button" class="btn btn-secondary" id="nt-topic-random" title="Generate a long random topic">Random</button>
                 </div>
-                <div class="nt-hint">Subscribe to the same topic in the ntfy app.</div>
             </div>
             <div class="nt-field">
                 <label for="nt-auth">Authentication</label>
@@ -486,7 +487,6 @@
                     <input class="nt-input" id="nt-secret" type="password" autocomplete="new-password" spellcheck="false">
                     <button type="button" class="btn btn-secondary" data-toggle="nt-secret">Show</button>
                 </div>
-                <div class="nt-hint">Tip: Use a write-only account for the printer.</div>
             </div>
         </div>
         </div>
@@ -596,10 +596,9 @@
                 <tbody id="nt-crows"></tbody>
             </table>
         </div>
-        <div class="nt-foot">* Needs <b>Exclude objects</b> enabled in the slicer.</div>
         <div class="nt-grid" id="nt-filament">
             <div class="nt-field">
-                <label for="nt-fl-percent">🧵 Spool running low: alert when a spool is down to <button type="button" class="nt-i pr-info" id="nt-fl-info" data-info="Needs Spoolman, to know how much filament each spool has left: run a Spoolman server and turn on Moonraker's [spoolman] integration (in Firmware Config). Then Not enough filament and Spool running low work." aria-label="About">?</button></label>
+                <label for="nt-fl-percent">🧵 Spool running low: alert when a spool is down to <button type="button" class="nt-i pr-info" id="nt-fl-info" data-info="Needs Spoolman to know how much filament each spool has left." data-guide="https://snapmakeru1-extended-firmware.pages.dev/spoolman" aria-label="About">?</button></label>
                 <div class="nt-inline nt-unit">
                     <input class="nt-input" id="nt-fl-percent" type="number" min="0" max="90" inputmode="numeric">
                     <span>% of a full spool</span>
@@ -615,8 +614,7 @@
                 <div class="nt-hint">0 turns this off.</div>
             </div>
             <div class="nt-field" style="grid-column:1 / -1">
-                <label><input type="checkbox" id="nt-fl-unknown"> At print start, warn about a loaded spool that Spoolman shows at 0 g (amount of filament left unknown)</label>
-                <div class="nt-hint">Turn off if you don't track spool weights in Spoolman.</div>
+                <label><input type="checkbox" id="nt-fl-unknown"> At print start, warn about a loaded spool that Spoolman shows at 0 g. Turn off if you don't track spool weights in Spoolman</label>
             </div>
         </div>
     </div>
@@ -669,7 +667,7 @@
                     <textarea class="nt-input" id="pr-when" rows="2" spellcheck="false" autocomplete="off"></textarea>
                     <div id="pr-cm-when"></div>
                     <div class="pr-now" id="pr-now"></div>
-                    <div class="pr-repeat"><span>Send</span><select id="pr-repeat"><option value="change">each time it turns true (at most once a minute)</option><option value="job">once per print job</option><option value="job_pause">once per print job, again after a pause</option><option value="minutes">at most every # minutes</option></select><span id="pr-rmin-wrap"># = <input type="number" id="pr-rmin" min="1" max="1440" inputmode="numeric"></span></div>
+                    <div class="pr-repeat"><span>Send</span><select id="pr-repeat"><option value="change">each time it turns true (at most once a minute)</option><option value="job">once per print job</option><option value="job_pause">once per print job, resets after a pause</option><option value="minutes">at most every # minutes</option></select><span id="pr-rmin-wrap"># = <input type="number" id="pr-rmin" min="1" max="1440" inputmode="numeric"></span></div>
                 </div>
                 <div class="pr-lbl">Title</div>
                 <textarea class="nt-input pr-code" id="pr-t-title" rows="1" spellcheck="false" autocomplete="off"></textarea>
@@ -713,7 +711,7 @@
         </div>
         <div class="pr-buttons">
             <div class="pr-block-pop" id="pr-block-pop" role="alert" style="display:none"></div>
-            <button type="button" class="btn btn-save" id="pr-data-ok">Done</button>
+            <button type="button" class="btn btn-save" id="pr-data-ok">Save</button>
             <span class="pr-gap"></span>
             <button type="button" class="btn btn-secondary" id="pr-data-cancel">Cancel</button>
             <button type="button" class="btn btn-remove" id="pr-data-delete" style="display:none">Delete</button>
@@ -743,7 +741,7 @@
 <div class="pr-modal pr-discard" id="pr-reset" role="alertdialog" aria-labelledby="pr-reset-title">
     <div class="pr-modal-box">
         <h3 id="pr-reset-title">⚠️ Reset this notification?</h3>
-        <p id="pr-reset-text"></p>
+        <p id="pr-reset-text" style="white-space:pre-line"></p>
         <div class="pr-buttons">
             <button type="button" class="btn btn-discard" id="pr-reset-yes" disabled>Reset</button>
             <button type="button" class="btn btn-keep" id="pr-reset-no">Keep editing</button>
@@ -770,6 +768,8 @@
     const PRIORITY_LABELS = { min: 'Min', low: 'Low', default: 'Default', high: 'High', max: 'Max' };
     const GROUP_LABELS = { chamber: 'Chamber temperature', fault: 'Faults', filaments: 'Filaments' };
     const el = id => document.getElementById(id);
+    // The spool settings, moved under the filaments' rows on each render
+    const flBox = el('nt-filament');
     const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
     let state = null;
     let saved = '';             // the payload as last loaded or saved
@@ -834,6 +834,7 @@
     // ---- rows -----------------------------------------------------------
     function renderRows() {
         let group = null;
+        if (flBox.parentNode) flBox.remove();    // kept across re-renders
         el('nt-rows').innerHTML = state.meta.rows.map(meta => {
             const row = state.rows[meta.id];
             let html = '';
@@ -858,8 +859,8 @@
             const byObject = { first_layer: ['nt-layer-objects', state.first_layer_objects],
                                complete: ['nt-complete-objects', state.complete_objects] }[meta.id];
             const objects = byObject
-                ? `<span class="nt-sub">Print-by-object mode: <select class="nt-input nt-layer" id="${byObject[0]}">${[['each', 'once per object *'], ['once', 'once per print job']].map(([v, t]) =>
-                    `<option value="${v}"${v === byObject[1] ? ' selected' : ''}>${t}</option>`).join('')}</select></span>`
+                ? `<span class="nt-sub">Print-by-object mode: <select class="nt-input nt-layer" id="${byObject[0]}">${[['each', 'once per object'], ['once', 'once per print job']].map(([v, t]) =>
+                    `<option value="${v}"${v === byObject[1] ? ' selected' : ''}>${t}</option>`).join('')}</select><span class="nt-needs" data-needs="${byObject[0]}"${byObject[1] === 'each' ? '' : ' style="display:none"'}>. Needs <b>Exclude objects</b> enabled in the slicer</span></span>`
                 : '';
             const driver = meta.id === 'driver_hot'
                 ? `<span class="nt-sub">X or Y driver over <input class="nt-input nt-layer nt-deg" id="nt-driver-hot" type="number" min="40" max="150" inputmode="numeric" value="${state.driver_temp}"> °C</span>`
@@ -900,6 +901,20 @@
         el('nt-rows').querySelectorAll('[data-enabled], [data-email]').forEach(cb => {
             cb.onchange = updateRowDimming;
         });
+        // "once per object": what it needs, next to it
+        el('nt-rows').querySelectorAll('[data-needs]').forEach(n => {
+            const sel = el(n.dataset.needs);
+            sel.addEventListener('change', () => { n.style.display = sel.value === 'each' ? '' : 'none'; });
+        });
+        // The spool settings: under the filaments' rows
+        const filRows = state.meta.rows.filter(m => ['spoolman', 'refill', 'filament'].includes(m.group))
+            .map(m => el('nt-rows').querySelector(`tr[data-row="${m.id}"]`)).filter(Boolean);
+        const flRow = document.createElement('tr');
+        flRow.className = 'nt-fl-row';
+        flRow.innerHTML = '<td colspan="4"></td>';
+        flRow.firstChild.appendChild(flBox);
+        if (filRows.length) filRows[filRows.length - 1].after(flRow);
+        else el('nt-rows').appendChild(flRow);
         wireEditButtons();
         updateRowDimming();
     }
@@ -1153,7 +1168,8 @@
         tipBox.textContent = btn.dataset.info;
         if (btn.dataset.guide) {
             const a = document.createElement('a');
-            a.href = `${GUIDE}#${btn.dataset.guide}`;
+            // An anchor in pushraker's guide, or a page elsewhere
+            a.href = /^https?:/.test(btn.dataset.guide) ? btn.dataset.guide : `${GUIDE}#${btn.dataset.guide}`;
             a.target = '_blank';
             a.textContent = 'Guide';
             tipBox.append(a);
@@ -1328,6 +1344,7 @@
     }
     function editorChanged() {
         if (!editing || filling) return;
+        const before = FIELDS.map(f => editing[f]);
         el('pr-block-pop').style.display = 'none';
         growTitle();
         if (isCustom(editing.key)) {
@@ -1343,6 +1360,7 @@
         }
         editing.title = el('pr-t-title').value;
         editing.contents = field('contents').get();
+        FIELDS.forEach((f, i) => { if (editing[f] !== before[i]) touched.add(f); });
         updateJinjaPane();
         clearTimeout(previewTimer);
         previewTimer = setTimeout(preview, 400);
@@ -1354,34 +1372,42 @@
             : (cmView ? el('pr-cm-host') : el('pr-data-text'));
     }
     let previewMsgs = [];
+    // Fields typed in (or all, once Save was pressed): a blank one isn't
+    // marked wrong before then
+    let touched = new Set();
+    const FIELDS = ['name', 'when', 'title', 'contents', 'topic'];
     function showErrors(r) {
         const err = el('pr-data-err');
         const msgs = [], bad = new Set();
+        const msgField = [];
+        const add = (f, m, first) => { if (first) { msgs.unshift(m); msgField.unshift(f); } else { msgs.push(m); msgField.push(f); } bad.add(f); };
         if (r && r.placeholders && r.placeholders.length) {
-            msgs.push(`Replace # in <code>${esc(r.placeholders[0])}</code> with a number.`);
-            bad.add(editing && editing.title.includes(r.placeholders[0]) ? 'title' : 'contents');
+            add(editing && editing.title.includes(r.placeholders[0]) ? 'title' : 'contents',
+                `Replace # in <code>${esc(r.placeholders[0])}</code> with a number.`);
         }
         if (r && r.error) {
             const f = r.error.field === 'title' ? 'title' : r.error.field === 'when' ? 'when' : 'contents';
-            msgs.push(`${f === 'title' ? 'Title' : f === 'when' ? 'When' : 'Contents'}, ${esc(r.error.message)}`);
-            bad.add(f);
+            add(f, `${f === 'title' ? 'Title' : f === 'when' ? 'When' : 'Contents'}, ${esc(r.error.message)}`);
         }
-        if (editing && editing.topic && !/^[A-Za-z0-9_-]{1,64}$/.test(editing.topic)) { msgs.push('Topic: up to 64 letters, digits, - and _.'); bad.add('topic'); }
-        else if (editing && editing.topic && el('nt-provider').value === 'telegram' && !/^\d+$/.test(editing.topic)) { msgs.push('Topic ID: a number (the topic\'s ID).'); bad.add('topic'); }
+        if (editing && editing.topic && !/^[A-Za-z0-9_-]{1,64}$/.test(editing.topic)) add('topic', 'Topic: up to 64 letters, digits, - and _.');
+        else if (editing && editing.topic && el('nt-provider').value === 'telegram' && !/^\d+$/.test(editing.topic)) add('topic', 'Topic ID: a number (the topic\'s ID).');
         if (editing && isCustom(editing.key)) {
             const c = customById(Number(editing.key.slice(7)));
             const nameBad = !RX_CUSTOM_NAME.test(editing.name) ? 'Name: up to 32 letters, digits and _, starting with a letter.'
                 : customs.some(o => o !== c && o.name.toLowerCase() === editing.name.toLowerCase()) ? 'Name: another custom notification has it.' : '';
-            if (nameBad) { msgs.unshift(nameBad); bad.add('name'); }
+            if (nameBad) add('name', nameBad, true);
             // State: what the condition is now (empty: never true)
             const st = !editing.when.trim() ? false : r && typeof r.when_now === 'boolean' ? r.when_now : null;
             el('pr-now').innerHTML = st === null ? '' : `State: <b class="${st ? 'yes' : 'no'}">${st ? 'True' : 'False'}</b>`;
         }
-        ['name', 'when', 'title', 'contents', 'topic'].forEach(f => fieldBox(f).classList.toggle('pr-bad', bad.has(f)));
         previewError = msgs.length ? msgs.join(' ') : null;
         previewMsgs = msgs;
-        err.innerHTML = msgs.join('<br>');
-        err.style.display = msgs.length ? '' : 'none';
+        // Shown: a field with something in it, or typed in, or after Save
+        const shownField = f => touched.has(f) || !!(editing && String(editing[f] || '').trim());
+        const visible = msgs.filter((m, i) => shownField(msgField[i]));
+        FIELDS.forEach(f => fieldBox(f).classList.toggle('pr-bad', bad.has(f) && shownField(f)));
+        err.innerHTML = visible.join('<br>');
+        err.style.display = visible.length ? '' : 'none';
     }
     async function preview() {
         if (!editing) return;
@@ -1479,6 +1505,7 @@
     el('pr-topic').oninput = () => {
         if (!editing) return;
         editing.topic = el('pr-topic').value.trim();
+        touched.add('topic');
         clearTimeout(previewTimer);
         previewTimer = setTimeout(preview, 400);
     };
@@ -1514,6 +1541,7 @@
         el('pr-data-reset').style.display = custom ? 'none' : '';
         el('pr-data-delete').style.display = custom ? '' : 'none';
         filling = true;
+        touched = new Set();
         setPlaceholders(custom);
         el('pr-block-pop').style.display = 'none';
         if (custom) {
@@ -1540,6 +1568,7 @@
         el('pr-data-title').textContent = meta.label;
         el('pr-prev').innerHTML = '';
         el('pr-data').classList.add('open');
+        document.body.classList.add('pr-locked');
         await mountEditor();
         fillEditor();
         activeField = isCustom(key) && !editing.when ? 'when' : 'contents';
@@ -1550,7 +1579,9 @@
     }
     async function closeEditor(keep) {
         if (keep && previewError) {
-            // Next to Done: why it can't close (the fields are outlined)
+            // Next to Save: why it can't close (the fields are outlined)
+            FIELDS.forEach(f => touched.add(f));
+            preview();
             const pop = el('pr-block-pop');
             pop.innerHTML = '⚠️ ' + previewMsgs.join('<br>⚠️ ');
             pop.style.display = '';
@@ -1559,12 +1590,14 @@
         if (editing && isCustom(editing.key)) {
             if (keep && !(await keepCustom())) return;
             el('pr-data').classList.remove('open');
+            document.body.classList.remove('pr-locked');
             clearTimeout(previewTimer);
             editing = null;
             draft = null;
             return;
         }
         el('pr-data').classList.remove('open');
+            document.body.classList.remove('pr-locked');
         clearTimeout(previewTimer);
         if (keep && editing) {
             editing.title = el('pr-t-title').value;
@@ -1608,7 +1641,7 @@
         if (!c) return false;
         if (c !== draft) {
             const ok = await confirmReset(
-                `${c._saved ? `G-code and macros that send it (RESPOND PREFIX=notify_custom MSG=pushraker.${c._saved}) send nothing once you save. ` : ''}Deleted on Save & Apply.`,
+                `${c._saved ? 'G-code and macros that send it will stop working.\n\n' : ''}Deletion takes effect on Save & Apply.`,
                 `⚠️ Delete ${c.name || 'this custom notification'}?`, 'Delete');
             if (!ok) return false;
             customs = customs.filter(o => o !== c);
@@ -1621,6 +1654,7 @@
         if (!editing || !isCustom(editing.key)) return;
         if (!(await deleteCustom(customById(Number(editing.key.slice(7)))))) return;
         el('pr-data').classList.remove('open');
+            document.body.classList.remove('pr-locked');
         editing = null;
         draft = null;
     };
@@ -1660,7 +1694,6 @@
     };
     el('pr-data-ok').onclick = () => closeEditor(true);
     el('pr-data-cancel').onclick = () => closeEditor(false);
-    el('pr-data').onclick = e => { if (e.target === el('pr-data')) closeEditor(false); };
     const ta = el('pr-data-text'), ti = el('pr-t-title');
     ta.oninput = ti.oninput = editorChanged;
     ta.onfocus = () => { activeField = 'contents'; updateJinjaPane(); };
@@ -1773,7 +1806,7 @@
             state: C.EditorState.create({
                 doc: el('pr-when').value,
                 extensions: [
-                    C.history(), C.drawSelection(), C.EditorView.lineWrapping,
+                    C.lineNumbers(), C.history(), C.drawSelection(), C.EditorView.lineWrapping,
                     C.keymap.of([...C.completionKeymap, ...C.defaultKeymap, ...C.historyKeymap]),
                     C.StreamLanguage.define(C.jinja2), C.oneDark, C.bracketMatching(),
                     C.autocompletion({ override: [whenCompletions] }),
@@ -2027,7 +2060,6 @@
         if (e.key !== 'Escape' || e.defaultPrevented) return;
         closeFill();
         if (el('pr-cm').classList.contains('open')) el('pr-cm').classList.remove('open');
-        else if (el('pr-data').classList.contains('open') && !el('pr-reset').classList.contains('open')) closeEditor(false);
     });
 
     function updatePublicWarning() {
