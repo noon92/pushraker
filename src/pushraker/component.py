@@ -1385,8 +1385,7 @@ class PushNotifications:
         try:
             self.store.save(s)
         except OSError as e:
-            raise cfgmod.ConfigError(f"Could not write the settings: {e}. "
-                                     "Nothing was saved.")
+            raise cfgmod.ConfigError(f"Could not write the settings: {e}.")
         self.settings = s
         self._apply_options(opts)
         await self._push_hooks()
