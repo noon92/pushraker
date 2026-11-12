@@ -264,6 +264,25 @@ def run_settings_tests():
           and back["rows"] == tok["rows"] and back["auth"] == "token",
           (back["secret_for"], back["auth"]))
     check("unchanged files: nothing changed", not store.changed())
+    old_cfg = open(store.settings_path).read()
+    old_sec = open(store.secrets_path).read()
+    original_write = st.Store._write
+    def fail_settings(path, text, mode):
+        if path == store.settings_path:
+            raise OSError("simulated settings write failure")
+        return original_write(path, text, mode)
+    st.Store._write = staticmethod(fail_settings)
+    failed = False
+    try:
+        changed = dict(tok, secret="tk_replacement")
+        store.save(changed)
+    except OSError:
+        failed = True
+    finally:
+        st.Store._write = staticmethod(original_write)
+    check("failed settings write restores the previous credentials",
+          failed and open(store.settings_path).read() == old_cfg
+          and open(store.secrets_path).read() == old_sec)
     with open(store.settings_path, "a") as f:
         f.write("name: Edited\n")
     os.utime(store.settings_path, None)
@@ -510,6 +529,19 @@ def run_installer_tests():
           and os.path.exists(os.path.join(comps, "pushraker.py"))
           and not os.path.exists(os.path.join(comps, "push_notifications.py")),
           moon)
+    include_dir = os.path.join(root, "printer_data", "moonraker_includes")
+    os.makedirs(include_dir)
+    with open(os.path.join(cfgd, "moonraker.conf"), "w") as f:
+        f.write("[server]\nhost: 0.0.0.0\n\n"
+                "[push_notifications]\nname: Old\n")
+    with contextlib.redirect_stdout(_io.StringIO()):
+        cli.main(["install", "--moonraker-dir", os.path.join(root, "moonraker"),
+                  "--data-dir", os.path.join(root, "printer_data"),
+                  "--moonraker-include-dir", include_dir])
+    moon = open(os.path.join(cfgd, "moonraker.conf")).read()
+    check("install with include directory removes the obsolete section",
+          "[push_notifications]" not in moon
+          and os.path.isfile(os.path.join(include_dir, "pushraker.cfg")), moon)
     return _failures
 
 

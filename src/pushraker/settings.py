@@ -769,8 +769,7 @@ class Store:
         return s
 
     def save(self, s: Dict[str, Any]) -> None:
-        """Secrets first: if their file can't be written, the settings
-        (which hold none) are untouched."""
+        """Save both files, restoring the old secrets if settings fail."""
         secrets = {k: s[k] for k in SECRET_FIELDS if s.get(k)}
         for key, of in (("secret_for", "secret"),
                         ("email_password_for", "email_password")):
@@ -783,10 +782,23 @@ class Store:
                 cfg.set(SECRETS_SECTION, k, v)
         buf = io.StringIO()
         cfg.write(buf)
+        try:
+            with open(self.secrets_path, encoding="utf-8") as f:
+                old_secrets = f.read()
+        except FileNotFoundError:
+            old_secrets = ""
         self._write(self.secrets_path, buf.getvalue() if secrets else "",
                     0o600)
-        os.makedirs(os.path.dirname(self.settings_path), exist_ok=True)
-        self._write(self.settings_path, "".join(section_lines(s)), 0o644)
+        try:
+            os.makedirs(os.path.dirname(self.settings_path), exist_ok=True)
+            self._write(self.settings_path, "".join(section_lines(s)), 0o644)
+        except OSError as save_error:
+            try:
+                self._write(self.secrets_path, old_secrets, 0o600)
+            except OSError as restore_error:
+                raise OSError("Settings save failed and the previous secrets "
+                              f"could not be restored: {restore_error}") from save_error
+            raise
         self._stamp = self.stamp()
 
     @staticmethod

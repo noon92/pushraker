@@ -255,12 +255,15 @@ def cmd_install(a: argparse.Namespace) -> int:
     # second time
     if remove(p["old_shim"]):
         changed.append(f"removed {p['old_shim']}")
+    # The old section may live in moonraker.conf even when the new section
+    # is installed through an include directory. Leaving it behind asks
+    # Moonraker to load the shim we just removed.
+    if drop_section(p["moonraker_conf"], OLD_SECTION, a.owner):
+        changed.append(f"[{OLD_SECTION}] removed from {p['moonraker_conf']}")
     if p["moonraker_include"]:
         if write(p["moonraker_include"], section_text(a), owner=a.owner):
             changed.append(p["moonraker_include"])
     else:
-        if drop_section(p["moonraker_conf"], OLD_SECTION, a.owner):
-            changed.append(f"[{OLD_SECTION}] removed from {p['moonraker_conf']}")
         if ensure_section(p["moonraker_conf"], SECTION, section_text(a),
                           a.owner):
             changed.append(p["moonraker_conf"])
