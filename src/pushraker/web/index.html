@@ -2438,7 +2438,7 @@
             printer_url: el('nt-printer-url').value.trim(),
             layers_complete: parseInt(el('nt-layers').value, 10) || 2,
             first_layer_objects: el('nt-layer-objects').value,
-            filament_change_events: ['loaded', 'unloaded'].filter(e => el('nt-fc-' + e).checked).join(','),
+            filament_change_events: ['loaded', 'unloaded'].filter(e => el('nt-fc-' + e) ? el('nt-fc-' + e).checked : String(state.filament_change_events || '').includes(e)).join(','),
             driver_temp: parseInt(el('nt-driver-hot').value, 10) || 105,
             report_interval: parseInt(el('nt-report-interval').value, 10) || 30,
             complete_objects: el('nt-complete-objects').value,
