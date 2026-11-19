@@ -1486,6 +1486,12 @@ class PushNotifications:
                              now.isoformat(timespec="seconds"), secrets)
         name = cfgmod.backup_name(s, now.strftime("%Y-%m-%d"), secrets)
         if how == "download":
+            if secrets:
+                # They don't otherwise leave the printer: on the record
+                logging.warning("[pushraker] ⚠️ a backup with tokens and "
+                                "passwords was downloaded")
+                self._console("⚠️ pushraker: a backup with tokens and "
+                              "passwords was downloaded")
             return {"name": name, "backup": data}
         if how == "restore":
             return await self._restore_view(args.get("backup"))

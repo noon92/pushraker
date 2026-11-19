@@ -351,7 +351,9 @@
         .card { padding: 10px; }
         .nt-table th.nt-data, .nt-table td.nt-data { display: none; }
         .nt-data-inline { display: block; margin-top: 6px; }
-        .nt-table tr.nt-crow { position: relative; }
+        /* In the row's last cell a phone shows: a cell can hold it in
+           every browser, a table row can't in older Safari */
+        .nt-table td.nt-x-cell { position: relative; }
         .nt-x-m { display: block; position: absolute; top: 8px; right: 8px; margin: 0; }
     }
     @media (max-width: 600px) {
@@ -726,12 +728,12 @@
         <h3 id="rs-title">⚠️ Reset settings</h3>
         <p class="bk-note">Choose what goes back to how pushraker came:</p>
         <div class="rs-list">
-            <label><input type="checkbox" data-rs="push"> <span><b>Push service settings</b><small>Service, server and topic, with its login and token</small></span></label>
-            <label><input type="checkbox" data-rs="email"> <span><b>Email settings</b><small>Server, sender and addresses, with its login and password</small></span></label>
-            <label><input type="checkbox" data-rs="webhook"> <span><b>Webhook</b><small>On or off, with its URL</small></span></label>
-            <label><input type="checkbox" data-rs="stock"> <span><b>Stock notifications</b><small>Which are on, push and email, priority, their titles, contents and images, and their own settings (layers, temperatures, spool alerts)</small></span></label>
+            <label><input type="checkbox" data-rs="push"> <span><b>Push service settings</b><small>Service, server and topic, login, password, token</small></span></label>
+            <label><input type="checkbox" data-rs="email"> <span><b>Email settings</b><small>Server, sender and addresses, login and password</small></span></label>
+            <label><input type="checkbox" data-rs="webhook"> <span><b>Webhook</b><small>Status, URL</small></span></label>
+            <label><input type="checkbox" data-rs="stock"> <span><b>Stock notifications</b><small>Status, priority, title, content, settings</small></span></label>
             <label id="rs-custom-wrap"><input type="checkbox" data-rs="custom"> <span><b>Custom notifications</b><small id="rs-custom-sub">All of them are deleted</small></span></label>
-            <label class="rs-all"><input type="checkbox" id="rs-all"> <span><b>All settings</b><small>Everything above, and the rest: the main switch, printer name, cameras, time zone</small></span></label>
+            <label class="rs-all"><input type="checkbox" id="rs-all"> <span><b>All settings</b><small>Everything above and all other settings</small></span></label>
         </div>
         <p class="bk-red" id="rs-red" style="display:none"></p>
         <p class="bk-note">Nothing is saved until you click Save &amp; Apply.</p>
@@ -1037,9 +1039,9 @@
                 ? `<span class="nt-sub">${at ? at + ', when' : 'When'} <code>${esc(c.when.length > 70 ? c.when.slice(0, 70) + '…' : c.when)}</code></span>`
                 : `<span class="nt-sub">${at || 'Sent only from G-code'}</span>`;
             return `<tr class="nt-crow" data-crow="${id}">
-                <td><span class="nt-icon">🔔</span><span class="nt-name">${esc(c.name)}</span><button type="button" class="nt-x nt-x-m" data-cdel="${id}" aria-label="Delete">✕</button>${when}<span class="nt-sub nt-data-inline"><span class="nt-dim"><button type="button" class="btn btn-secondary nt-data-btn" data-ctpl="${id}">Edit</button></span></span></td>
+                <td><span class="nt-icon">🔔</span><span class="nt-name">${esc(c.name)}</span>${when}<span class="nt-sub nt-data-inline"><span class="nt-dim"><button type="button" class="btn btn-secondary nt-data-btn" data-ctpl="${id}">Edit</button></span></span></td>
                 <td class="nt-c nt-col-push"><input type="checkbox" data-cenabled="${id}"${c.enabled ? ' checked' : ''}></td>
-                <td class="nt-c nt-col-email"><input type="checkbox" data-cemail="${id}"${c.email ? ' checked' : ''}></td>
+                <td class="nt-c nt-col-email nt-x-cell"><button type="button" class="nt-x nt-x-m" data-cdel="${id}" aria-label="Delete">✕</button><input type="checkbox" data-cemail="${id}"${c.email ? ' checked' : ''}></td>
                 <td class="nt-data"><span class="nt-dim"><button type="button" class="btn btn-secondary nt-data-btn" data-ctpl="${id}">Edit</button></span><button type="button" class="nt-x" data-cdel="${id}" aria-label="Delete">✕</button></td>
             </tr>`;
         }).join('') + (customs.length < max
@@ -2879,13 +2881,20 @@
     // a new install has them, on this page; Save & Apply saves it and
     // drops their tokens and passwords
     const rsBoxes = () => [...document.querySelectorAll('#rs-modal [data-rs]')].filter(b => !b.disabled);
-    const RS_WHAT = { push: 'push service settings (with its login and token)', email: 'email settings (with its login and password)',
-        webhook: 'the webhook (with its URL)', stock: 'stock notifications', custom: 'custom notifications (deleted)' };
+    const RS_WHAT = { push: 'push service settings', email: 'email settings', webhook: 'webhook',
+        stock: 'stock notifications', custom: 'custom notifications' };
+    // Reset works 5 seconds after the dialog opens, with something ticked
+    let rsLeft = 0, rsTimer = null;
+    function rsTick() {
+        rsShow();
+        if (rsLeft > 0) rsTimer = setTimeout(() => { rsLeft--; rsTick(); }, 1000);
+    }
     function rsShow() {
         const on = rsBoxes().filter(b => b.checked).map(b => b.dataset.rs), all = el('rs-all').checked;
-        el('rs-yes').disabled = !on.length && !all;
+        el('rs-yes').disabled = rsLeft > 0 || (!on.length && !all);
+        el('rs-yes').textContent = rsLeft > 0 ? `Reset (${rsLeft})` : 'Reset';
         el('rs-red').style.display = on.length || all ? '' : 'none';
-        el('rs-red').textContent = all ? '⚠️ All settings will be reset, including tokens, passwords and the webhook URL.'
+        el('rs-red').textContent = all ? '⚠️ All settings will be reset.'
             : '⚠️ Will be reset: ' + on.map(k => RS_WHAT[k]).join(', ') + '.';
     }
     el('rs-open').onclick = () => {
@@ -2895,15 +2904,18 @@
         el('rs-custom-wrap').classList.toggle('rs-off', none);
         el('rs-custom-sub').textContent = none ? 'There are none' : 'All of them are deleted';
         document.querySelectorAll('#rs-modal input[type=checkbox]').forEach(b => { b.checked = false; });
-        rsShow();
+        clearTimeout(rsTimer);
+        rsLeft = 5;
+        rsTick();
         el('rs-modal').classList.add('open');
     };
     el('rs-all').onchange = () => { rsBoxes().forEach(b => { b.checked = el('rs-all').checked; }); rsShow(); };
     document.querySelector('#rs-modal .rs-list').addEventListener('change', e => {
         if (e.target.dataset.rs) { el('rs-all').checked = false; rsShow(); }
     });
-    el('rs-no').onclick = () => el('rs-modal').classList.remove('open');
+    el('rs-no').onclick = () => { clearTimeout(rsTimer); el('rs-modal').classList.remove('open'); };
     el('rs-yes').onclick = async () => {
+        if (el('rs-yes').disabled) return;
         const sections = el('rs-all').checked ? ['all'] : rsBoxes().filter(b => b.checked).map(b => b.dataset.rs);
         el('rs-modal').classList.remove('open');
         const keep = saved, was = savedState;
