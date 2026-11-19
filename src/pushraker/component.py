@@ -849,6 +849,24 @@ class PushNotifications:
             "~/printer_data")
         config_dir = os.path.dirname(app_args.get("config_file") or "") \
             or os.path.join(data_path, "config")
+        # pushraker.conf goes in Moonraker's "config" root (what Mainsail
+        # and Fluidd show), which isn't always where moonraker.conf is:
+        # Kiln OS starts Moonraker with -c /run/moonraker/moonraker.conf,
+        # and /run is emptied at every boot
+        try:
+            root = self.server.lookup_component("file_manager") \
+                .get_directory("config")
+        except Exception:
+            root = ""
+        if root and os.path.realpath(root) != os.path.realpath(config_dir):
+            old = os.path.join(config_dir, cfgmod.CONF_NAME)
+            new = os.path.join(root, cfgmod.CONF_NAME)
+            if os.path.isfile(old) and not os.path.exists(new):
+                try:
+                    shutil.copy2(old, new)
+                except OSError:
+                    pass
+            config_dir = root
         self._low_path = os.path.join(data_path, ".pushraker.json")
         # CodeMirror, when installed: <data>/pushraker/codemirror/
         self._cm_dir = os.path.join(data_path, "pushraker", "codemirror")

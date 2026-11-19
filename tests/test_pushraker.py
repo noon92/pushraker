@@ -120,7 +120,8 @@ class FileManager:
         return Meta()
 
     def get_directory(self, root):
-        return GCODES
+        return os.path.join(WORK, "data", "config") if root == "config" \
+            else GCODES
 
 
 class Klippy:
@@ -4151,6 +4152,46 @@ async def test_data():
           log and log[-1]["body"].endswith("\nn/a"), log and log[-1]["body"])
 
 
+async def test_conf_in_config_root():
+    print("pushraker.conf in Moonraker's config root, not next to moonraker.conf")
+    reset_world()
+    cfg = os.path.join(WORK, "data", "config")
+    run = os.path.join(WORK, "run_moonraker")
+    os.makedirs(cfg, exist_ok=True)
+    os.makedirs(run, exist_ok=True)
+    conf = os.path.join(cfg, "pushraker.conf")
+    if os.path.exists(conf):
+        os.remove(conf)
+    with open(os.path.join(run, "pushraker.conf"), "w") as f:
+        f.write("[pushraker]\nname: Kiln\n")
+
+    class RunServer(Server):
+        # Kiln OS: moonraker -c /run/moonraker/moonraker.conf (emptied
+        # at every boot); the config root is <data>/config
+        def get_app_args(self):
+            return {"data_path": os.path.join(WORK, "data"),
+                    "config_file": os.path.join(run, "moonraker.conf")}
+
+    c = pn.PushNotifications(Config(RunServer(), dict(name="U1")))
+    check("moonraker.conf outside the config root: pushraker.conf in the root",
+          c.store is not None and c.store.settings_path == conf,
+          c.store and c.store.settings_path)
+    with open(conf) as f:
+        check("one left next to moonraker.conf is copied over",
+              "name: Kiln" in f.read())
+    with open(os.path.join(run, "pushraker.conf"), "w") as f:
+        f.write("[pushraker]\nname: Other\n")
+    pn.PushNotifications(Config(RunServer(), dict(name="U1")))
+    with open(conf) as f:
+        check("one already in the root is never overwritten",
+              "name: Kiln" in f.read())
+    os.remove(conf)
+    shutil.rmtree(run, ignore_errors=True)
+    c = pn.PushNotifications(Config(Server(), dict(name="U1")))
+    check("moonraker.conf in the config root: unchanged",
+          c.store.settings_path == conf, c.store.settings_path)
+
+
 async def run_component_tests():
     for t in (test_order_and_priority, test_expiry_and_independence,
               test_fault_dedup, test_same_preparation_everywhere,
@@ -4160,7 +4201,7 @@ async def run_component_tests():
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
               test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_custom_events, test_camera_pictures, test_codemirror,
-              test_data):
+              test_data, test_conf_in_config_root):
         try:
             await t()
         except Exception as e:  # report and carry on
