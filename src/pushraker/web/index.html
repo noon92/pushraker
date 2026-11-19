@@ -2826,6 +2826,7 @@
         el('bk-out-list').innerHTML = bkContents(state);
         el('bk-secrets').checked = false;
         el('bk-secrets-wrap').style.display = bkHow === 'download' ? '' : 'none';
+        bkCountStop();
         bkSecrets();
         el('bk-go').textContent = bkHow === 'download' ? 'Download' : 'Send';
         el('bk-go').disabled = false;
@@ -2847,9 +2848,24 @@
         el('bk-out-never').style.display = bkHow === 'download' ? 'none' : '';
         el('bk-out-never').textContent = `Tokens, passwords and the webhook URL cannot be sent via ${bkHow === 'email' ? 'email' : 'push'}.`;
     }
-    el('bk-secrets').onchange = bkSecrets;
-    el('bk-cancel').onclick = () => el('bk-out').classList.remove('open');
+    // Ticking it: Download works 5 seconds later
+    let bkLeft = 0, bkTimer = null;
+    function bkCount() {
+        const go = el('bk-go');
+        go.disabled = bkLeft > 0;
+        go.textContent = bkHow === 'download' ? (bkLeft > 0 ? `Download (${bkLeft})` : 'Download') : 'Send';
+        if (bkLeft > 0) bkTimer = setTimeout(() => { bkLeft--; bkCount(); }, 1000);
+    }
+    function bkCountStop() { clearTimeout(bkTimer); bkLeft = 0; }
+    el('bk-secrets').onchange = () => {
+        bkSecrets();
+        bkCountStop();
+        if (el('bk-secrets').checked) bkLeft = 5;
+        bkCount();
+    };
+    el('bk-cancel').onclick = () => { bkCountStop(); el('bk-out').classList.remove('open'); };
     el('bk-go').onclick = async () => {
+        if (el('bk-go').disabled || bkLeft > 0) return;
         const go = el('bk-go'), label = go.textContent;
         el('bk-err').style.display = 'none';
         go.disabled = true;
