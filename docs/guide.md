@@ -742,6 +742,15 @@ them.
 A topic on the public ntfy.sh server is in it: anyone with the file can
 read that topic.
 
+**Reset…** puts chosen parts back to how pushraker came, on the page:
+push service settings (with its login and token), email settings (with
+its login and password), the webhook (with its URL), stock notifications
+(which are on, push and email, priority, templates and their own
+settings), custom notifications (all deleted), or all settings (those,
+and the main switch, printer name, cameras and time zone). What else you
+changed on the page stays. Nothing is saved until you click Save & Apply;
+that is also when the tokens and passwords are removed.
+
 **Restore…** loads a backup file onto the page. ⚠️ All settings are
 replaced by the backup's (excluding tokens, passwords and the webhook URL,
 which stay as they are, unless the file has them). Nothing is saved until

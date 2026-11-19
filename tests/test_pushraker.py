@@ -1455,6 +1455,52 @@ async def test_file_mode():
                                "webhook_url": "  https://h.example  ",
                                "other": "y"}})
               == {"webhook_url": "https://h.example"})
+        # Reset…: sections back to a new install's, with their secrets
+        rs = await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "reset", "sections": ["email"]}))
+        check("reset email: its settings and password, nothing else",
+              rs["forget"] == ["email_password"]
+              and rs["view"]["email_host"] == ""
+              and rs["view"]["has_email_password"] is False
+              and rs["view"]["topic"] == saved_s["topic"]
+              and rs["view"]["has_secret"] is True, (rs["forget"],))
+        rs = await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "reset", "sections": ["all"]}))
+        fresh = pn.cfgmod.defaults(c.store.default_name, c.store.unavailable)
+        check("reset all: a new install's settings, every secret dropped",
+              sorted(rs["forget"]) == sorted(pn.cfgmod.SECRET_FIELDS)
+              and rs["view"]["topic"] == fresh["topic"]
+              and rs["view"]["rows"] == fresh["rows"]
+              and rs["view"]["has_secret"] is False, rs["forget"])
+        out, gone, _keys = pn.cfgmod.reset(
+            dict(saved_s, custom=[{"name": "x"}], bed_cool_temp=55), fresh,
+            ["stock", "custom", "webhook"])
+        check("reset stock, custom and webhook",
+              out["custom"] == [] and out["bed_cool_temp"] == 40
+              and gone == ["webhook_url"] and out["webhook_url"] == ""
+              and out["secret"] == "tok123"
+              and out["topic"] == saved_s["topic"], gone)
+        for bad in ([], ["nope"], "all", None):
+            try:
+                pn.cfgmod.reset(saved_s, fresh, bad)
+                check(f"reset refuses {bad!r}", False)
+            except pn.cfgmod.ConfigError:
+                pass
+        stored = pn.cfgmod.validate(
+            {"enabled": False, "secret": "tok123", "email_password": "pw456"},
+            dict(saved_s, secret="", email_password="", secret_for="",
+                 email_password_for=""), c.env)
+        kept = pn.cfgmod.validate({"enabled": False}, stored, c.env)
+        dropped = pn.cfgmod.validate(
+            {"enabled": False, "forget": ["email_password", "nonsense"]},
+            stored, c.env)
+        check("saving after a reset drops that secret, not the others",
+              kept["email_password"] == "pw456"
+              and dropped["email_password"] == ""
+              and dropped["email_password_for"] == ""
+              and dropped["secret"] == kept["secret"]
+              and dropped["webhook_url"] == saved_s["webhook_url"],
+              (dropped["email_password"], dropped["secret"]))
         back = await server.endpoints["/server/pushraker/backup"](
             WebRequest("POST", {"how": "restore", "backup": bk["backup"]}))
         check("restore: the backup's settings, checked, for the page; the "

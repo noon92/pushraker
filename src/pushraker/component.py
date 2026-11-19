@@ -1489,6 +1489,21 @@ class PushNotifications:
             return {"name": name, "backup": data}
         if how == "restore":
             return await self._restore_view(args.get("backup"))
+        if how == "reset":
+            # Reset…: the chosen sections as a new install has them, for
+            # the page to load; Save & Apply saves it and drops the secrets
+            try:
+                fresh = cfgmod.defaults(self.store.default_name,
+                                        self.store.unavailable)
+                out, forget, keys = cfgmod.reset(s, fresh,
+                                                 args.get("sections"))
+            except cfgmod.ConfigError as e:
+                raise self.server.error(str(e), 400)
+            view = cfgmod.public_view(out, self.env, self._busy(),
+                                      __version__)
+            view["meta"]["sending"] = (await self._view())["meta"]["sending"]
+            # keys: the page keeps what else was changed on it and unsaved
+            return {"view": view, "forget": forget, "keys": keys}
         if how not in ("push", "email"):
             raise self.server.error("Invalid request", 400)
         targets = cfgmod.backup_targets(s)

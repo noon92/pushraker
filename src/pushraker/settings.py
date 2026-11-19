@@ -916,6 +916,12 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     for key in BOOL_FIELDS:
         if key in data:
             s[key] = bool(data[key])
+    # A reset: the stored token, password or webhook URL is dropped (one
+    # typed since is kept, below)
+    forget = data.get("forget")
+    for key in SECRET_FIELDS:
+        if isinstance(forget, list) and key in forget:
+            s[key] = ""
     if "secret" in data and str(data["secret"]):
         s["secret_for"] = ""     # set below, once the service is known
     if "email_password" in data and str(data["email_password"]):
@@ -1511,6 +1517,54 @@ def email_url(s: Dict[str, Any], inline: bool = True) -> str:
 PROVIDER_LABELS = {"ntfy": "ntfy", "gotify": "Gotify", "pushover": "Pushover",
                    "telegram": "Telegram", "discord": "Discord",
                    "discord_dm": "Discord"}
+# Reset…: the page's sections, in its order, with the settings each one
+# puts back to a new install's and the secret it drops
+RESET_SECTIONS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
+    "push": (("push_enabled", "provider", "server", "topic", "auth",
+              "username", "pushover_user", "pushover_device",
+              "gotify_server", "telegram_chat", "discord_user",
+              "discord_mention"), ("secret",)),
+    "email": (("email_enabled", "email_host", "email_port",
+               "email_security", "email_username", "email_from",
+               "email_to"), ("email_password",)),
+    "webhook": (("webhook_enabled",), ("webhook_url",)),
+    "stock": (("rows", "templates", "layers_complete", "first_layer_objects",
+               "filament_change_events", "complete_objects",
+               "filament_low_percent", "filament_low_grams",
+               "filament_unknown", "progress_marks", "time_left",
+               "driver_temp", "bed_cool_temp", "report_interval"), ()),
+    "custom": (("custom",), ()),
+}
+
+
+def reset(s: Dict[str, Any], fresh: Dict[str, Any],
+          sections: Any) -> Tuple[Dict[str, Any], List[str], List[str]]:
+    """The settings with the chosen sections as a new install has them
+    ("all": every one, and the rest), the secrets that go with them (to
+    drop on saving), and which settings those were."""
+    if not isinstance(sections, list) or not sections or any(
+            x != "all" and x not in RESET_SECTIONS for x in sections):
+        raise ConfigError("Choose what to reset")
+    out = json.loads(json.dumps(s))
+    fresh = json.loads(json.dumps(fresh))
+    if "all" in sections:
+        keys: List[str] = [k for k in fresh if k not in SECRET_FIELDS
+                           + ("secret_for", "email_password_for")]
+        forget = list(SECRET_FIELDS)
+    else:
+        keys = [k for x in sections for k in RESET_SECTIONS[x][0]]
+        forget = [k for x in sections for k in RESET_SECTIONS[x][1]]
+    for key in keys:
+        out[key] = fresh[key]
+    for key in forget:
+        out[key] = ""
+    if "secret" in forget:
+        out["secret_for"] = ""
+    if "email_password" in forget:
+        out["email_password_for"] = ""
+    return out, forget, keys
+
+
 # A backup: the settings in a file, without what pushraker.secrets holds
 BACKUP_FORMAT = 1
 # Push services that can carry a backup file, and why the others can't

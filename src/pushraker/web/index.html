@@ -102,6 +102,7 @@
     .rs-list input { margin-top: 3px; flex: none; }
     .rs-list small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
     .rs-list .rs-all { border-top: 1px solid #444; padding-top: 10px; }
+    .rs-list label.rs-off { opacity: 0.45; cursor: default; }
     .bk-secrets { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; font-size: 14px; cursor: pointer; }
     .bk-to { margin: 4px 0 8px; }
     .bk-to label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
@@ -725,12 +726,12 @@
         <h3 id="rs-title">⚠️ Reset settings</h3>
         <p class="bk-note">Choose what goes back to how pushraker came:</p>
         <div class="rs-list">
-            <label><input type="checkbox" data-rs="notifications"> <span><b>Notifications</b><small>Which are on, push and email, priority, and their titles, contents and images</small></span></label>
-            <label><input type="checkbox" data-rs="custom"> <span><b>Custom notifications</b><small>All of them are deleted</small></span></label>
-            <label><input type="checkbox" data-rs="push"> <span><b>Push service settings</b><small>Service, server, topic</small></span></label>
-            <label><input type="checkbox" data-rs="email"> <span><b>Email settings</b><small>Server, addresses, sender</small></span></label>
-            <label><input type="checkbox" data-rs="secrets"> <span><b>Secrets and logins</b><small>Tokens, passwords and the webhook URL</small></span></label>
-            <label class="rs-all"><input type="checkbox" id="rs-all"> <span><b>All settings</b><small>Everything above, and the rest: printer name, cameras, temperatures, spool settings</small></span></label>
+            <label><input type="checkbox" data-rs="push"> <span><b>Push service settings</b><small>Service, server and topic, with its login and token</small></span></label>
+            <label><input type="checkbox" data-rs="email"> <span><b>Email settings</b><small>Server, sender and addresses, with its login and password</small></span></label>
+            <label><input type="checkbox" data-rs="webhook"> <span><b>Webhook</b><small>On or off, with its URL</small></span></label>
+            <label><input type="checkbox" data-rs="stock"> <span><b>Stock notifications</b><small>Which are on, push and email, priority, their titles, contents and images, and their own settings (layers, temperatures, spool alerts)</small></span></label>
+            <label id="rs-custom-wrap"><input type="checkbox" data-rs="custom"> <span><b>Custom notifications</b><small id="rs-custom-sub">All of them are deleted</small></span></label>
+            <label class="rs-all"><input type="checkbox" id="rs-all"> <span><b>All settings</b><small>Everything above, and the rest: the main switch, printer name, cameras, time zone</small></span></label>
         </div>
         <p class="bk-red" id="rs-red" style="display:none"></p>
         <p class="bk-note">Nothing is saved until you click Save &amp; Apply.</p>
@@ -2331,8 +2332,14 @@
     }
 
     // ---- load / collect ----------------------------------------------------
+    // What's saved (Discard changes goes back to it; a restore or reset
+    // puts something else on the page), and the stored secrets a reset
+    // drops on saving
+    let savedState = null, forget = [];
     function render(data) {
         state = data;
+        savedState = data;
+        forget = [];
         el('pr-version').textContent = data.meta.version ? `pushraker ${data.meta.version}` : '';
         el('nt-enabled').checked = data.enabled;
         el('nt-push-enabled').checked = data.push_enabled !== false;
@@ -2618,6 +2625,7 @@
         if (secret) payload.secret = secret;
         if (emailPassword) payload.email_password = emailPassword;
         if (webhookUrl) payload.webhook_url = webhookUrl;
+        if (forget.length) payload.forget = forget.slice();
         return payload;
     }
 
@@ -2867,23 +2875,66 @@
             go.textContent = label;
         }
     };
-    // MOCKUP: Reset…, by section (All settings ticks the rest)
-    const rsBoxes = () => [...document.querySelectorAll('#rs-modal [data-rs]')];
+    // Reset…, by section (All settings ticks the rest): the chosen ones as
+    // a new install has them, on this page; Save & Apply saves it and
+    // drops their tokens and passwords
+    const rsBoxes = () => [...document.querySelectorAll('#rs-modal [data-rs]')].filter(b => !b.disabled);
+    const RS_WHAT = { push: 'push service settings (with its login and token)', email: 'email settings (with its login and password)',
+        webhook: 'the webhook (with its URL)', stock: 'stock notifications', custom: 'custom notifications (deleted)' };
     function rsShow() {
         const on = rsBoxes().filter(b => b.checked).map(b => b.dataset.rs), all = el('rs-all').checked;
-        el('rs-yes').disabled = !on.length;
-        const what = { notifications: 'notifications', custom: 'custom notifications', push: 'push service settings', email: 'email settings', secrets: 'tokens, passwords and the webhook URL' };
-        el('rs-red').style.display = on.length ? '' : 'none';
+        el('rs-yes').disabled = !on.length && !all;
+        el('rs-red').style.display = on.length || all ? '' : 'none';
         el('rs-red').textContent = all ? '⚠️ All settings will be reset, including tokens, passwords and the webhook URL.'
-            : '⚠️ Will be reset: ' + on.map(k => what[k]).join(', ') + '.';
+            : '⚠️ Will be reset: ' + on.map(k => RS_WHAT[k]).join(', ') + '.';
     }
-    el('rs-open').onclick = () => { rsBoxes().forEach(b => { b.checked = false; }); el('rs-all').checked = false; rsShow(); el('rs-modal').classList.add('open'); };
+    el('rs-open').onclick = () => {
+        if (!state) return;
+        const none = !customs.length, box = document.querySelector('#rs-modal [data-rs="custom"]');
+        box.disabled = none;
+        el('rs-custom-wrap').classList.toggle('rs-off', none);
+        el('rs-custom-sub').textContent = none ? 'There are none' : 'All of them are deleted';
+        document.querySelectorAll('#rs-modal input[type=checkbox]').forEach(b => { b.checked = false; });
+        rsShow();
+        el('rs-modal').classList.add('open');
+    };
     el('rs-all').onchange = () => { rsBoxes().forEach(b => { b.checked = el('rs-all').checked; }); rsShow(); };
     document.querySelector('#rs-modal .rs-list').addEventListener('change', e => {
-        if (e.target.dataset.rs) { el('rs-all').checked = rsBoxes().every(b => b.checked); rsShow(); }
+        if (e.target.dataset.rs) { el('rs-all').checked = false; rsShow(); }
     });
     el('rs-no').onclick = () => el('rs-modal').classList.remove('open');
-    el('rs-yes').onclick = () => { el('rs-modal').classList.remove('open'); bkSay('✓ Reset on this page: check it, then Save & Apply'); };
+    el('rs-yes').onclick = async () => {
+        const sections = el('rs-all').checked ? ['all'] : rsBoxes().filter(b => b.checked).map(b => b.dataset.rs);
+        el('rs-modal').classList.remove('open');
+        const keep = saved, was = savedState;
+        try {
+            const res = await api('/server/pushraker/backup', 'POST', { how: 'reset', sections });
+            // Only those sections: what else was changed on this page and
+            // not saved stays (a token typed in, too)
+            const page = collect(false), gone = [...new Set(forget.concat(res.forget || []))];
+            const typed = { secret: page.secret, email_password: page.email_password, webhook_url: page.webhook_url };
+            const merged = Object.assign({}, state, page);
+            (res.keys || []).forEach(k => { merged[k] = res.view[k]; });
+            ['secret', 'email_password', 'webhook_url'].forEach(k => {
+                delete merged[k];
+                if (gone.includes(k)) merged['has_' + k] = false;
+            });
+            merged.meta = state.meta;
+            render(merged);
+            forget = gone;
+            const box = { ntfy: 'nt-secret', pushover: 'nt-po-token', gotify: 'nt-gt-token', telegram: 'nt-tg-token',
+                discord: 'nt-dc-hook', discord_dm: 'nt-dc-token' }[merged.provider];
+            if (typed.secret && box && !(res.forget || []).includes('secret')) el(box).value = typed.secret;
+            if (typed.email_password && !(res.forget || []).includes('email_password')) el('nt-email-password').value = typed.email_password;
+            if (typed.webhook_url && !(res.forget || []).includes('webhook_url')) el('nt-wh-url').value = typed.webhook_url;
+        } catch (e) {
+            bkSay('⚠️ ' + e.message);
+            return;
+        }
+        saved = keep; savedState = was;
+        markDirty();
+        bkSay('✓ Reset on this page: check it, then Save & Apply');
+    };
     el('bk-restore').onclick = () => { if (state) { el('bk-file').value = ''; el('bk-file').click(); } };
     el('bk-file').onchange = async () => {
         const f = el('bk-file').files[0];
@@ -2917,7 +2968,7 @@
     el('bk-yes').onclick = async () => {
         el('bk-modal').classList.remove('open');
         if (!bkIn) return;
-        const data = bkIn, keep = saved;
+        const data = bkIn, keep = saved, was = savedState;
         bkIn = null;
         try {
             // Checked by pushraker like a save: nothing from a file gets
@@ -2936,7 +2987,7 @@
             bkSay('⚠️ ' + (/^Can't restore/.test(e.message) ? e.message : 'Can\'t restore this backup: ' + e.message));
             return;
         }
-        saved = keep;
+        saved = keep; savedState = was;
         markDirty();
         bkSay('✓ Restored on this page: check it, then Save & Apply');
     };
@@ -2978,7 +3029,7 @@
     }
     el('pr-close').onclick = async () => {
         if (!dirty() || !(await confirmDiscard())) return;
-        render(state);
+        render(savedState || state);
         el('pr-close').disabled = true;
         el('pr-status').textContent = 'Changes discarded';
     };
