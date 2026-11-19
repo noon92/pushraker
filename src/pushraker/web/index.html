@@ -2902,7 +2902,7 @@
         const none = !customs.length, box = document.querySelector('#rs-modal [data-rs="custom"]');
         box.disabled = none;
         el('rs-custom-wrap').classList.toggle('rs-off', none);
-        el('rs-custom-sub').textContent = none ? 'There are none' : 'All of them are deleted';
+        el('rs-custom-sub').textContent = none ? 'None' : 'All of them are deleted';
         document.querySelectorAll('#rs-modal input[type=checkbox]').forEach(b => { b.checked = false; });
         clearTimeout(rsTimer);
         rsLeft = 5;
