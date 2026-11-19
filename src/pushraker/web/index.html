@@ -2687,12 +2687,12 @@
         }
         try { payload = collect(true); } catch (e) { showError(e.message); return; }
         busy(true, 'Saving…');
-        runStart('Save & Apply', 'Saving and applying settings…');
+        runStart('Save & Apply', 'Saving...');
         try {
             const data = await api('/server/pushraker/config', 'POST', payload);
             const notes = (data.notes || []).slice();
             render(data);
-            showConsole(['Settings saved and applied. Nothing restarts: they are in effect now, during a print job too.'].concat(notes));
+            showConsole(['Settings saved and applied.'].concat(notes));
             el('pr-status').textContent = 'Saved and applied';
             runEnd('Done', true);
         } catch (e) {
