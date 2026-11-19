@@ -97,6 +97,11 @@
     .nt-fill-menu.bk-menu button.bk-off { opacity: 0.45; cursor: not-allowed; }
     .nt-fill-menu.bk-menu button.bk-off:hover { background: none; }
     .bk-red { color: #ff6b6b; font-weight: 600; }
+    .rs-list { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 12px; }
+    .rs-list label { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 14px; }
+    .rs-list input { margin-top: 3px; flex: none; }
+    .rs-list small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
+    .rs-list .rs-all { border-top: 1px solid #444; padding-top: 10px; }
     .bk-secrets { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; font-size: 14px; cursor: pointer; }
     .bk-to { margin: 4px 0 8px; }
     .bk-to label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
@@ -653,6 +658,7 @@
             </div>
         </span>
         <button type="button" class="btn btn-secondary" id="bk-restore">Restore…</button>
+        <button type="button" class="btn btn-secondary" id="rs-open">Reset…</button>
         <input type="file" id="bk-file" accept=".json,application/json" style="display:none">
         <span class="bk-status" id="bk-status"></span>
     </div>
@@ -710,6 +716,27 @@
         <div class="pr-buttons">
             <button type="button" class="btn btn-save" id="bk-go">Download</button>
             <button type="button" class="btn btn-secondary" id="bk-cancel">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<div class="pr-modal bk-modal" id="rs-modal" role="alertdialog" aria-labelledby="rs-title">
+    <div class="pr-modal-box">
+        <h3 id="rs-title">⚠️ Reset settings</h3>
+        <p class="bk-note">Choose what goes back to how pushraker came:</p>
+        <div class="rs-list">
+            <label><input type="checkbox" data-rs="notifications"> <span><b>Notifications</b><small>Which are on, push and email, priority, and their titles, contents and images</small></span></label>
+            <label><input type="checkbox" data-rs="custom"> <span><b>Custom notifications</b><small>All of them are deleted</small></span></label>
+            <label><input type="checkbox" data-rs="push"> <span><b>Push service settings</b><small>Service, server, topic</small></span></label>
+            <label><input type="checkbox" data-rs="email"> <span><b>Email settings</b><small>Server, addresses, sender</small></span></label>
+            <label><input type="checkbox" data-rs="secrets"> <span><b>Secrets and logins</b><small>Tokens, passwords and the webhook URL</small></span></label>
+            <label class="rs-all"><input type="checkbox" id="rs-all"> <span><b>All settings</b><small>Everything above, and the rest: printer name, cameras, temperatures, spool settings</small></span></label>
+        </div>
+        <p class="bk-red" id="rs-red" style="display:none"></p>
+        <p class="bk-note">Nothing is saved until you click Save &amp; Apply.</p>
+        <div class="pr-buttons">
+            <button type="button" class="btn btn-discard" id="rs-yes" disabled>Reset</button>
+            <button type="button" class="btn btn-secondary" id="rs-no">Cancel</button>
         </div>
     </div>
 </div>
@@ -2840,6 +2867,23 @@
             go.textContent = label;
         }
     };
+    // MOCKUP: Reset…, by section (All settings ticks the rest)
+    const rsBoxes = () => [...document.querySelectorAll('#rs-modal [data-rs]')];
+    function rsShow() {
+        const on = rsBoxes().filter(b => b.checked).map(b => b.dataset.rs), all = el('rs-all').checked;
+        el('rs-yes').disabled = !on.length;
+        const what = { notifications: 'notifications', custom: 'custom notifications', push: 'push service settings', email: 'email settings', secrets: 'tokens, passwords and the webhook URL' };
+        el('rs-red').style.display = on.length ? '' : 'none';
+        el('rs-red').textContent = all ? '⚠️ All settings will be reset, including tokens, passwords and the webhook URL.'
+            : '⚠️ Will be reset: ' + on.map(k => what[k]).join(', ') + '.';
+    }
+    el('rs-open').onclick = () => { rsBoxes().forEach(b => { b.checked = false; }); el('rs-all').checked = false; rsShow(); el('rs-modal').classList.add('open'); };
+    el('rs-all').onchange = () => { rsBoxes().forEach(b => { b.checked = el('rs-all').checked; }); rsShow(); };
+    document.querySelector('#rs-modal .rs-list').addEventListener('change', e => {
+        if (e.target.dataset.rs) { el('rs-all').checked = rsBoxes().every(b => b.checked); rsShow(); }
+    });
+    el('rs-no').onclick = () => el('rs-modal').classList.remove('open');
+    el('rs-yes').onclick = () => { el('rs-modal').classList.remove('open'); bkSay('✓ Reset on this page: check it, then Save & Apply'); };
     el('bk-restore').onclick = () => { if (state) { el('bk-file').value = ''; el('bk-file').click(); } };
     el('bk-file').onchange = async () => {
         const f = el('bk-file').files[0];
