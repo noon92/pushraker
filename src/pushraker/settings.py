@@ -1388,6 +1388,15 @@ def camera_live_url(s: Dict[str, Any], env: Env) -> str:
         return ""
     if "://" in stream:
         return stream
+    if stream.startswith(":"):
+        # A camera server on its own port (pushraker.discover): that port
+        # on the Printer URL's host
+        port, _, path = stream[1:].partition("/")
+        u = urlparse(printer_root(s, env))
+        if not u.hostname or not port.isdigit():
+            return ""
+        host = f"[{u.hostname}]" if ":" in u.hostname else u.hostname
+        return f"{u.scheme or 'http'}://{host}:{port}/{path}"
     return printer_root(s, env) + "/" + stream.lstrip("/")
 
 

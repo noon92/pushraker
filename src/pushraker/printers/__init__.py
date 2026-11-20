@@ -106,6 +106,13 @@ class Printer:
     def has(self, obj: str) -> bool:
         return obj in self.objects
 
+    def cameras(self) -> Dict[str, Dict[str, str]]:
+        """The printer's own cameras that neither Moonraker nor the
+        generic discovery (pushraker.discover) can find: {name:
+        {"snapshot": a URL giving a JPEG, "stream": the live view's path
+        or URL}}. None on a plain printer."""
+        return {}
+
     def model(self, hostname: str = "") -> str:
         """The most specific model name known (`hostname`: Klipper's,
         from printer.info)."""

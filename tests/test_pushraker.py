@@ -86,6 +86,12 @@ pn.SEND_RETRY_DELAYS = (0.2, 0.2, 0.2)
 pn.PushNotifications._send_unchecked = \
     lambda self, *a, **k: self._send(*a, key="_", **k)
 pn.CONSOLE_GROUP = 0.05
+# Camera discovery probes 127.0.0.1: never on the machine running the tests
+# (test_discovered_cameras drives it)
+DISCOVERED = {}
+pn.FIND_CAMERAS = lambda known=(), *a, **k: {
+    n: c for n, c in DISCOVERED.items()
+    if not any(pn.discover.same_url(c["snapshot"], x) for x in known)}
 RANK_RED = 2
 CONSOLE = []
 pn.PAUSE_SNAPSHOT_DELAY = 0.1
@@ -2042,6 +2048,42 @@ async def test_backup_from():
         json.dump({"device_info": {"model_str": "F999"}}, f)
     check("...renamed, code not in the table: a plain name",
           hi.model("my-printer") == "Creality printer")
+    for t in list(c._tasks):
+        t.cancel()
+
+
+async def test_discovered_cameras():
+    print("Cameras Moonraker doesn't list: found at Klippy ready, offered")
+    reset_world()
+    STATE.pop("print_task_config", None)
+    DISCOVERED.clear()
+    DISCOVERED.update({
+        "Camera (port 8080)": {"snapshot": "http://127.0.0.1:8080/?action="
+                               "snapshot", "stream": ":8080/?action=stream"},
+        "Camera (/webcam/)": {"snapshot": "http://127.0.0.1/webcam/?action="
+                              "snapshot", "stream": "/webcam/?action=stream"}})
+    server = Server()
+    # Moonraker already has the /webcam/ one, under its own name
+    server.extra_components = {"webcam": Webcams([
+        Webcam("case", "/webcam/?action=snapshot", "/webcam/?action=stream")])}
+    try:
+        c = pn.PushNotifications(Config(server, dict(name="Hi",
+                                                     settle_time="0.1")))
+        STATE["print_stats"] = ps("standby")
+        await server.handlers["server:klippy_ready"]()
+        await asyncio.sleep(0.2)
+        view = await server.endpoints["/server/pushraker/config"](
+            WebRequest("GET"))
+        cams = view["meta"]["cameras"]
+        check("a camera server Moonraker doesn't list is offered",
+              "Camera (port 8080)" in cams and "case" in cams, sorted(cams))
+        check("...but not again when Moonraker has the same address",
+              "Camera (/webcam/)" not in cams, sorted(cams))
+        check("...and never chosen for the user", c.settings["camera"] == "")
+        check("the notifications see it too",
+              "Camera (port 8080)" in c.env.cameras)
+    finally:
+        DISCOVERED.clear()
     for t in list(c._tasks):
         t.cancel()
 
@@ -4622,7 +4664,7 @@ async def run_component_tests():
               test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_custom_events, test_camera_pictures, test_codemirror,
               test_data, test_old_moonraker, test_page_current_moonraker,
               test_creality_layers, test_missing_hardware_rows,
-              test_backup_from):
+              test_backup_from, test_discovered_cameras):
         try:
             await t()
         except Exception as e:  # report and carry on
@@ -4673,6 +4715,10 @@ def main():
     test_install.run_install_tests()
     _passes += test_install._passes
     _failures += test_install._failures
+    import test_discover
+    test_discover.run_discover_tests()
+    _passes += test_discover._passes
+    _failures += test_discover._failures
     shutil.rmtree(WORK, ignore_errors=True)
     print(f"\n{_passes} passed, {_failures} failed")
     return 1 if _failures else 0

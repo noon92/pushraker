@@ -92,6 +92,7 @@ except Exception as e:
     discord = None  # type: ignore
 
 from . import compat
+from . import discover
 from .compat import JobEvent
 from . import settings as cfgmod
 from . import printers
@@ -108,6 +109,8 @@ if TYPE_CHECKING:
 # start, it simply never fires on a printer without one
 EXCEPTION_EVENTS = printers.EXCEPTION_EVENTS
 REMOTE_METHOD = "pushraker"
+# Camera servers Moonraker doesn't know (the tests swap it)
+FIND_CAMERAS = discover.discover
 # The settings page, served by Moonraker (compat.register_page)
 PAGE_ENDPOINT = "/server/pushraker/page"
 # The 0.1 name, still answered (a Klipper macro file from 0.1 calls it)
@@ -1177,6 +1180,8 @@ class PushNotifications:
         self._ready_once = False
         self._page: Optional[Tuple[int, str]] = None
         self._hostname = ""          # Klipper's (printer.info)
+        # Camera servers Moonraker doesn't know, found at Klippy ready
+        self._found_cams: Dict[str, Dict[str, str]] = {}
         self._status_seen = True     # logged after each Klippy ready
         # Per-job state
         self._job_active = False
@@ -1318,6 +1323,21 @@ class PushNotifications:
                     cams[str(name)] = {"snapshot": snap, "stream": stream}
         except Exception as e:
             logging.warning("[pushraker] webcams: %s", e)
+        # The printer's own, then camera servers Moonraker doesn't know
+        # (found at Klippy ready): never one Moonraker already has
+        try:
+            extra = dict(self.printer.cameras())
+        except Exception as e:
+            logging.warning("[pushraker] printer cameras: %s", e)
+            extra = {}
+        extra.update(self._found_cams)
+        for name, cam in extra.items():
+            if name in cams or any(
+                    discover.same_url(cam.get("snapshot", ""),
+                                      c.get("snapshot", ""))
+                    for c in cams.values()):
+                continue
+            cams[name] = dict(cam)
         spoolman = ""
         try:
             sm = self.server.lookup_component("spoolman", None)
@@ -5702,6 +5722,7 @@ class PushNotifications:
             self._hostname = str((info or {}).get("hostname") or "")
         except Exception:
             self._klipper_version = None
+        self._spawn(self._discover_cameras())
         if first_ready:
             logging.info("[pushraker] printer: %s (drivers: %s, "
                          "extruders: %d)", self.printer.name,
@@ -5797,6 +5818,25 @@ class PushNotifications:
         if first_ready and "power_loss" in self.rows and \
                 self.printer.power_loss_env_paths and self._booted_recently():
             self._spawn(self._check_power_loss())
+
+    async def _discover_cameras(self) -> None:
+        """Camera servers Moonraker doesn't know (pushraker.discover), once
+        per Klippy ready: they appear in the camera choices; none is ever
+        chosen for the user."""
+        self._found_cams = {}
+        try:
+            known = [c.get("snapshot", "") for c in
+                     (await self._env()).cameras.values()]
+            found = await self.eventloop.run_in_thread(FIND_CAMERAS, known)
+        except Exception as e:
+            logging.warning("[pushraker] camera discovery: %s", e)
+            return
+        self._found_cams = found
+        if found:
+            self.env = await self._env()
+            logging.info("[pushraker] cameras Moonraker doesn't list: %s",
+                         ", ".join(f"{n} ({c['snapshot']})"
+                                   for n, c in found.items()))
 
     async def _on_status_event(self, data: Dict[str, Any],
                                *_: Any) -> None:
