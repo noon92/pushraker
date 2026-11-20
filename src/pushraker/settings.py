@@ -310,6 +310,8 @@ class Env:
       name          the printer's default name
       rows_unavailable  rows the printer can't produce (off by default and
                     left off the page unless turned on in pushraker.conf)
+      ntfy_token    the installed Apprise's ntfy takes an access token
+                    (False on Apprise 1.2.0: pushraker.ntfy sends instead)
       rows_missing  rows for hardware the printer doesn't have (a chamber,
                     driver temperatures): left off the page even when on;
                     their settings stay as saved
@@ -324,6 +326,7 @@ class Env:
                  error_index_url: str = "", name: str = "Printer",
                  rows_unavailable: Sequence[str] = (),
                  rows_missing: Sequence[str] = (),
+                 ntfy_token: bool = True,
                  preprint: bool = False,
                  time_methods: Optional[List[Dict[str, str]]] = None,
                  time_default: str = "blend") -> None:
@@ -333,6 +336,7 @@ class Env:
         self.preprint = preprint
         self.rows_unavailable = set(rows_unavailable)
         self.rows_missing = set(rows_missing)
+        self.ntfy_token = ntfy_token
         self.spoolman_url = spoolman_url.rstrip("/")
         self.error_index_url = error_index_url
         self.name = name
@@ -1473,6 +1477,18 @@ def row_url(s: Dict[str, Any], rid: str, priority: str, env: Env) -> str:
         params["actions"] = "; ".join(
             f"view, {t}, {url}" + (", clear=true" if t == "Web UI" else "")
             for t, url in btns)
+    if not (env.ntfy_token if env is not None else True):
+        # An Apprise whose ntfy can't authenticate (1.2.0): pushraker's own
+        # sender (pushraker.ntfy), every auth mode alike
+        own = {"secure": "yes" if u.scheme == "https" else "no",
+               "priority": priority}
+        if "actions" in params:
+            own["actions"] = params["actions"]
+        if s["auth"] == "basic":
+            own.update(user=s["username"], **{"pass": s["secret"]})
+        elif s["auth"] == "token":
+            own["token"] = s["secret"]
+        return f"pntfy://{u.netloc}/{s['topic']}?{query(own)}"
     userinfo = ""
     extra = ""
     if s["auth"] == "basic":

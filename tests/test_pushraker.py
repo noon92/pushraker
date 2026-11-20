@@ -4719,6 +4719,10 @@ def main():
     test_discover.run_discover_tests()
     _passes += test_discover._passes
     _failures += test_discover._failures
+    import test_ntfy
+    test_ntfy.run_ntfy_tests()
+    _passes += test_ntfy._passes
+    _failures += test_ntfy._failures
     shutil.rmtree(WORK, ignore_errors=True)
     print(f"\n{_passes} passed, {_failures} failed")
     return 1 if _failures else 0

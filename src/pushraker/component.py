@@ -85,6 +85,14 @@ except Exception as e:
     email_html = None  # type: ignore
 
 try:
+    # Registers pntfy://: ntfy with access tokens for an Apprise without
+    # (1.2.0, the Creality Hi's)
+    from . import ntfy
+except Exception as e:
+    logging.warning("[pushraker] own ntfy sender unavailable: %s", e)
+    ntfy = None  # type: ignore
+
+try:
     # Registers the discordwh:// and discorddm:// Apprise plugins
     from . import discord
 except Exception as e:
@@ -741,7 +749,8 @@ def short_cause(messages: List[str]) -> str:
     "401 Unauthorized", "timed out", "SSL error", "535 login rejected"."""
     text = " | ".join(messages)
     low = text.lower()
-    m = re.search(r"error=(\d{3})\b", text)
+    # ntfy's own codes have five digits, the HTTP status first (40301)
+    m = re.search(r"error=(\d{3})(?:\d{2})?\b", text)
     if m:
         code = int(m.group(1))
         try:
@@ -793,8 +802,10 @@ class AppriseLog(logging.Handler):
         if record.levelno >= self.forward_level:
             logging.getLogger().handle(record)
         path = (record.pathname or "").replace("\\", "/")
-        where = path.rsplit("/apprise/", 1)[-1] if "/apprise/" in path \
-            else os.path.basename(path)
+        # Lowercase: Apprise before 1.7 names its plugins NotifyNtfy.py,
+        # NotifyEmail.py...; newer ones ntfy.py, email/...
+        where = (path.rsplit("/apprise/", 1)[-1] if "/apprise/" in path
+                 else os.path.basename(path)).lower()
         for key, channel in APPRISE_SOURCES:
             if key in where:
                 try:
@@ -1351,6 +1362,7 @@ class PushNotifications:
                           else self.name,
                           rows_unavailable=self.printer.rows_unavailable,
                           rows_missing=self.printer.missing_rows(),
+                          ntfy_token=ntfy is None or ntfy.apprise_has_token(),
                           preprint=bool(self.printer.preprint_calibrations),
                           time_methods=[
                               {"id": m, "label": l, "help": h}

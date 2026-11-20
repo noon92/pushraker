@@ -93,7 +93,12 @@ def fake_request(method):
                                                           (bytes,))
                          or hasattr(kw.get("data"), "read"),
                          body=str(data)[-600:] if data else
-                         str(kw.get("json"))[-600:]))
+                         str(kw.get("json"))[-600:],
+                         # Everything a server reads: what the checks
+                         # below look for (auth, target, priority)
+                         all=" ".join(str(x) for x in (
+                             url, kw.get("params"), kw.get("headers"),
+                             kw.get("auth"), data, kw.get("json")))))
         return FakeResponse(url)
     return call
 
@@ -117,13 +122,16 @@ class FakeSMTP:
         return (220, b"ok")
 
     def login(self, *a):
+        SENT.append(dict(method="LOGIN", url=f"{self.host}:{self.port}",
+                         files=False, body="", all="login " + " ".join(a)))
         return (235, b"ok")
 
     def sendmail(self, frm, to, msg, *a, **kw):
         SENT.append(dict(method="SMTP", url=f"{self.host}:{self.port}",
                          files="Content-Disposition" in str(msg)
                          or "image/jpeg" in str(msg),
-                         body=str(msg)[:400]))
+                         body=str(msg)[:400],
+                         all=f"from {frm} to {to}"))
         return {}
 
     send_message = sendmail
@@ -179,7 +187,11 @@ except Exception as e:
     check("the Jinja engine loads", False, repr(e))
 
 s = cfg.defaults("Hi")
-env = cfg.Env()
+# As the component builds it: with an Apprise whose ntfy can't take a
+# token, pushraker's own ntfy sender
+from pushraker import ntfy as _ntfy  # noqa: E402
+env = cfg.Env(ntfy_token=_ntfy.apprise_has_token())
+print(f"Apprise's own ntfy takes a token: {env.ntfy_token}")
 TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz0123"
 services = {
     "ntfy": dict(provider="ntfy", server="https://ntfy.sh", topic="hi_test_x9",
@@ -215,13 +227,42 @@ async def send(url, attach=True, body="Body *text*", fmt=None):
     return ok, SENT[n:]
 
 
+# What each server needs to see, somewhere in the requests (credentials,
+# where to, how urgent): a request that is merely built isn't enough
+NEEDS = {
+    "ntfy": ["Bearer tk_" + TOKEN, "hi_test_x9", "ntfy.sh"],
+    "ntfy (basic auth, own server)": ["192.168.0.5", "/hi",
+                                      "('me', 'pw')|Basic bWU6cHc="],
+    "pushover": ["u" + TOKEN[:29], "a" + TOKEN[:29]],
+    "gotify": ["A" + TOKEN[:14], "gotify.example.com"],
+    "telegram": ["123456789:" + TOKEN + "abcd12", "12345678"],
+    "discord (webhook)": ["123456789012345678", TOKEN + TOKEN],
+    "discord (DM)": ["Bot MTIz." + TOKEN, "123456789012345678"],
+}
+
+
+def has(sent, needle):
+    return any(any(n in x.get("all", "") for n in needle.split("|"))
+               for x in sent)
+
+
 async def main():
     for name, fields in services.items():
         st = dict(s, **fields)
-        url = cfg.row_url(st, "complete", "default", env)
+        url = cfg.row_url(st, "complete", "high", env)
         ok, sent = await send(url)
         check(f"{name}: request built", ok and bool(sent),
               sent if isinstance(sent, str) else f"ok={ok} sent={sent}")
+        if ok and sent:
+            missing = [n for n in NEEDS[name] if not has(sent, n)]
+            check(f"{name}: carries what the server needs "
+                  "(credentials, target)", not missing,
+                  f"missing {missing}")
+            if fields["provider"] == "ntfy":
+                check(f"{name}: priority high", has(
+                    sent, "'priority': 'high'|'X-Priority': '4'|'X-Priority': 'high'|"
+                          "priority=high|'Priority': '4'"),
+                      [x["all"][:300] for x in sent])
         if ok and sent and fields["provider"] != "gotify":
             check(f"{name}: picture attached", any(x["files"] for x in sent),
                   [(x["method"], x["url"][:60]) for x in sent])
@@ -246,6 +287,11 @@ async def main():
         ok, sent = await send(url, body=html, fmt="html")
         check(f"email ({sec}): message built", ok and bool(sent),
               sent if isinstance(sent, str) else f"ok={ok}")
+        if ok and sent:
+            check(f"email ({sec}): logs in, from and to",
+                  has(sent, "login me pw") and has(sent, "me@example.com")
+                  and has(sent, "you@example.com"),
+                  [x.get("all") for x in sent])
 
 asyncio.run(main())
 print(f"\n{'all ok' if not failures else f'{failures} failed'}")
