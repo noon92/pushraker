@@ -766,7 +766,9 @@ you click Save & Apply.
   lists them; the internal camera is `case` with the default **paxx12**
   service, see [Camera Support](https://snapmakeru1-extended-firmware.pages.dev/camera_support)).
 - For *Layer complete*, the slicer must emit `SET_PRINT_STATS_INFO`
-  layer information (the Snapmaker U1 Orca profile includes it).
+  layer information (the Snapmaker U1 Orca profile includes it), or the
+  printer's firmware must count layers itself (Creality's does: see
+  [Creality Hi](#creality-hi)).
 - For print-by-object (*Layer complete* and *Print complete* for each
   object), the slicer's **Exclude objects** (label objects) setting must
   be on, so the G-code marks each object (Snapmaker Orca has it on by
@@ -818,6 +820,65 @@ built with. Nothing is sent until you set it up:
 
 To stop all notifications, uncheck **Enable notifications**. Upgrades
 come with the firmware: there is no separate pushraker update.
+
+## Creality Hi
+
+pushraker runs on the Creality Hi's stock firmware: no custom firmware, and
+nothing of Creality's is upgraded or replaced.
+
+### Install
+
+Turn on root access in the printer's settings, log in over SSH as
+`root`, and run:
+
+```sh
+python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubusercontent.com/noon92/pushraker/main/install.py').read())"
+```
+
+It checks that the printer isn't printing, installs pushraker, restarts
+Moonraker (Fluidd reconnects after a few seconds), and prints the
+settings page's address: **`http://<printer>:7125/server/pushraker/page`**.
+Then set it up as in [Setup](#setup), from step 1.
+
+What it changes:
+
+- `/usr/share/moonraker/components/pushraker.py`: one small file that loads
+  pushraker.
+- `/usr/share/moonraker/moonraker.conf`: a `[pushraker]` section (the
+  original is kept as `moonraker.conf.bak-pushraker`).
+- `/mnt/UDISK/pushraker-install/`: pushraker itself.
+- Your settings: `/mnt/UDISK/printer_data/config/pushraker.conf` (and the
+  tokens and passwords in `/mnt/UDISK/printer_data/pushraker.secrets`).
+
+Klipper's configuration and Creality's macros are not touched.
+
+**After a firmware update**, run the same command again: the update
+removes the first two, and your settings stay.
+
+**To update pushraker**, run the same command again.
+
+**To remove it**, add `--uninstall` after the command (your settings stay;
+`--purge` removes them too):
+
+```sh
+python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubusercontent.com/noon92/pushraker/main/install.py').read())" --uninstall
+```
+
+### What works on the Hi
+
+- Every notification service. With an ntfy access token, pushraker sends
+  the token itself (the Apprise version the Hi ships can't).
+- **Render** and **time left** for files from Creality Print, OrcaSlicer
+  and Snapmaker Orca: pushraker reads the picture and the slicer's estimate
+  from the file itself.
+- **Layers** (*First layer started*, *Layer complete*, `job.layer`): from
+  Creality's own layer count.
+- **Camera**: choose **Printer camera**. The picture comes from the Hi's
+  own camera, through the firmware's own ffmpeg.
+- Notifications for hardware the Hi doesn't have (a chamber heater, driver
+  temperatures) are left off the page.
+- Print hooks (the print-end snapshot lift) are not installed on the Hi;
+  *Print complete* and *Print cancelled* are sent all the same.
 
 ## Self-hosting a push server
 

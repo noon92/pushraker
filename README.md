@@ -63,6 +63,22 @@ it: the settings are kept. Options go after the command
 longer starts; `--purge` also removes the settings), `--version X`, `--wheel FILE`, `--name`, `--no-restart`;
 `python3 install.py --help` lists them all.
 
+### On the Creality Hi
+
+The command above, over SSH as root. It puts one file in
+`/usr/share/moonraker/components/` and `[pushraker]` in
+`/usr/share/moonraker/moonraker.conf` (backed up first); pushraker itself
+goes in `/mnt/UDISK/pushraker-install`, the settings in
+`/mnt/UDISK/printer_data/config/pushraker.conf`. Settings page:
+`http://<printer>:7125/server/pushraker/page`.
+
+A firmware update removes the first two: run the command again; the
+settings stay. On the Hi, pushraker works with Creality's older Moonraker
+and Apprise, reads the render, estimate and filament from the G-code
+files themselves, takes layers from Creality's own count, and takes
+camera pictures from the Hi's camera through the firmware's ffmpeg. See
+the [guide](docs/guide.md#creality-hi).
+
 ## Install (any Moonraker printer)
 
 ```sh
