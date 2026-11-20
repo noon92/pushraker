@@ -92,6 +92,10 @@ it out again; `--purge` also removes the settings and secrets.
 - `docs/guide.md` — the user guide
 - `tests/` — `python tests/test_pushraker.py` (the component against a
   stand-in Moonraker; also runs `test_settings.py`)
+- `tests/check_deps.py` — whether pushraker works with the Apprise, Pillow and
+  Jinja2 of a printer's Python, without sending anything: copy it and the
+  package to the printer and run `<Moonraker's python> check_deps.py <dir
+  holding pushraker/>`
 
 ## License
 
