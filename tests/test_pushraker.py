@@ -1851,10 +1851,10 @@ def test_compat_without_moonraker():
 
 
 async def test_creality_layers():
-    print("Creality: layers from virtual_sdcard when print_stats.info is empty")
+    print("Layers from virtual_sdcard (Creality's Klipper) when "
+          "print_stats.info is empty")
     reset_world()
     STATE.pop("print_task_config", None)       # not a Snapmaker U1
-    STATE["box"] = {"state": "disconnect"}
     logs = {rid: [] for rid in ("layer_started", "first_layer", "complete")}
     server, c = make({"layers_complete": "2"}, {
         rid: [("ntfy", FakeService(log, "ntfy"), False)]
@@ -1867,8 +1867,8 @@ async def test_creality_layers():
     await server.handlers["job_state:state_changed"](
         JobEvent.STARTED, {}, STATE["print_stats"])
     info = lambda: c._status["print_stats"].get("info")  # noqa: E731
-    check("detected by its objects (box / filament_rack)",
-          c.printer.name == "creality", c.printer.name)
+    check("any printer: no printer profile needed",
+          c.printer.name == "generic", c.printer.name)
     check("layer fields subscribed and queried", "layer" in (
         c._with_printer_fields({"virtual_sdcard": ["progress"]})
         ["virtual_sdcard"]))
@@ -1910,20 +1910,18 @@ async def test_creality_layers():
     for t in list(c._tasks):
         t.cancel()
 
-    # Not a Creality: virtual_sdcard's extra fields change nothing
+    # A standard virtual_sdcard (no layer fields): nothing changes
     reset_world()
     STATE.pop("print_task_config", None)
     server, c = make({}, {})
     STATE["print_stats"] = ps("printing", info={"total_layer": None,
                                                 "current_layer": None})
-    STATE["virtual_sdcard"] = {"file_position": 1000, "layer": 7,
-                               "layer_count": 240}
+    STATE["virtual_sdcard"] = {"file_position": 1000, "progress": 0.1}
     await server.handlers["server:klippy_ready"]()
-    await c._on_status_update({"virtual_sdcard": {"layer": 8}}, 0.)
-    check("another printer: print_stats.info left as Klipper sends it",
-          c.printer.name != "creality"
-          and c._status["print_stats"]["info"] == {"total_layer": None,
-                                                    "current_layer": None},
+    await c._on_status_update({"virtual_sdcard": {"progress": 0.2}}, 0.)
+    check("standard virtual_sdcard: print_stats.info left as Klipper "
+          "sends it", c._status["print_stats"]["info"] == {
+              "total_layer": None, "current_layer": None},
           c._status["print_stats"].get("info"))
     for t in list(c._tasks):
         t.cancel()

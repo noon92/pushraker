@@ -77,9 +77,13 @@ class Printer:
     # computing), and the method this printer defaults to
     time_methods: Dict[str, Tuple[str, str]] = {}
     time_default = "blend"
-    # Status fields of this printer's own objects that adjust_status reads,
-    # subscribed and queried with the component's ({object: [fields]})
-    status_fields: Dict[str, List[str]] = {}
+    # Status fields adjust_status reads, subscribed and queried with the
+    # component's ({object: [fields]}); Klipper leaves out the fields an
+    # object doesn't have. virtual_sdcard's layer and layer_count: Creality's
+    # Klipper fork (the Hi, confirmed; the K1 family probably, unconfirmed)
+    # counts layers there instead of in print_stats.info
+    status_fields: Dict[str, List[str]] = {
+        "virtual_sdcard": ["layer", "layer_count"]}
 
     def __init__(self, objects: Sequence[str]) -> None:
         self.objects = list(objects)
@@ -92,6 +96,9 @@ class Printer:
         self.extruders = [e for e in ("extruder", "extruder1", "extruder2",
                                       "extruder3", "extruder4", "extruder5")
                           if e in self.objects] or ["extruder"]
+        # Whether print_stats.info comes from the slicer (SET_PRINT_STATS_
+        # INFO; Klipper only sets current_layer together with total_layer)
+        self._slicer_layers = False
 
     def has(self, obj: str) -> bool:
         return obj in self.objects
@@ -158,10 +165,45 @@ class Printer:
 
     def adjust_status(self, data: Dict[str, Any],
                       status: Dict[str, Dict[str, Any]]) -> None:
-        """Fill in a standard value this printer keeps somewhere else (in
+        """Fill in a standard value the printer keeps somewhere else (in
         place, in `status`: the component's merged status), after each
         update `data` is merged. The values the notifications show stay
-        the standard ones; only where they come from is the printer's."""
+        the standard ones; only where they come from differs.
+
+        Layers: Creality's Klipper fork counts them in virtual_sdcard
+        (`layer`: +1 at each layer marker in the file, ";LAYER_CHANGE" and
+        the like, the first at the start of layer 1, 0 before it and while
+        idle, restored after a power-loss resume; `layer_count`: the file's
+        layer count, set when the print starts; both zeroed when the print
+        ends, is cancelled or fails), and Creality Print doesn't write
+        SET_PRINT_STATS_INFO, so print_stats.info stays empty. Wherever
+        those fields exist they are copied into print_stats.info, unless a
+        slicer did write SET_PRINT_STATS_INFO: that one wins."""
+        ps = status.get("print_stats")
+        if ps is None:
+            return
+        new_info = (data.get("print_stats") or {}).get("info")
+        if isinstance(new_info, dict):
+            self._slicer_layers = new_info.get("total_layer") is not None
+        if self._slicer_layers:
+            return
+        vsd = status.get("virtual_sdcard") or {}
+        if "layer" not in vsd and "layer_count" not in vsd:
+            return              # a standard virtual_sdcard
+        try:
+            total = int(vsd.get("layer_count") or 0)
+            layer = int(vsd.get("layer") or 0)
+        except (TypeError, ValueError):
+            return
+        if not total and not layer:
+            if ps.get("state") in ("complete", "cancelled", "error"):
+                return          # zeroed at the end: keep the job's last
+            info: Dict[str, Any] = {"total_layer": None,
+                                    "current_layer": None}
+        else:
+            info = {"total_layer": total or None,
+                    "current_layer": min(layer, total) if total else layer}
+        ps["info"] = info
 
     def left_seconds(self, method: str, ctx: Dict[str, Any]) -> Optional[float]:
         """Seconds left by one of this printer's own time_methods. `ctx`:
@@ -173,9 +215,8 @@ class Printer:
 
 
 from .snapmaker_u1 import SnapmakerU1  # noqa: E402
-from .creality import Creality  # noqa: E402
 
-PRINTERS: Tuple[type, ...] = (SnapmakerU1, Creality)
+PRINTERS: Tuple[type, ...] = (SnapmakerU1,)
 
 
 def detect(objects: Sequence[str]) -> Printer:
