@@ -37,7 +37,7 @@ Find out, and save the raw output:
 | `subscribe_objects(..., callback)` | `server:status_update` (all components' subscriptions merged: extra objects and fields arrive) |
 | `klippy_connection` as a component | `server.klippy_connection`, `get_klippy_state()` |
 | `register_endpoint(content_type=, auth_required=)` | `wrap_result=False` returns a str, which tornado sends as text/html |
-| metadata for the Orca family (OrcaSlicer, Creality Print, Snapmaker Orca, Bambu Studio) | `thumbs.py` reads the file's own thumbnail; no estimated time or layer count from Moonraker |
+| metadata for the Orca family (OrcaSlicer, Creality Print, Snapmaker Orca, Bambu Studio) | `thumbs.py` (the file's own thumbnail) and `gmeta.py` (estimated time, layers, filament from its comments); Moonraker's values always win |
 
 Floor: Moonraker with the `job_state` component (Nov 2021 on), Python 3.7. Below that, `install.py` refuses and says what is missing.
 
@@ -65,10 +65,22 @@ Floor: Moonraker with the `job_state` component (Nov 2021 on), Python 3.7. Below
 - [ ] A profile is detected by objects only the vendor has (Creality: `box`, `filament_rack`), never by hostname.
 - [ ] Model name: the vendor's stock hostname pattern ("Creality Hi-78E7") first, a short model-code table only for renamed printers.
 
-## 6. Cameras
+## 6. Cameras (a picture is a must)
 
 - [ ] `discover.py` probes 127.0.0.1 at Klippy ready (8080/8081 `?action=snapshot`, `/snapshot`, `/webcam/`) and accepts only real JPEG/PNG bytes. That covers mjpg-streamer, ustreamer/crowsnest and camera-streamer.
-- [ ] WebRTC-only vendors (Creality Hi, K1C 2025, K2): no HTTP snapshot. On the Hi, `capture 0` writes an H.264 frame **into the timelapse file**, and the firmware's own `/usr/bin/ffmpeg` decodes it (0.8 s). See findings-rev4. Never decode WebRTC in pushraker.
+- [ ] WebRTC-only vendors (Creality Hi, K1C 2025, K2): no HTTP snapshot. Cheapest first:
+  1. the vendor's own capture command;
+  2. the vendor's own API;
+  3. **a decoder already in the firmware** (the Hi ships `/usr/bin/ffmpeg`, 200 KB plus shared libs: one frame in 0.8 s);
+  4. only then a small download (budget 1–3 MB);
+  5. never a WebRTC client.
+- [ ] The Hi (`printers/creality.py`, "Printer camera"): `capture 0` appends one self-contained H.264 frame (SPS, PPS, IDR) to Creality's **timelapse file** `/mnt/UDISK/timelapse/main_output.h264`.
+  - Printing with timelapse on (`user_print_refer.json` `delay_image.switch`): read the last frame, read only.
+  - Otherwise: capture, then restore the file exactly (size and times, or remove it).
+  - Never within 10 minutes of a print's end (Creality builds the video then), never while a `capture` runs.
+  - Decode with the firmware's ffmpeg at low priority, in a temp folder removed at once: pictures of the room never stay on the printer.
+- [ ] Look for the vendor's timelapse switch and assembly timing in its Klipper source (`virtual_sdcard.py` on Creality) and in its timelapse index (`delay_image_info.json`), not by experiment.
+- [ ] The test capture produced a frame showing a person: keep such files local, never commit or publish them.
 
 ## 7. Testing on the printer without touching the vendor's Moonraker
 
