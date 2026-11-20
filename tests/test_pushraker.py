@@ -2221,6 +2221,107 @@ async def test_printer_camera_route():
         t.cancel()
 
 
+async def test_camera_error_line():
+    print("A camera picture that fails: sent all the same, the text says why")
+    reset_world()
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    mail = FakeService(log, "email")
+    server, c = make({}, {"paused": [("ntfy", ntfy, False),
+                                     ("email", mail, True)],
+                          "started": [("ntfy", ntfy, False)]})
+    # A camera that can't give a picture (as the Hi's does within 10
+    # minutes of a print's end)
+    c.printer.snapshot = lambda name, ctx: (
+        None, "the printer is making its timelapse video (about 10 minutes "
+              "after a print)")
+    c.snapshot_url = "printer:camera"
+    c._fetch_snapshot = pn.PushNotifications._fetch_snapshot.__get__(c)
+    await c._send_unchecked("paused", "⏸️ Hi paused", "Benchy.gcode")
+    await asyncio.sleep(0.3)
+    want = ("Benchy.gcode\n\nError sending camera image: the printer is "
+            "making its timelapse video (about 10 minutes after a print)")
+    push = [e for e in log if e["channel"] == "ntfy"]
+    email = [e for e in log if e["channel"] == "email"]
+    check("push: sent, the reason after a blank line",
+          push and push[-1]["ok"] and push[-1]["body"] == want,
+          push and push[-1]["body"])
+    check("email: the same line", email and email[-1]["ok"]
+          and "Error sending camera image: the printer is making its "
+              "timelapse video" in email[-1]["body"],
+          email and email[-1]["body"][:300])
+    log.clear()
+    # No camera chosen: nothing asked for, no line
+    c.snapshot_url = None
+    await c._send_unchecked("paused", "⏸️ Hi paused", "Benchy.gcode")
+    await asyncio.sleep(0.3)
+    check("no camera chosen: no error line",
+          log and all("Error sending camera image" not in e["body"]
+                      for e in log), [e["body"] for e in log])
+    log.clear()
+    # The camera works: no line
+    c.snapshot_url = "printer:camera"
+    c.printer.snapshot = lambda name, ctx: (b"\xff\xd8\xff\xe0" + b"\0" * 64,
+                                            "")
+    await c._send_unchecked("paused", "⏸️ Hi paused", "Benchy.gcode")
+    await asyncio.sleep(0.3)
+    check("a picture taken: no error line, the picture attached",
+          log and all("Error sending" not in e["body"] and e["attach"]
+                      for e in log), [(e["body"], e["attach"]) for e in log])
+    for t in list(c._tasks):
+        t.cancel()
+    # Send Test with that camera chosen
+    reset_world()
+    STATE.pop("print_task_config", None)
+    for name in ("config/pushraker.conf", "pushraker.secrets"):
+        try:
+            os.remove(os.path.join(WORK, "data", name))
+        except OSError:
+            pass
+    server = Server()
+    c2 = pn.PushNotifications(Config(server, dict(name="Hi",
+                                                  settle_time="0.1")))
+    STATE["print_stats"] = ps("standby")
+    await server.handlers["server:klippy_ready"]()
+    c2.printer.cameras = lambda: {"Printer camera": {
+        "snapshot": "printer:camera", "stream": ""}}
+    c2.printer.snapshot = lambda name, ctx: (None, "the camera took no "
+                                                   "picture")
+    sent = []
+
+    class FakeAp:
+        def add(self, url):
+            return True
+
+        def __iter__(self):
+            return iter([FakeServer()])
+
+        async def async_notify(self, title, body, attach=None, **_kw):
+            sent.append(body)
+            return True
+    real = pn.apprise.Apprise
+    pn.apprise.Apprise = FakeAp
+    try:
+        res = await server.endpoints["/server/pushraker/test"](
+            WebRequest("POST", dict(provider="ntfy",
+                                    server="https://ntfy.example.com",
+                                    topic="hi_x9", camera="Printer camera")))
+    finally:
+        pn.apprise.Apprise = real
+    check("Send Test: sent, with the camera's error in the text and the "
+          "console", sent and sent[0].endswith(
+              "\n\nError sending camera image: the camera took no picture")
+          and "Error sending camera image: the camera took no picture"
+          in res["lines"], (sent, res.get("lines")))
+    for t in list(c2._tasks):
+        t.cancel()
+    check("with_camera_error leaves other paths alone",
+          pn.with_camera_error("x", "/tmp/snap.jpg") == "x"
+          and pn.with_camera_error("x", None) == "x"
+          and pn.with_camera_error("x", pn.SnapshotProblem("", "why"))
+          == "x\n\nError sending camera image: why")
+
+
 async def test_status_report():
     print("Status report every N minutes of print time")
     reset_world()
@@ -4799,7 +4900,7 @@ async def run_component_tests():
               test_creality_layers, test_missing_hardware_rows,
               test_backup_from, test_discovered_cameras,
               test_header_thumbnail, test_file_metadata,
-              test_printer_camera_route):
+              test_printer_camera_route, test_camera_error_line):
         try:
             await t()
         except Exception as e:  # report and carry on

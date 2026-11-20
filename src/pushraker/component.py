@@ -778,6 +778,30 @@ def short_cause(messages: List[str]) -> str:
     return "failed"
 
 
+class SnapshotProblem(str):
+    """The picture that stands in for a camera picture that couldn't be
+    taken (or "" when not even that could be drawn), with the reason: the
+    notification still goes out, and its text says why."""
+    why = ""
+
+    def __new__(cls, path: str, why: str) -> "SnapshotProblem":
+        obj = super().__new__(cls, path)
+        obj.why = why
+        return obj
+
+
+CAMERA_ERROR = "Error sending camera image: {why}"
+
+
+def with_camera_error(body: str, path: Any) -> str:
+    """The text with the camera's error appended (a blank line, then the
+    line), when `path` is a SnapshotProblem; else as it was."""
+    why = getattr(path, "why", "")
+    if not why:
+        return body
+    return f"{body}\n\n" + CAMERA_ERROR.format(why=why)
+
+
 class AppriseLog(logging.Handler):
     """Apprise's messages per service (debug ones too), to say why a send
     failed. Moonraker's log gets what it got before: Apprise's own logger
@@ -1740,12 +1764,19 @@ class PushNotifications:
                          "Gotify.")
         cam = cfgmod.camera(s, env)
         path = None
+        problem: Optional[str] = None     # a failed camera picture
         if cam and cam.get("snapshot"):
             path = await self.eventloop.run_in_thread(
                 self._fetch_snapshot_sync, True, cam["snapshot"])
-            lines.append("Attaching a camera snapshot" if path else
-                         "Camera snapshot unavailable; sending without "
-                         "an image")
+            if getattr(path, "why", ""):
+                lines.append(CAMERA_ERROR.format(why=path.why))
+                body = with_camera_error(body, path)
+                problem = path
+                path = path or None
+            else:
+                lines.append("Attaching a camera snapshot" if path else
+                             "Camera snapshot unavailable; sending "
+                             "without an image")
         elif s["camera"]:
             lines.append(f'No webcam named "{s["camera"]}" in Moonraker; '
                          "sending without an image")
@@ -1753,6 +1784,11 @@ class PushNotifications:
         t0 = time.monotonic()
         try:
             for target, url, text in dests:
+                if text is not None:
+                    # Push and webhook texts were made before the camera:
+                    # its error goes at their end too (email is made below,
+                    # from `body`, which has it)
+                    text = with_camera_error(text, problem)
                 if text is None and email_html is not None:
                     text = email_html.render(
                         title, body, btns, "info",
@@ -1771,7 +1807,8 @@ class PushNotifications:
                         srv.socket_read_timeout, SEND_READ_TIMEOUT)
                 channel = "email" if url.startswith("mailto") else (
                     "webhook" if url.startswith("json") else
-                    url.split(":", 1)[0])
+                    {"pntfy": "ntfy", "ntfys": "ntfy"}.get(
+                        url.split(":", 1)[0], url.split(":", 1)[0]))
                 self.apprise_log.take(channel)
                 lines.append(f"Sending to {target}...")
                 ok = await ap.async_notify(
@@ -3554,7 +3591,7 @@ class PushNotifications:
             if not quiet:
                 logging.warning("[pushraker] no snapshot from %s: %s", url,
                                 why)
-            return self._problem_picture(why)
+            return SnapshotProblem(self._problem_picture(why) or "", why)
         tmpdir = tempfile.mkdtemp(prefix="pushraker_")
         path = os.path.join(tmpdir, "snapshot.jpg")
         try:
@@ -3812,7 +3849,10 @@ class PushNotifications:
             else:
                 path = await self._image(image, filename, snapshot,
                                          snapshot_ready, key)
-            named = self._named_copy(path, title, filename)
+            # A camera picture that was asked for and failed: sent all the
+            # same, the text saying why
+            body = with_camera_error(body, path)
+            named = self._named_copy(path or None, title, filename)
             report: List[Dict[str, Any]] = []
             try:
                 results = self._outcomes(rid, dests, await asyncio.gather(*(
@@ -3823,7 +3863,7 @@ class PushNotifications:
             finally:
                 if named is not None and named != path:
                     shutil.rmtree(os.path.dirname(named), ignore_errors=True)
-                if path is not None and image == "snapshot":
+                if path and image == "snapshot":
                     shutil.rmtree(os.path.dirname(path), ignore_errors=True)
         finally:
             for t in tickets:
