@@ -3456,6 +3456,18 @@ class PushNotifications:
             logging.error("[pushraker] state query failed: %s", e)
             return {}
 
+    def _with_printer_fields(self, objects: Dict[str, Any]
+                             ) -> Dict[str, Any]:
+        """A subscription or query with the fields the printer's own
+        adjust_status reads added."""
+        out = dict(objects)
+        for obj, fields in self.printer.status_fields.items():
+            have = out.get(obj, [])
+            if obj in out and have is None:
+                continue            # already the whole object
+            out[obj] = list(dict.fromkeys(list(have or []) + list(fields)))
+        return out
+
     def _klippy_shutdown(self) -> bool:
         return compat.klippy_shutdown(self.server)
 
@@ -4511,12 +4523,13 @@ class PushNotifications:
         self._job_number += 1
         self._pause_now = None
         if query:
-            state = await self._query(
+            state = await self._query(self._with_printer_fields(
                 {"print_stats": ["info"], "virtual_sdcard": ["file_position"],
                  **({"print_task_config": PREPRINT_FIELDS}
-                    if self.printer.preprint_calibrations else {})})
+                    if self.printer.preprint_calibrations else {})}))
             for obj in self._status:
                 self._status[obj].update(state.get(obj) or {})
+            self.printer.adjust_status(state, self._status)
         self._gcode_bytes = self._get_gcode_bytes(filename)
         self._job_filename = filename
         layer = ((self._status["print_stats"].get("info") or {})
@@ -5724,7 +5737,7 @@ class PushNotifications:
             for obj in chamber:
                 self._status.setdefault(obj, {})
         try:
-            status = await kapis.subscribe_objects(
+            status = await kapis.subscribe_objects(self._with_printer_fields(
                 dict({"print_stats": ["state", "filename", "info",
                                       "print_duration", "total_duration",
                                       "filament_used"],
@@ -5745,7 +5758,7 @@ class PushNotifications:
                      **{"toolhead": ["extruder"]},
                      **({ACE_OBJECT: ACE_FIELDS} if self._ace_on else {}),
                      **{f: None for f in self._feeds},
-                     **chamber),
+                     **chamber)),
                 *((self._on_status_update,) if self._status_cb else ()),
                 default={})
         except Exception as e:
@@ -5753,6 +5766,7 @@ class PushNotifications:
             status = {}
         for obj in self._status:
             self._status[obj].update(status.get(obj) or {})
+        self.printer.adjust_status(status, self._status)
         self._calibrating = self._cal_action = None   # Klipper restarted
         self._ace_src = self._ace_sources()
         self._exist_seen = None
@@ -5796,6 +5810,7 @@ class PushNotifications:
         for obj, values in data.items():
             if obj in self._status and isinstance(values, dict):
                 self._status[obj].update(values)
+        self.printer.adjust_status(data, self._status)
         ps = self._status["print_stats"]
         if "print_task_config" in data and self._job_active:
             self._check_spool_switch()

@@ -1848,6 +1848,85 @@ def test_compat_without_moonraker():
           compat.config_dir({}, data) == os.path.join(data, "config"))
 
 
+async def test_creality_layers():
+    print("Creality: layers from virtual_sdcard when print_stats.info is empty")
+    reset_world()
+    STATE.pop("print_task_config", None)       # not a Snapmaker U1
+    STATE["box"] = {"state": "disconnect"}
+    logs = {rid: [] for rid in ("layer_started", "first_layer", "complete")}
+    server, c = make({"layers_complete": "2"}, {
+        rid: [("ntfy", FakeService(log, "ntfy"), False)]
+        for rid, log in logs.items()})
+    STATE["print_stats"] = ps("printing", info={"total_layer": None,
+                                                "current_layer": None})
+    STATE["virtual_sdcard"] = {"file_position": 1000, "progress": 0,
+                               "layer": 0, "layer_count": 240}
+    await server.handlers["server:klippy_ready"]()
+    await server.handlers["job_state:state_changed"](
+        JobEvent.STARTED, {}, STATE["print_stats"])
+    info = lambda: c._status["print_stats"].get("info")  # noqa: E731
+    check("detected by its objects (box / filament_rack)",
+          c.printer.name == "creality", c.printer.name)
+    check("layer fields subscribed and queried", "layer" in (
+        c._with_printer_fields({"virtual_sdcard": ["progress"]})
+        ["virtual_sdcard"]))
+    check("before layer 1: 0 of 240", info() == {"total_layer": 240,
+                                                 "current_layer": 0}, info())
+
+    async def vsd(**kw):
+        await server.handlers.get("server:status_update", c._on_status_update)(
+            {"virtual_sdcard": dict({"file_position": 1500}, **kw)}, 0.)
+        await asyncio.sleep(0.3)
+    await vsd(layer=1)
+    check("layer 1 starts: First layer started sent",
+          len(logs["layer_started"]) == 1 and not logs["first_layer"],
+          (info(), {k: len(v) for k, v in logs.items()}))
+    await vsd(layer=3)
+    check("layer 3 starts: 2 layers complete sent",
+          len(logs["first_layer"]) == 1 and info()["current_layer"] == 3,
+          (info(), {k: len(v) for k, v in logs.items()}))
+    # A slicer that writes SET_PRINT_STATS_INFO wins
+    await c._on_status_update({"print_stats": {"info": {
+        "total_layer": 100, "current_layer": 5}}}, 0.)
+    await vsd(layer=50)
+    check("the slicer's SET_PRINT_STATS_INFO wins over virtual_sdcard",
+          info() == {"total_layer": 100, "current_layer": 5}, info())
+    await c._on_status_update({"print_stats": {"info": {
+        "total_layer": None, "current_layer": None}}}, 0.)
+    await vsd(layer=51)
+    check("...back to virtual_sdcard when Klipper's info is reset",
+          info() == {"total_layer": 240, "current_layer": 51}, info())
+    # Creality zeroes both when the print ends
+    await c._on_status_update({"print_stats": {"state": "complete"},
+                               "virtual_sdcard": {"layer": 0,
+                                                  "layer_count": 0}}, 0.)
+    check("print ended (zeroed by the firmware): the job's last layer kept",
+          info() == {"total_layer": 240, "current_layer": 51}, info())
+    await c._on_status_update({"print_stats": {"state": "printing"}}, 0.)
+    check("next print, before its layer count: nothing", info() == {
+        "total_layer": None, "current_layer": None}, info())
+    for t in list(c._tasks):
+        t.cancel()
+
+    # Not a Creality: virtual_sdcard's extra fields change nothing
+    reset_world()
+    STATE.pop("print_task_config", None)
+    server, c = make({}, {})
+    STATE["print_stats"] = ps("printing", info={"total_layer": None,
+                                                "current_layer": None})
+    STATE["virtual_sdcard"] = {"file_position": 1000, "layer": 7,
+                               "layer_count": 240}
+    await server.handlers["server:klippy_ready"]()
+    await c._on_status_update({"virtual_sdcard": {"layer": 8}}, 0.)
+    check("another printer: print_stats.info left as Klipper sends it",
+          c.printer.name != "creality"
+          and c._status["print_stats"]["info"] == {"total_layer": None,
+                                                    "current_layer": None},
+          c._status["print_stats"].get("info"))
+    for t in list(c._tasks):
+        t.cancel()
+
+
 async def test_status_report():
     print("Status report every N minutes of print time")
     reset_world()
@@ -4422,7 +4501,8 @@ async def run_component_tests():
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
               test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_custom_events, test_camera_pictures, test_codemirror,
-              test_data, test_old_moonraker, test_page_current_moonraker):
+              test_data, test_old_moonraker, test_page_current_moonraker,
+              test_creality_layers):
         try:
             await t()
         except Exception as e:  # report and carry on

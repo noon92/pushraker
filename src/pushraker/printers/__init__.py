@@ -77,6 +77,9 @@ class Printer:
     # computing), and the method this printer defaults to
     time_methods: Dict[str, Tuple[str, str]] = {}
     time_default = "blend"
+    # Status fields of this printer's own objects that adjust_status reads,
+    # subscribed and queried with the component's ({object: [fields]})
+    status_fields: Dict[str, List[str]] = {}
 
     def __init__(self, objects: Sequence[str]) -> None:
         self.objects = list(objects)
@@ -131,6 +134,13 @@ class Printer:
         objects' current status in `state`)."""
         return []
 
+    def adjust_status(self, data: Dict[str, Any],
+                      status: Dict[str, Dict[str, Any]]) -> None:
+        """Fill in a standard value this printer keeps somewhere else (in
+        place, in `status`: the component's merged status), after each
+        update `data` is merged. The values the notifications show stay
+        the standard ones; only where they come from is the printer's."""
+
     def left_seconds(self, method: str, ctx: Dict[str, Any]) -> Optional[float]:
         """Seconds left by one of this printer's own time_methods. `ctx`:
         estimated (the slicer's seconds), print_duration, progress (file
@@ -141,8 +151,9 @@ class Printer:
 
 
 from .snapmaker_u1 import SnapmakerU1  # noqa: E402
+from .creality import Creality  # noqa: E402
 
-PRINTERS: Tuple[type, ...] = (SnapmakerU1,)
+PRINTERS: Tuple[type, ...] = (SnapmakerU1, Creality)
 
 
 def detect(objects: Sequence[str]) -> Printer:
