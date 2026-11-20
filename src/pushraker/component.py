@@ -101,6 +101,7 @@ except Exception as e:
 
 from . import compat
 from . import discover
+from . import thumbs
 from .compat import JobEvent
 from . import settings as cfgmod
 from . import printers
@@ -869,6 +870,8 @@ class PushNotifications:
         self._low_path = os.path.join(data_path, ".pushraker.json")
         # CodeMirror, when installed: <data>/pushraker/codemirror/
         self._cm_dir = os.path.join(data_path, "pushraker", "codemirror")
+        # Thumbnails read from G-code headers Moonraker didn't parse
+        self._thumb_dir = os.path.join(data_path, "pushraker", "thumbs")
         # 0.1 kept it under this name; moved on first read
         self._old_low_path = os.path.join(data_path, ".push_notifications.json")
         # Where the settings come from: pushraker.conf (the page edits it,
@@ -3668,15 +3671,49 @@ class PushNotifications:
             return None
         thumbs = [t for t in meta.get("thumbnails") or []
                   if t.get("relative_path")]
-        if not thumbs:
+        if thumbs:
+            best = max(thumbs, key=lambda t: t.get("width", 0) or 0)
+            rel = best["relative_path"]
+            for path in (os.path.join(root, os.path.dirname(filename), rel),
+                         os.path.join(root, rel)):
+                if os.path.isfile(path):
+                    return path
+        # None from Moonraker (an older one doesn't know the Orca family of
+        # slicers): the file's own thumbnail block
+        return self._header_thumbnail(os.path.join(root, filename))
+
+    def _header_thumbnail(self, gcode: str) -> Optional[str]:
+        """The G-code file's own thumbnail (pushraker.thumbs), kept in
+        <data>/pushraker/thumbs per file version (the newest 30)."""
+        try:
+            st = os.stat(gcode)
+        except OSError:
             return None
-        best = max(thumbs, key=lambda t: t.get("width", 0) or 0)
-        rel = best["relative_path"]
-        for path in (os.path.join(root, os.path.dirname(filename), rel),
-                     os.path.join(root, rel)):
-            if os.path.isfile(path):
-                return path
-        return None
+        key = hashlib.sha1(f"{gcode}|{st.st_size}|{st.st_mtime_ns}"
+                           .encode("utf-8")).hexdigest()[:16]
+        for ext in (".png", ".jpg"):
+            cached = os.path.join(self._thumb_dir, key + ext)
+            if os.path.isfile(cached):
+                return cached
+        found = thumbs.extract(gcode)
+        if found is None:
+            return None
+        data, ext = found
+        try:
+            os.makedirs(self._thumb_dir, exist_ok=True)
+            path = os.path.join(self._thumb_dir, key + ext)
+            with open(path + ".tmp", "wb") as f:
+                f.write(data)
+            os.replace(path + ".tmp", path)
+            kept = sorted((os.path.join(self._thumb_dir, n)
+                           for n in os.listdir(self._thumb_dir)),
+                          key=lambda p: os.path.getmtime(p), reverse=True)
+            for old in kept[30:]:
+                os.remove(old)
+        except OSError as e:
+            logging.warning("[pushraker] thumbnail: %s", e)
+            return None
+        return path
 
     async def _send(
         self, rid: str, title: str, body: str,
