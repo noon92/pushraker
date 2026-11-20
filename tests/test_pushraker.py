@@ -2148,6 +2148,58 @@ async def test_header_thumbnail():
         t.cancel()
 
 
+async def test_file_metadata():
+    print("Metadata from the file's own comments when Moonraker has none")
+    from pushraker import gmeta, thumbs
+    fx = os.path.join(HERE, "fixtures")
+    orca = gmeta.from_file(os.path.join(fx, "snapmaker-orca-benchy.gcode"))
+    check("Snapmaker Orca (the Hi's Benchy): time, layers, filament",
+          orca.get("estimated_time") == 41 * 60 + 1
+          and orca.get("layer_count") == 240
+          and orca.get("filament_total") == 3583.01
+          and orca.get("filament_weight") == [10.69, 0.0]
+          and orca.get("filament_weight_total") == 10.69
+          and orca.get("filament_type") == "PLA;PETG"
+          and orca.get("slicer") == "Snapmaker Orca"
+          and orca.get("slicer_version") == "2.3.5"
+          and orca.get("object_height") == 48.0, orca)
+    cp = gmeta.from_file(os.path.join(fx, "creality-print-baseplate.gcode"))
+    check("Creality Print V7: the header's layer number (22, not the end "
+          "block's 23)", cp.get("estimated_time") == 3600 + 25 * 60 + 13
+          and cp.get("layer_count") == 22
+          and cp.get("filament_weight_total") == 41.84
+          and cp.get("filament_type") == "PETG"
+          and cp.get("slicer") == "Creality Print"
+          and cp.get("slicer_version") == "7.2.0.5225", cp)
+    check("durations", gmeta.duration("2d 3h 4m 5s") == 183845
+          and gmeta.duration("10s") == 10 and gmeta.duration("soon") is None)
+    for name in ("snapmaker-orca-benchy.gcode",
+                 "creality-print-baseplate.gcode"):
+        got = thumbs.extract(os.path.join(fx, name))
+        check(f"real thumbnail block ({name}): a 96x96 PNG",
+              got is not None and got[1] == ".png"
+              and got[0].startswith(b"\x89PNG"))
+    # Through the component: only what Moonraker lacks
+    reset_world()
+    shutil.copy(os.path.join(fx, "snapmaker-orca-benchy.gcode"),
+                os.path.join(GCODES, "benchy_orca.gcode"))
+    META.clear()
+    META.update(slicer="Unknown", gcode_start_byte=1000,
+                gcode_end_byte=11000)
+    server, c = make({}, {})
+    check("Moonraker's metadata empty: the file's estimate is used",
+          c._estimated_time("benchy_orca.gcode") == 2461.0
+          and c._filament_total("benchy_orca.gcode") == 3583.01)
+    m = c._meta("benchy_orca.gcode")
+    check("...Moonraker's own values never replaced; its 'Unknown' is",
+          m["gcode_end_byte"] == 11000 and m["slicer"] == "Snapmaker Orca")
+    META.update(estimated_time=3000.0)
+    check("Moonraker has an estimate: that one",
+          c._estimated_time("benchy_orca.gcode") == 3000.0)
+    for t in list(c._tasks):
+        t.cancel()
+
+
 async def test_status_report():
     print("Status report every N minutes of print time")
     reset_world()
@@ -4725,7 +4777,7 @@ async def run_component_tests():
               test_data, test_old_moonraker, test_page_current_moonraker,
               test_creality_layers, test_missing_hardware_rows,
               test_backup_from, test_discovered_cameras,
-              test_header_thumbnail):
+              test_header_thumbnail, test_file_metadata):
         try:
             await t()
         except Exception as e:  # report and carry on

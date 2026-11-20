@@ -102,6 +102,7 @@ except Exception as e:
 from . import compat
 from . import discover
 from . import thumbs
+from . import gmeta
 from .compat import JobEvent
 from . import settings as cfgmod
 from . import printers
@@ -1194,6 +1195,8 @@ class PushNotifications:
         self._ready_once = False
         self._page: Optional[Tuple[int, str]] = None
         self._hostname = ""          # Klipper's (printer.info)
+        # The files' own metadata (pushraker.gmeta), per file version
+        self._gmeta_cache: Dict[Tuple[str, int, int], Dict[str, Any]] = {}
         # Camera servers Moonraker doesn't know, found at Klippy ready
         self._found_cams: Dict[str, Dict[str, str]] = {}
         self._status_seen = True     # logged after each Klippy ready
@@ -2527,7 +2530,7 @@ class PushNotifications:
         for f in self._queue_files(filename):
             try:
                 fm = self.server.lookup_component("file_manager")
-                meta = fm.get_metadata_storage().get(f, {}) or {}
+                meta = self._meta(f, fm)
             except Exception:
                 meta = {}
             secs = float(meta.get("estimated_time") or 0.)
@@ -3660,10 +3663,34 @@ class PushNotifications:
                 return path
             await asyncio.sleep(PL_CAMERA_POLL)
 
+    def _meta(self, filename: str, fm: Any = None) -> Dict[str, Any]:
+        """Moonraker's metadata for a file, with what the file's own
+        comments say where Moonraker has nothing (pushraker.gmeta: an
+        older Moonraker doesn't know the Orca family of slicers). Read once
+        per version of the file."""
+        if fm is None:
+            fm = self.server.lookup_component("file_manager")
+        meta = fm.get_metadata_storage().get(filename, {}) or {}
+        if not filename:
+            return dict(meta)
+        try:
+            path = os.path.join(fm.get_directory("gcodes"), filename)
+            st = os.stat(path)
+        except Exception:
+            return dict(meta)
+        key = (path, st.st_size, st.st_mtime_ns)
+        own = self._gmeta_cache.get(key)
+        if own is None:
+            own = gmeta.from_file(path)
+            if len(self._gmeta_cache) > 50:
+                self._gmeta_cache.clear()
+            self._gmeta_cache[key] = own
+        return gmeta.merged(meta, own)
+
     def _thumbnail(self, filename: str) -> Optional[str]:
         try:
             fm = self.server.lookup_component("file_manager")
-            meta = fm.get_metadata_storage().get(filename, {}) or {}
+            meta = self._meta(filename, fm)
             root = fm.get_directory("gcodes")
         except Exception as e:
             logging.warning("[pushraker] metadata lookup failed: %s",
@@ -4357,7 +4384,7 @@ class PushNotifications:
     def _filament_total(self, filename: str) -> float:
         try:
             fm = self.server.lookup_component("file_manager")
-            meta = fm.get_metadata_storage().get(filename, {}) or {}
+            meta = self._meta(filename, fm)
             return float(meta.get("filament_total") or 0.)
         except Exception:
             return 0.
@@ -4377,7 +4404,7 @@ class PushNotifications:
     def _estimated_time(self, filename: str) -> float:
         try:
             fm = self.server.lookup_component("file_manager")
-            meta = fm.get_metadata_storage().get(filename, {}) or {}
+            meta = self._meta(filename, fm)
             return float(meta.get("estimated_time") or 0.)
         except Exception:
             return 0.
@@ -4608,6 +4635,12 @@ class PushNotifications:
             for obj in self._status:
                 self._status[obj].update(state.get(obj) or {})
             self.printer.adjust_status(state, self._status)
+        # The file's own metadata, where Moonraker has none, read in a thread
+        # (a fraction of a second on a slow printer), then cached
+        try:
+            await self.eventloop.run_in_thread(self._meta, filename)
+        except Exception as e:
+            logging.warning("[pushraker] file metadata: %s", e)
         self._gcode_bytes = self._get_gcode_bytes(filename)
         self._job_filename = filename
         layer = ((self._status["print_stats"].get("info") or {})
@@ -6380,7 +6413,7 @@ class PushNotifications:
             return (None, None)
         try:
             fm = self.server.lookup_component("file_manager")
-            meta = fm.get_metadata_storage().get(filename, {}) or {}
+            meta = self._meta(filename, fm)
             return (meta.get("gcode_start_byte"), meta.get("gcode_end_byte"))
         except Exception as e:
             logging.warning("[pushraker] metadata lookup failed: %s",
@@ -6590,7 +6623,7 @@ class PushNotifications:
         """Slicer filament weight per slicer filament (T0..)."""
         try:
             fm = self.server.lookup_component("file_manager")
-            meta = fm.get_metadata_storage().get(filename, {}) or {}
+            meta = self._meta(filename, fm)
         except Exception:
             return {}
         weights = meta.get("filament_weight")
