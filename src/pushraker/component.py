@@ -1151,6 +1151,7 @@ class PushNotifications:
         self._faults_pending: Set[FaultKey] = set()
         self._last_fault_send = 0.
         self._ready_once = False
+        self._status_seen = True     # logged after each Klippy ready
         # Per-job state
         self._job_active = False
         self._job_done_sent = False
@@ -5647,6 +5648,7 @@ class PushNotifications:
         except Exception:
             objs = []
         self.printer = printers.detect(objs)
+        self._status_seen = False
         try:
             info = await kapis.get_klippy_info()
             self._klipper_version = (info or {}).get("software_version")
@@ -5757,6 +5759,15 @@ class PushNotifications:
     async def _on_status_update(
         self, data: Dict[str, Any], _eventtime: Optional[float]
     ) -> None:
+        if not self._status_seen:
+            # Once per Klippy ready: proof the subscription works, and which
+            # way this Moonraker delivers it
+            self._status_seen = True
+            logging.info("[pushraker] status updates arriving (%s): %s",
+                         "callback" if self._status_cb
+                         else "server:status_update",
+                         ", ".join(sorted(o for o in data
+                                          if o in self._status)) or "-")
         for obj, values in data.items():
             if obj in self._status and isinstance(values, dict):
                 self._status[obj].update(values)

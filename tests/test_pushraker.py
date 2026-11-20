@@ -1666,15 +1666,15 @@ async def test_old_moonraker():
           "status as an event, settings in printer_data/config")
     from pushraker import compat
     reset_world()
-    saved = compat.HAS_COMMON
-    compat.HAS_COMMON = False
+    saved = compat.HAS_JOB_EVENT
+    compat.HAS_JOB_EVENT = False
     try:
         server = OldServer()
         os.makedirs(os.path.join(WORK, "olddata"), exist_ok=True)
         c = pn.PushNotifications(Config(server, dict(name="Hi",
                                                      settle_time="0.1")))
     finally:
-        compat.HAS_COMMON = saved
+        compat.HAS_JOB_EVENT = saved
     check("old job events listened to, not job_state:state_changed",
           "job_state:started" in server.handlers
           and "job_state:complete" in server.handlers
@@ -1717,6 +1717,26 @@ async def test_old_moonraker():
           and "some_other_object" not in c._status)
     check("...and drives the progress notifications",
           any("50" in e["title"] for e in log), [e["title"] for e in log])
+    # Older Moonraker merges every component's subscription into one: the
+    # event carries fields and objects pushraker never asked for (job_state
+    # and history subscribe all of print_stats; Creality's own fields)
+    titles = [e["title"] for e in log]
+    await server.handlers["server:status_update"](
+        {"print_stats": {"state": "printing", "message": "", "power_loss": 0,
+                         "z_pos": 41.2, "total_duration": 700.0,
+                         "filament_used": 12.5, "info": {
+                             "total_layer": None, "current_layer": None}},
+         "virtual_sdcard": {"file_position": 7100, "progress": 0.61,
+                            "layer": 3, "layer_count": 240, "run_dis": 1.5,
+                            "first_layer_stop": False, "is_active": True},
+         "webhooks": {"state": "ready", "state_message": "Printer is ready"},
+         "box": {"state": "disconnect", "T1": {"material_type": ["-1"]}}})
+    await asyncio.sleep(0.3)
+    check("fields and objects nobody here asked for: kept out of the way",
+          c._status["print_stats"].get("state") == "printing"
+          and c._status["virtual_sdcard"].get("file_position") == 7100
+          and "box" not in c._status and "webhooks" not in c._status
+          and [e["title"] for e in log] == titles, [e["title"] for e in log])
     n = len(log)
     done = ps("complete")
     await server.handlers["job_state:complete"](STATE["print_stats"], done)
@@ -1742,7 +1762,7 @@ def test_compat_without_moonraker():
     code = ("import sys; sys.path[:0] = [%r, %r]\n"
             "from pushraker import compat\n"
             "from pushraker.compat import JobEvent, KlippyState\n"
-            "assert not compat.HAS_COMMON\n"
+            "assert not compat.HAS_JOB_EVENT\n"
             "assert [e.name for e in JobEvent] == ['STANDBY', 'STARTED', "
             "'PAUSED', 'RESUMED', 'COMPLETE', 'CANCELLED', 'ERROR']\n"
             "assert str(JobEvent.COMPLETE) == 'complete' and "
@@ -1757,6 +1777,20 @@ def test_compat_without_moonraker():
           "moonraker.py not imported", r.stdout.strip() == "ok",
           (r.stdout + r.stderr)[-600:])
     from pushraker import compat
+
+    class OldKapis:      # Moonraker before 2023 (the Creality Hi's)
+        async def subscribe_objects(self, objects, default=None):
+            pass
+
+    class NewKapis:      # current Moonraker
+        async def subscribe_objects(self, objects, callback=None,
+                                    default=None):
+            pass
+    check("subscribe_objects signature: old takes no callback, current does",
+          not compat.takes_status_callback(OldKapis())
+          and compat.takes_status_callback(NewKapis())
+          and compat.takes_status_callback(Klippy())
+          and not compat.takes_status_callback(OldKlippy()))
     data = os.path.join(WORK, "d")
     check("config dir: next to moonraker.conf inside the data path",
           compat.config_dir({"config_file": os.path.join(

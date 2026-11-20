@@ -30,7 +30,10 @@ def _common() -> Any:
     if spec is not None and spec.submodule_search_locations:
         try:
             from moonraker import common
-            return common
+            # A 2023 package-layout Moonraker before JobEvent existed has
+            # common.py without it: that one sends the old events too
+            if hasattr(common, "JobEvent") and hasattr(common, "KlippyState"):
+                return common
         except ImportError:
             pass
     try:
@@ -45,7 +48,8 @@ def _common() -> Any:
 
 
 _mod = _common()
-HAS_COMMON = _mod is not None
+# Whether this Moonraker has JobEvent (and with it job_state:state_changed)
+HAS_JOB_EVENT = _mod is not None
 if _mod is not None:
     JobEvent = _mod.JobEvent
     KlippyState = _mod.KlippyState
@@ -93,9 +97,9 @@ OLD_JOB_EVENTS: Dict[str, Any] = {
 def register_job_events(server: Any, handler: Callable[..., Any]) -> None:
     """Call handler(JobEvent, prev_stats, new_stats) on every job state
     change, whichever way this Moonraker reports it. JobEvent and
-    job_state:state_changed arrived together, so moonraker.common tells
+    job_state:state_changed arrived together, so having JobEvent tells
     which one it is (listening to both could report a change twice)."""
-    if HAS_COMMON:
+    if HAS_JOB_EVENT:
         server.register_event_handler("job_state:state_changed", handler)
         return
     for name, event in OLD_JOB_EVENTS.items():
