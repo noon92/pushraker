@@ -1655,7 +1655,8 @@ def restore_notes(data: Any, version: str, model: str,
         "secret_for", "email_password_for", "meta"}
     unused = sorted(k for k in settings
                     if k not in known and not k.startswith("has_"))
-    unused += sorted(f"rows.{r}" for r in rows
+    # A row this version doesn't have: a notification of a newer one
+    unused += sorted(f"{r} notification" for r in rows
                      if r not in fresh["rows"] and r not in labels)
     if unused:
         out.append(RESTORE_NOTES["unused"].format(keys=", ".join(unused)))

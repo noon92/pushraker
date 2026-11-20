@@ -674,7 +674,7 @@ def run_restore_notes_tests():
     newer["settings"]["rows"]["door_open"] = {"enabled": True}
     check("settings this version doesn't know: named, ignored",
           st.restore_notes(newer, "0.3.7.1", "Creality Hi")
-          == ["Not used by this version: sound, rows.door_open."])
+          == ["Not used by this version: sound, door_open notification."])
     words = " ".join(st.RESTORE_NOTES.values()).lower()
     check("the wording never asks the user to set something up",
           not any(w in words for w in ("set up", "configure", "you need",
