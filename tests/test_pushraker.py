@@ -2200,6 +2200,27 @@ async def test_file_metadata():
         t.cancel()
 
 
+async def test_printer_camera_route():
+    print("A printer's own camera: printer:<name> goes to its profile")
+    reset_world()
+    server, c = make({}, {})
+    seen = []
+    c.printer.snapshot = lambda name, ctx: (seen.append((name, ctx)) or
+                                            (b"\xff\xd8\xffcam", ""))
+    c._status["print_stats"]["state"] = "printing"
+    data, why = c._picture("printer:camera")
+    check("the profile answers, with the print state",
+          data == b"\xff\xd8\xffcam" and seen[0][0] == "camera"
+          and seen[0][1]["state"] == "printing")
+    c.printer.snapshot = lambda name, ctx: (_ for _ in ()).throw(
+        OSError("boom"))
+    data, why = c._picture("printer:camera")
+    check("...a failing one says why, nothing raised",
+          data is None and "boom" in why)
+    for t in list(c._tasks):
+        t.cancel()
+
+
 async def test_status_report():
     print("Status report every N minutes of print time")
     reset_world()
@@ -4777,7 +4798,8 @@ async def run_component_tests():
               test_data, test_old_moonraker, test_page_current_moonraker,
               test_creality_layers, test_missing_hardware_rows,
               test_backup_from, test_discovered_cameras,
-              test_header_thumbnail, test_file_metadata):
+              test_header_thumbnail, test_file_metadata,
+              test_printer_camera_route):
         try:
             await t()
         except Exception as e:  # report and carry on
@@ -4836,6 +4858,10 @@ def main():
     test_ntfy.run_ntfy_tests()
     _passes += test_ntfy._passes
     _failures += test_ntfy._failures
+    import test_creality_camera
+    test_creality_camera.run_creality_camera_tests()
+    _passes += test_creality_camera._passes
+    _failures += test_creality_camera._failures
     shutil.rmtree(WORK, ignore_errors=True)
     print(f"\n{_passes} passed, {_failures} failed")
     return 1 if _failures else 0

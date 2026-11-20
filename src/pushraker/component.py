@@ -3548,7 +3548,7 @@ class PushNotifications:
         url = url or self.snapshot_url
         if not url:
             return None
-        data, why = self._read_picture(url)
+        data, why = self._picture(url)
         if data is None:
             if not quiet:
                 logging.warning("[pushraker] no snapshot from %s: %s", url,
@@ -3564,6 +3564,20 @@ class PushNotifications:
             logging.warning("[pushraker] snapshot not saved: %s", e)
             return None
         return path
+
+    def _picture(self, url: str) -> Tuple[Optional[bytes], str]:
+        """A JPEG from a camera: the printer's own ("printer:<name>",
+        printers.Printer.snapshot) or an http(s) address. Blocking."""
+        if url.startswith("printer:"):
+            ended = getattr(self, "_job_ended", None)
+            ctx = {"state": self._status["print_stats"].get("state"),
+                   "since_end": (time.monotonic() - ended)
+                   if ended else None}
+            try:
+                return self.printer.snapshot(url[len("printer:"):], ctx)
+            except Exception as e:
+                return None, f"the printer's camera failed ({e})"
+        return self._read_picture(url)
 
     @staticmethod
     def _read_picture(url: str) -> Tuple[Optional[bytes], str]:
@@ -3636,7 +3650,7 @@ class PushNotifications:
 
     def _snapshot_why(self, url: str) -> Tuple[Optional[str], str]:
         """A snapshot for the editor, or why there's none."""
-        data, why = self._read_picture(url)
+        data, why = self._picture(url)
         if data is None:
             return None, why
         tmpdir = tempfile.mkdtemp(prefix="pushraker_")

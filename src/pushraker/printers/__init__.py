@@ -113,6 +113,14 @@ class Printer:
         or URL}}. None on a plain printer."""
         return {}
 
+    def snapshot(self, name: str, ctx: Dict[str, Any]
+                 ) -> Tuple[Optional[bytes], str]:
+        """A JPEG from one of this printer's own cameras ("printer:<name>"
+        addresses from cameras()), or why there's none. `ctx`: "state"
+        (print_stats.state), "since_end" (seconds since a print ended, or
+        None). Blocking: called in a thread."""
+        return None, "this printer has no camera of its own"
+
     def model(self, hostname: str = "") -> str:
         """The most specific model name known (`hostname`: Klipper's,
         from printer.info)."""
