@@ -93,6 +93,8 @@
     .bk-status { font-size: 13px; color: #8bc34a; }
     .bk-file { font-family: monospace; font-size: 13px; color: #ccc; margin: 4px 0 8px; word-break: break-all; }
     .bk-list { margin: 0 0 10px 18px; padding: 0; font-size: 14px; line-height: 1.6; }
+    .bk-fit { color: #c9c9c9; }
+    .bk-fit:empty { display: none; }
     .bk-note { color: var(--muted); font-size: 13px; }
     .nt-fill-menu.bk-menu button.bk-off { opacity: 0.45; cursor: not-allowed; }
     .nt-fill-menu.bk-menu button.bk-off:hover { background: none; }
@@ -749,6 +751,7 @@
         <h3 id="bk-title">Restore this backup?</h3>
         <div class="bk-file" id="bk-in-file"></div>
         <ul class="bk-list" id="bk-in-list"></ul>
+        <ul class="bk-list bk-fit" id="bk-in-fit"></ul>
         <p class="bk-red" id="bk-in-red"></p>
         <p class="bk-note" id="bk-in-note"></p>
         <div class="pr-buttons">
@@ -2995,7 +2998,14 @@
         el('bk-in-note').textContent = (has
             ? 'This file contains tokens and passwords. '
             : 'Tokens, passwords and webhook URLs stay as they are. ') + 'Nothing is saved until you click Save & Apply.';
+        // What doesn't fit this printer or this pushraker (pushraker's
+        // wording, settings.RESTORE_NOTES): only the lines that apply
+        el('bk-in-fit').innerHTML = '';
         el('bk-modal').classList.add('open');
+        try {
+            const r = await api('/server/pushraker/backup', 'POST', { how: 'inspect', backup: data });
+            if (bkIn === data) el('bk-in-fit').innerHTML = (r.notes || []).map(n => `<li>${esc(n)}</li>`).join('');
+        } catch (e) { /* an older component: nothing to add */ }
     };
     el('bk-no').onclick = () => { el('bk-modal').classList.remove('open'); bkIn = null; };
     el('bk-yes').onclick = async () => {

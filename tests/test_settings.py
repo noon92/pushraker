@@ -6,6 +6,7 @@
 from the extended firmware's INI settings. Run: python tests/test_settings.py
 (also run by test_pushraker.py)."""
 
+import json
 import os
 import re
 import sys
@@ -628,6 +629,58 @@ def run_installer_tests():
     return _failures
 
 
+def run_restore_notes_tests():
+    """What the Restore dialog says before restoring (settings.RESTORE_NOTES)."""
+    print("Restore notes")
+    s = st.defaults("Hi")
+    b = st.backup(s, "0.3.7.1", "2026-11-21T00:00:00", model="Creality Hi")
+    check("a backup says where it is from",
+          b["from"] == {"pushraker": "0.3.7.1", "printer": "Creality Hi"})
+    check("same pushraker, same printer, nothing hidden: no lines",
+          st.restore_notes(b, "0.3.7.1", "Creality Hi") == [])
+    check("a local build of the same version counts as the same",
+          st.restore_notes(b, "0.3.7.1+multiprinter", "Creality Hi") == [])
+    old = dict(b, **{"from": {"pushraker": "0.3.6", "printer": "Creality Hi"}})
+    check("older", st.restore_notes(old, "0.3.7.1", "Creality Hi")
+          == ["Backup from pushraker 0.3.6 (older)."])
+    new = dict(b, **{"from": {"pushraker": "0.3.9", "printer": "Creality Hi"}})
+    check("newer", st.restore_notes(new, "0.3.7.1", "Creality Hi")
+          == ["Backup from pushraker 0.3.9 (newer)."])
+    bare = {k: v for k, v in b.items() if k != "from"}
+    check("no \"from\" (made before it existed)",
+          st.restore_notes(bare, "0.3.7.1", "Creality Hi")
+          == ["Backup from an older pushraker."])
+    u1 = dict(b, **{"from": {"pushraker": "0.3.7.1",
+                             "printer": "Snapmaker U1"}})
+    check("another printer model",
+          st.restore_notes(u1, "0.3.7.1", "Creality Hi")
+          == ["Backup from a Snapmaker U1. Some settings may not apply here."])
+    el = dict(b, **{"from": {"pushraker": "0.3.7.1",
+                             "printer": "Elegoo Neptune 4"}})
+    check("...with its article",
+          st.restore_notes(el, "0.3.7.1", "Creality Hi")[0]
+          .startswith("Backup from an Elegoo"))
+    check("rows on in the backup that this printer doesn't show, by name",
+          st.restore_notes(b, "0.3.7.1", "Creality Hi",
+                           ["chamber_waiting", "driver_hot"])
+          == ["Not available on this printer: Waiting for chamber "
+              "temperature, Driver running hot."])
+    off = json.loads(json.dumps(b))
+    off["settings"]["rows"]["driver_hot"].update(enabled=False, email=False)
+    check("...only those it has on",
+          st.restore_notes(off, "0.3.7.1", "Creality Hi", ["driver_hot"]) == [])
+    newer = json.loads(json.dumps(b))
+    newer["settings"]["sound"] = "chime"
+    newer["settings"]["rows"]["door_open"] = {"enabled": True}
+    check("settings this version doesn't know: named, ignored",
+          st.restore_notes(newer, "0.3.7.1", "Creality Hi")
+          == ["Not used by this version: sound, rows.door_open."])
+    words = " ".join(st.RESTORE_NOTES.values()).lower()
+    check("the wording never asks the user to set something up",
+          not any(w in words for w in ("set up", "configure", "you need",
+                                       "you must", "please")))
+
+
 def run_secret_guard_tests():
     """The settings problem the page shows never carries a secret's value."""
     real = st.validate
@@ -644,6 +697,7 @@ def run_secret_guard_tests():
 
 
 if __name__ == "__main__":
+    run_restore_notes_tests()
     run_secret_guard_tests()
     run_settings_tests()
     run_hidden_rows_tests()

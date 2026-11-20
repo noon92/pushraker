@@ -1579,20 +1579,87 @@ BACKUP_PUSH = {"ntfy": "", "telegram": "", "discord": "", "discord_dm": "",
 
 
 def backup(s: Dict[str, Any], version: str, created: str,
-           secrets: bool = False) -> Dict[str, Any]:
+           secrets: bool = False, model: str = "") -> Dict[str, Any]:
     """The saved settings as a backup: no tokens, passwords or webhook
     URL (the secrets), nothing about which service they were for.
     secrets (a download the user asked to have them in): those that are
-    set, apart from the settings, under "secrets"."""
+    set, apart from the settings, under "secrets". "from": the pushraker
+    and the printer model it was made on (what Restore compares)."""
     out = json.loads(json.dumps(s))
     for key in SECRET_FIELDS + ("secret_for", "email_password_for"):
         out.pop(key, None)
     data = {"pushraker_backup": BACKUP_FORMAT, "version": version,
             "printer": s.get("name") or "Printer", "created": created,
+            "from": {"pushraker": version, "printer": model},
             "settings": out}
     if secrets:
         data["secrets"] = {k: str(s[k]) for k in SECRET_FIELDS if s.get(k)}
     return data
+
+
+# What the Restore dialog says about a backup before it is restored: only
+# the lines that apply, never asking the user to set anything up (noon
+# checks this wording; it lives here alone)
+RESTORE_NOTES = {
+    "older": "Backup from pushraker {version} (older).",
+    "newer": "Backup from pushraker {version} (newer).",
+    "unknown": "Backup from an older pushraker.",
+    "model": "Backup from {article} {model}. Some settings may not apply "
+             "here.",
+    "hidden": "Not available on this printer: {rows}.",
+    "unused": "Not used by this version: {keys}.",
+}
+
+
+def _version_key(v: str) -> Tuple[int, ...]:
+    # 0.3.7.1+multiprinter: the local part doesn't count
+    return tuple(int(x) for x in re.findall(r"\d+", v.split("+")[0])) or (0,)
+
+
+def restore_notes(data: Any, version: str, model: str,
+                  hidden_rows: Sequence[str] = ()) -> List[str]:
+    """The Restore dialog's lines for a backup file (see RESTORE_NOTES):
+    where it is from when that differs from here, the notifications it has
+    on that this printer can't show (their settings are kept), and the
+    settings this version doesn't know (ignored)."""
+    if not isinstance(data, dict):
+        return []
+    out: List[str] = []
+    frm = data.get("from") if isinstance(data.get("from"), dict) else None
+    if frm is None:
+        out.append(RESTORE_NOTES["unknown"])
+    else:
+        theirs = str(frm.get("pushraker") or "")
+        a, b = _version_key(theirs), _version_key(version)
+        if theirs and a != b:
+            out.append(RESTORE_NOTES["older" if a < b else "newer"]
+                       .format(version=theirs.split("+")[0]))
+        other = str(frm.get("printer") or "").strip()
+        if other and model and other.lower() != model.lower():
+            out.append(RESTORE_NOTES["model"].format(
+                model=other, article="an" if other[:1].lower() in "aeiou"
+                else "a"))
+    settings = data.get("settings")
+    if not isinstance(settings, dict):
+        return out
+    rows = settings.get("rows") if isinstance(settings.get("rows"),
+                                              dict) else {}
+    labels = {r[0]: r[1] for r in ROWS}
+    hidden = [labels[r] for r in labels if r in hidden_rows
+              and isinstance(rows.get(r), dict)
+              and (rows[r].get("enabled") or rows[r].get("email"))]
+    if hidden:
+        out.append(RESTORE_NOTES["hidden"].format(rows=", ".join(hidden)))
+    fresh = _defaults("Printer")
+    known = set(fresh) | set(SECRET_FIELDS) | {
+        "secret_for", "email_password_for", "meta"}
+    unused = sorted(k for k in settings
+                    if k not in known and not k.startswith("has_"))
+    unused += sorted(f"rows.{r}" for r in rows
+                     if r not in fresh["rows"] and r not in labels)
+    if unused:
+        out.append(RESTORE_NOTES["unused"].format(keys=", ".join(unused)))
+    return out
 
 
 def backup_name(s: Dict[str, Any], day: str) -> str:

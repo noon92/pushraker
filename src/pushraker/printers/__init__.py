@@ -23,6 +23,9 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 class Printer:
     """A plain Moonraker printer."""
     name = "generic"
+    # The printer's model as people know it ("Snapmaker U1"), for backups'
+    # "from"; empty: the profile's name stands in
+    model_name = ""
     # Moonraker event carrying the printer's coded faults (None: only
     # print_stats and Klipper shutdowns report faults)
     exception_event: Optional[str] = None
@@ -102,6 +105,11 @@ class Printer:
 
     def has(self, obj: str) -> bool:
         return obj in self.objects
+
+    def model(self, hostname: str = "") -> str:
+        """The most specific model name known (`hostname`: Klipper's,
+        from printer.info)."""
+        return self.model_name or self.name
 
     def missing_rows(self) -> Set[str]:
         """Rows for hardware this printer doesn't have, from Klipper's
@@ -215,8 +223,9 @@ class Printer:
 
 
 from .snapmaker_u1 import SnapmakerU1  # noqa: E402
+from .creality import Creality  # noqa: E402
 
-PRINTERS: Tuple[type, ...] = (SnapmakerU1,)
+PRINTERS: Tuple[type, ...] = (SnapmakerU1, Creality)
 
 
 def detect(objects: Sequence[str]) -> Printer:

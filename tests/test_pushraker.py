@@ -1985,6 +1985,55 @@ async def test_missing_hardware_rows():
         t.cancel()
 
 
+async def test_backup_from():
+    print("Backups say where they come from; the Restore dialog's notes")
+    reset_world()
+    STATE.pop("print_task_config", None)
+    STATE["filament_rack"] = {"vender": "Creality"}
+    server = Server()
+    real_info = Klippy.get_klippy_info if hasattr(Klippy, "get_klippy_info") \
+        else None
+
+    async def info(self, default=None):
+        return {"hostname": "Creality Hi-78E7", "software_version": "x"}
+    Klippy.get_klippy_info = info
+    try:
+        c = pn.PushNotifications(Config(server, dict(name="Hi",
+                                                     settle_time="0.1")))
+        STATE["print_stats"] = ps("standby")
+        await server.handlers["server:klippy_ready"]()
+        got = await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "download"}))
+        check("Creality: the model from Klipper's hostname",
+              c.printer.name == "creality"
+              and got["backup"]["from"] == {"pushraker": pn.__version__,
+                                            "printer": "Creality Hi"},
+              got["backup"].get("from"))
+        u1 = dict(got["backup"], **{"from": {"pushraker": "0.3.6",
+                                             "printer": "Snapmaker U1"}})
+        u1["settings"] = dict(u1["settings"])
+        notes = (await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "inspect", "backup": u1})))["notes"]
+        check("inspect: older, another model, rows this printer hides",
+              notes[0] == "Backup from pushraker 0.3.6 (older)."
+              and notes[1].startswith("Backup from a Snapmaker U1.")
+              and notes[2].startswith("Not available on this printer:")
+              and "Driver running hot" in notes[2], notes)
+    finally:
+        if real_info is None:
+            del Klippy.get_klippy_info
+        else:
+            Klippy.get_klippy_info = real_info
+        STATE.pop("filament_rack", None)
+    from pushraker.printers import creality
+    check("Creality without its usual hostname: a plain name",
+          creality.Creality(["box"]).model("my-printer") == "Creality printer"
+          and creality.Creality(["box"]).model("Creality K2 Plus-A1B2")
+          == "Creality K2 Plus")
+    for t in list(c._tasks):
+        t.cancel()
+
+
 async def test_status_report():
     print("Status report every N minutes of print time")
     reset_world()
@@ -4560,7 +4609,8 @@ async def run_component_tests():
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
               test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_custom_events, test_camera_pictures, test_codemirror,
               test_data, test_old_moonraker, test_page_current_moonraker,
-              test_creality_layers, test_missing_hardware_rows):
+              test_creality_layers, test_missing_hardware_rows,
+              test_backup_from):
         try:
             await t()
         except Exception as e:  # report and carry on
@@ -4604,6 +4654,7 @@ def main():
     test_settings.run_settings_tests()
     test_settings.run_hidden_rows_tests()
     test_settings.run_installer_tests()
+    test_settings.run_restore_notes_tests()
     _passes += test_settings._passes
     _failures += test_settings._failures
     import test_install

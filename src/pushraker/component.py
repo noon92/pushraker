@@ -1176,6 +1176,7 @@ class PushNotifications:
         self._last_fault_send = 0.
         self._ready_once = False
         self._page: Optional[Tuple[int, str]] = None
+        self._hostname = ""          # Klipper's (printer.info)
         self._status_seen = True     # logged after each Klippy ready
         # Per-job state
         self._job_active = False
@@ -1520,7 +1521,8 @@ class PushNotifications:
         # never in one sent by push or email
         secrets = how == "download" and args.get("secrets") is True
         data = cfgmod.backup(s, __version__,
-                             now.isoformat(timespec="seconds"), secrets)
+                             now.isoformat(timespec="seconds"), secrets,
+                             model=self.printer.model(self._hostname))
         name = cfgmod.backup_name(s, now.strftime("%Y-%m-%d"))
         if how == "download":
             if secrets:
@@ -1532,6 +1534,12 @@ class PushNotifications:
             return {"name": name, "backup": data}
         if how == "restore":
             return await self._restore_view(args.get("backup"))
+        if how == "inspect":
+            # The Restore dialog, before Restore: what doesn't fit here
+            return {"notes": cfgmod.restore_notes(
+                args.get("backup"), __version__,
+                self.printer.model(self._hostname),
+                sorted(self.printer.missing_rows()))}
         if how == "reset":
             # Reset…: the chosen sections as a new install has them, for
             # the page to load; Save & Apply saves it and drops the secrets
@@ -5691,6 +5699,7 @@ class PushNotifications:
         try:
             info = await kapis.get_klippy_info()
             self._klipper_version = (info or {}).get("software_version")
+            self._hostname = str((info or {}).get("hostname") or "")
         except Exception:
             self._klipper_version = None
         if first_ready:
