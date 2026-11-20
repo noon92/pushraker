@@ -129,6 +129,7 @@ it out again; `--purge` also removes the settings and secrets.
 - `install.py` — the one-line install over SSH (standard library only; not
   part of the package)
 - `docs/guide.md` — the user guide
+- `docs/porting-guide.md` — for agents bringing pushraker to another printer
 - `tests/` — `python tests/test_pushraker.py` (the component against a
   stand-in Moonraker; also runs `test_settings.py`)
 - `tests/test_install.py` — install.py against a fake `/proc` (also run by
