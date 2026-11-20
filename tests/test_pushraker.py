@@ -1632,6 +1632,144 @@ async def test_generic_printer():
         t.cancel()
 
 
+class OldKlippy(Klippy):
+    """klippy_apis of an older Moonraker: no subscription callback."""
+    subscribed = []
+
+    async def subscribe_objects(self, objs, default=None):
+        OldKlippy.subscribed.append(dict(objs))
+        return {k: copy.deepcopy(STATE.get(k, {})) for k in objs}
+
+
+class OldServer(Server):
+    """An older, flat Moonraker (the Creality Hi's): moonraker.conf in the
+    firmware, the Klippy connection an attribute, not a component."""
+
+    class klippy_connection:
+        state = "ready"
+
+    def lookup_component(self, name, default=None):
+        if name == "klippy_apis":
+            return OldKlippy()
+        if name == "klippy_connection":
+            raise self.error("no component klippy_connection")
+        return super().lookup_component(name, default)
+
+    def get_app_args(self):
+        return {"data_path": os.path.join(WORK, "olddata"),
+                "config_file": os.path.join(WORK, "firmware", "moonraker",
+                                            "moonraker.conf")}
+
+
+async def test_old_moonraker():
+    print("An older Moonraker (no moonraker.common): per-state job events, "
+          "status as an event, settings in printer_data/config")
+    from pushraker import compat
+    reset_world()
+    saved = compat.HAS_COMMON
+    compat.HAS_COMMON = False
+    try:
+        server = OldServer()
+        os.makedirs(os.path.join(WORK, "olddata"), exist_ok=True)
+        c = pn.PushNotifications(Config(server, dict(name="Hi",
+                                                     settle_time="0.1")))
+    finally:
+        compat.HAS_COMMON = saved
+    check("old job events listened to, not job_state:state_changed",
+          "job_state:started" in server.handlers
+          and "job_state:complete" in server.handlers
+          and "job_state:state_changed" not in server.handlers,
+          sorted(server.handlers))
+    check("status updates taken from server:status_update",
+          "server:status_update" in server.handlers and not c._status_cb)
+    STATE["print_stats"] = ps("standby")
+    await server.handlers["server:klippy_ready"]()
+    conf = os.path.join(WORK, "olddata", "config", "pushraker.conf")
+    check("settings file in <data_path>/config, not next to a "
+          "moonraker.conf outside the data path",
+          os.path.exists(conf) and not os.path.exists(os.path.join(
+              WORK, "firmware", "moonraker", "pushraker.conf")))
+    check("subscribed without a callback (old signature)",
+          OldKlippy.subscribed and "print_stats" in OldKlippy.subscribed[-1])
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    c.rows = {rid: ("snapshot", [pn.Destination("ntfy", ntfy, False)])
+              for rid in ("started", "complete", "progress_50")}
+
+    async def snap(*_a, **_k):
+        return snapshot_file()
+    c._fetch_snapshot = snap
+    c._thumbnail = lambda *_a: None
+    STATE["print_stats"] = ps("printing")
+    STATE["virtual_sdcard"] = {"file_position": 1000, "progress": 0}
+    await server.handlers["job_state:started"]({}, STATE["print_stats"])
+    await asyncio.sleep(0.4)
+    check("job_state:started sends Started",
+          [e["title"] for e in log if e["ok"]][:1]
+          and "started" in log[0]["title"], [e["title"] for e in log])
+    # 60% through the G-code's bytes (1000..11000): the 50% milestone
+    await server.handlers["server:status_update"](
+        {"virtual_sdcard": {"file_position": 7000, "progress": 0.6},
+         "some_other_object": {"x": 1}})
+    await asyncio.sleep(0.4)
+    check("server:status_update reaches the component",
+          c._status["virtual_sdcard"].get("file_position") == 7000
+          and "some_other_object" not in c._status)
+    check("...and drives the progress notifications",
+          any("50" in e["title"] for e in log), [e["title"] for e in log])
+    n = len(log)
+    done = ps("complete")
+    await server.handlers["job_state:complete"](STATE["print_stats"], done)
+    await asyncio.sleep(0.6)
+    check("job_state:complete sends Complete", len(log) > n,
+          [e["title"] for e in log])
+    check("Klipper state read from server.klippy_connection",
+          not c._klippy_shutdown())
+    OldServer.klippy_connection.state = "shutdown"
+    check("...shutdown seen", c._klippy_shutdown())
+    OldServer.klippy_connection.state = "ready"
+    for t in list(c._tasks):
+        t.cancel()
+
+
+def test_compat_without_moonraker():
+    print("pushraker.compat on a flat Moonraker: no moonraker package")
+    import subprocess
+    flat = tempfile.mkdtemp(prefix="flat_", dir=WORK)
+    # The flat Moonraker's own script: must not be imported as a module
+    with open(os.path.join(flat, "moonraker.py"), "w") as f:
+        f.write("raise SystemExit('moonraker.py imported')\n")
+    code = ("import sys; sys.path[:0] = [%r, %r]\n"
+            "from pushraker import compat\n"
+            "from pushraker.compat import JobEvent, KlippyState\n"
+            "assert not compat.HAS_COMMON\n"
+            "assert [e.name for e in JobEvent] == ['STANDBY', 'STARTED', "
+            "'PAUSED', 'RESUMED', 'COMPLETE', 'CANCELLED', 'ERROR']\n"
+            "assert str(JobEvent.COMPLETE) == 'complete' and "
+            "JobEvent.CANCELLED.aborted and JobEvent.RESUMED.is_printing\n"
+            "assert KlippyState.SHUTDOWN.value == 5\n"
+            "assert sorted(compat.OLD_JOB_EVENTS)[0] == 'job_state:cancelled'\n"
+            "import pushraker.component\n"
+            "print('ok')\n") % (flat, SRC)
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                       text=True, cwd=flat)
+    check("fallback JobEvent/KlippyState, component imports, flat "
+          "moonraker.py not imported", r.stdout.strip() == "ok",
+          (r.stdout + r.stderr)[-600:])
+    from pushraker import compat
+    data = os.path.join(WORK, "d")
+    check("config dir: next to moonraker.conf inside the data path",
+          compat.config_dir({"config_file": os.path.join(
+              data, "config", "moonraker.conf")}, data)
+          == os.path.join(data, "config"))
+    check("config dir: <data>/config when moonraker.conf is elsewhere",
+          compat.config_dir({"config_file": "/usr/share/moonraker/"
+                             "moonraker.conf"}, data)
+          == os.path.join(data, "config"))
+    check("config dir: <data>/config without a config file",
+          compat.config_dir({}, data) == os.path.join(data, "config"))
+
+
 async def test_status_report():
     print("Status report every N minutes of print time")
     reset_world()
@@ -4206,7 +4344,7 @@ async def run_component_tests():
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
               test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_custom_events, test_camera_pictures, test_codemirror,
-              test_data):
+              test_data, test_old_moonraker):
         try:
             await t()
         except Exception as e:  # report and carry on
@@ -4215,6 +4353,7 @@ async def run_component_tests():
             check(t.__name__, False, repr(e))
         # let the component's background tasks finish
         await asyncio.sleep(0.2)
+    test_compat_without_moonraker()
     parity_report()
 
 

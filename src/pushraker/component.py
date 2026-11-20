@@ -91,7 +91,8 @@ except Exception as e:
     logging.warning("[pushraker] Discord unavailable: %s", e)
     discord = None  # type: ignore
 
-from moonraker.common import JobEvent, KlippyState
+from . import compat
+from .compat import JobEvent
 from . import settings as cfgmod
 from . import printers
 from . import templating as tp
@@ -847,8 +848,8 @@ class PushNotifications:
             app_args = {}
         data_path = app_args.get("data_path") or os.path.expanduser(
             "~/printer_data")
-        config_dir = os.path.dirname(app_args.get("config_file") or "") \
-            or os.path.join(data_path, "config")
+        # printer_data/config, also when moonraker.conf lives elsewhere
+        config_dir = compat.config_dir(app_args, data_path)
         self._low_path = os.path.join(data_path, ".pushraker.json")
         # CodeMirror, when installed: <data>/pushraker/codemirror/
         self._cm_dir = os.path.join(data_path, "pushraker", "codemirror")
@@ -883,8 +884,17 @@ class PushNotifications:
                 name=config.get("name", "Printer"))
         self._apply_options(self._legacy_options(config) if legacy else {})
         self._init_state()
-        self.server.register_event_handler(
-            "job_state:state_changed", self._on_job_event)
+        compat.register_job_events(self.server, self._on_job_event)
+        # Older Moonraker sends status updates as an event rather than to a
+        # subscription callback
+        try:
+            self._status_cb = compat.takes_status_callback(
+                self.server.lookup_component("klippy_apis"))
+        except Exception:
+            self._status_cb = True
+        if not self._status_cb:
+            self.server.register_event_handler(
+                "server:status_update", self._on_status_event)
         for event in EXCEPTION_EVENTS:
             self.server.register_event_handler(event, self._on_exception)
         self.server.register_event_handler(
@@ -3421,11 +3431,7 @@ class PushNotifications:
             return {}
 
     def _klippy_shutdown(self) -> bool:
-        try:
-            kconn = self.server.lookup_component("klippy_connection")
-            return kconn.state == KlippyState.SHUTDOWN
-        except Exception:
-            return False
+        return compat.klippy_shutdown(self.server)
 
     def _live_fault(self, ps: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """The fault in print_stats, unless it's the one a resume already
@@ -5713,7 +5719,8 @@ class PushNotifications:
                      **({ACE_OBJECT: ACE_FIELDS} if self._ace_on else {}),
                      **{f: None for f in self._feeds},
                      **chamber),
-                self._on_status_update, default={})
+                *((self._on_status_update,) if self._status_cb else ()),
+                default={})
         except Exception as e:
             logging.error("[pushraker] subscribe failed: %s", e)
             status = {}
@@ -5740,8 +5747,15 @@ class PushNotifications:
                 self.printer.power_loss_env_paths and self._booted_recently():
             self._spawn(self._check_power_loss())
 
+    async def _on_status_event(self, data: Dict[str, Any],
+                               *_: Any) -> None:
+        """server:status_update (older Moonraker): every object any
+        component subscribed to; ours are picked out like a callback's."""
+        if isinstance(data, dict) and self._ready_once:
+            await self._on_status_update(data, None)
+
     async def _on_status_update(
-        self, data: Dict[str, Any], _eventtime: float
+        self, data: Dict[str, Any], _eventtime: Optional[float]
     ) -> None:
         for obj, values in data.items():
             if obj in self._status and isinstance(values, dict):
