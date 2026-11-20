@@ -148,6 +148,7 @@ def backup(path: str, suffix: str) -> None:
     original, never overwritten."""
     if suffix and os.path.isfile(path) and not os.path.exists(path + suffix):
         shutil.copy2(path, path + suffix)
+        print(f"Backed up {path} to {path + suffix}")
 
 
 def remove(path: str) -> bool:
@@ -342,9 +343,11 @@ def cmd_install(a: argparse.Namespace) -> int:
         print(f"Updated: {path}")
     if not changed:
         print("Already installed; nothing changed.")
-    print(f"pushraker {__version__} is set up. Restart Moonraker"
-          + ("" if a.no_klipper else " and Klipper")
-          + " to load it, then open the notifications page.")
+    # install.py restarts Moonraker itself and says what to open
+    if not os.environ.get("PUSHRAKER_INSTALLER"):
+        print(f"pushraker {__version__} is set up. Restart Moonraker"
+              + ("" if a.no_klipper else " and Klipper")
+              + " to load it, then open the notifications page.")
     return 0
 
 
@@ -373,7 +376,8 @@ def cmd_uninstall(a: argparse.Namespace) -> int:
         print(f"Removed {path}")
     if not removed:
         print("Nothing to remove.")
-    print("Restart Moonraker and Klipper to unload pushraker.")
+    if not os.environ.get("PUSHRAKER_INSTALLER"):
+        print("Restart Moonraker and Klipper to unload pushraker.")
     return 0
 
 

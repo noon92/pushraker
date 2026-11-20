@@ -486,7 +486,8 @@ def cli_args(m, a):
 
 
 def run_cli(m, command, args):
-    env = dict(os.environ, PYTHONPATH=m["lib"], PYTHONDONTWRITEBYTECODE="1")
+    env = dict(os.environ, PYTHONPATH=m["lib"], PYTHONDONTWRITEBYTECODE="1",
+               PUSHRAKER_INSTALLER="1")
     r = subprocess.run([m["python"], "-m", PACKAGE, command] + args,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                        universal_newlines=True, cwd="/", env=env)

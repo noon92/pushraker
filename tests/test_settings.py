@@ -581,9 +581,22 @@ def run_installer_tests():
     args = ["--moonraker-dir", mdir, "--data-dir", data,
             "--moonraker-conf", conf, "--no-klipper",
             "--backup", ".bak-pushraker", "--site-packages", "/x/lib"]
-    with contextlib.redirect_stdout(_io.StringIO()):
+    out = _io.StringIO()
+    with contextlib.redirect_stdout(out):
         rc = cli.main(["install"] + args)
     shim = os.path.join(mdir, "components", "pushraker.py")
+    check("the backup is reported, with where it is",
+          f"Backed up {conf} to {conf}.bak-pushraker" in out.getvalue(),
+          out.getvalue())
+    os.environ["PUSHRAKER_INSTALLER"] = "1"
+    out = _io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            cli.main(["install"] + args)
+    finally:
+        del os.environ["PUSHRAKER_INSTALLER"]
+    check("run by install.py: no 'restart Moonraker' advice (it restarts)",
+          "Restart Moonraker" not in out.getvalue(), out.getvalue())
     check("flat layout: the component file goes in <moonraker-dir>/components",
           rc == 0 and os.path.isfile(shim)
           and "'/x/lib'" in open(shim).read()
