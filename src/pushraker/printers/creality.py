@@ -24,6 +24,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from typing import Any, Dict, Optional, Sequence, Tuple
 
@@ -56,6 +57,14 @@ PRINT_REFER = "/mnt/UDISK/creality/userdata/config/user_print_refer.json"
 VIDEO_SETTLE = 600.
 TAIL_BYTES = 2 * 1024 * 1024
 DECODE_TIMEOUT = 5.
+# `capture` signals cam_app through a FIFO: the frame may land after it
+# returns. The file is read and restored once its size has held this long
+SETTLE_STEADY = 0.3
+SETTLE_MAX = 3.
+# One picture at a time (two notifications at once would interleave their
+# captures and restores), and one taken this recently is reused
+_LOCK = threading.Lock()
+REUSE = 5.
 CAMERA_NAME = "Printer camera"
 
 
@@ -132,9 +141,22 @@ class Creality(Printer):
 
     def snapshot(self, name: str, ctx: Dict[str, Any]
                  ) -> Tuple[Optional[bytes], str]:
+        """One picture at a time; the last one again within REUSE seconds."""
+        with _LOCK:
+            last = getattr(self, "_last_picture", None)
+            if last and time.monotonic() - last[0] < REUSE:
+                return last[1], ""
+            data, why = self._snapshot(ctx)
+            if data:
+                self._last_picture = (time.monotonic(), data)
+            return data, why
+
+    def _snapshot(self, ctx: Dict[str, Any]
+                  ) -> Tuple[Optional[bytes], str]:
         """The camera's picture by the printer's state (ctx: "state" =
         print_stats.state, "since_end" = seconds since a print ended or
-        None):
+        None; the component gives a huge number when none ended since it
+        started, which the timelapse file's own time then covers):
         - printing, timelapse on: the last timelapse frame Creality took
           (one per layer), read only;
         - printing, timelapse off, or idle: `capture 0`, then the timelapse
@@ -179,19 +201,28 @@ class Creality(Printer):
         before = os.path.getsize(path) if os.path.exists(path) else None
         times = (os.stat(path).st_atime, os.stat(path).st_mtime) \
             if before is not None else None
+        failed = ""
+        new = b""
         try:
-            r = subprocess.run([self.capture_bin, "0"],
-                               stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL,
-                               timeout=DECODE_TIMEOUT)
-            if r.returncode:
-                return None, f"the camera didn't take a picture " \
-                    f"(exit {r.returncode})"
-            with open(path, "rb") as f:
-                f.seek(before or 0)
-                new = f.read()
-        except (OSError, subprocess.TimeoutExpired) as e:
-            return None, f"the camera didn't take a picture ({e})"
+            try:
+                r = subprocess.run([self.capture_bin, "0"],
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL,
+                                   timeout=DECODE_TIMEOUT)
+                if r.returncode:
+                    failed = f"exit {r.returncode}"
+            except (OSError, subprocess.TimeoutExpired) as e:
+                failed = str(e)
+            # Whatever happened, wait for cam_app's write to land, so the
+            # restore below takes all of it back
+            self.settle(path)
+            if not failed:
+                try:
+                    with open(path, "rb") as f:
+                        f.seek(before or 0)
+                        new = f.read()
+                except OSError as e:
+                    failed = str(e)
         finally:
             try:
                 if before is None:
@@ -203,10 +234,31 @@ class Creality(Printer):
                     os.utime(path, times)    # as it was, to the second
             except OSError:
                 pass
+        if failed:
+            return None, f"the camera didn't take a picture ({failed})"
         frame = last_frame(new) or (new or None)
         if not frame:
             return None, "the camera took no picture"
         return self.decode(frame)
+
+    @staticmethod
+    def settle(path: str) -> None:
+        """Until the file's size has held for SETTLE_STEADY seconds (at most
+        SETTLE_MAX)."""
+        def size() -> int:
+            try:
+                return os.path.getsize(path)
+            except OSError:
+                return -1
+        end = time.monotonic() + SETTLE_MAX
+        last, since = size(), time.monotonic()
+        while time.monotonic() < end:
+            time.sleep(0.05)
+            now = size()
+            if now != last:
+                last, since = now, time.monotonic()
+            elif time.monotonic() - since >= SETTLE_STEADY and now >= 0:
+                return
 
     def decode(self, h264: bytes) -> Tuple[Optional[bytes], str]:
         """One H.264 frame to a JPEG with the firmware's ffmpeg, at low

@@ -17,6 +17,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -74,6 +75,9 @@ open(a[-1], "wb").write(b"\\xff\\xd8\\xff" + src[-3:])
     c = creality.Creality(["box"])
     c.ffmpeg, c.capture_bin, c.timelapse = ff, cap, tl
     c.print_refer, c.proc = refer, proc
+    # Each case below takes its own picture (the reuse is tested at the end)
+    reuse = creality.REUSE
+    creality.REUSE = 0
 
     def refer_switch(on):
         with open(refer, "w") as f:
@@ -144,6 +148,57 @@ open(a[-1], "wb").write(b"\\xff\\xd8\\xff" + src[-3:])
     # Unreadable switch: treated as on (the file is never touched)
     os.remove(refer)
     check("switch unreadable: timelapse on", c.timelapse_on())
+
+    # capture returns before cam_app's frame lands (it only signals a FIFO)
+    late = os.path.join(work, "capture_late")
+    script(late, f"""import os, sys, time
+open({calls!r}, "a").write("late\\n")
+if os.fork() == 0:
+    time.sleep(0.5)
+    open({tl!r}, "ab").write({frame(b"LAT")!r})
+    os._exit(0)
+""")
+    c.capture_bin = late
+    refer_switch(0)
+    data, why = c.snapshot("camera", {"state": "standby", "since_end": None})
+    time.sleep(0.8)
+    check("a frame that lands after capture returned: read, then the file "
+          "removed again", data == b"\xff\xd8\xffLAT"
+          and not os.path.exists(tl), (data, why))
+    # capture fails after writing: the file is still put back
+    slow = os.path.join(work, "capture_slow")
+    script(slow, f"""import time
+open({tl!r}, "ab").write({frame(b"SLO")!r})
+time.sleep(3)
+""")
+    with open(tl, "wb") as f:
+        f.write(b"KEEP")
+    old_timeout = creality.DECODE_TIMEOUT
+    creality.DECODE_TIMEOUT = 0.5
+    c.capture_bin = slow
+    data, why = c.snapshot("camera", {"state": "standby", "since_end": None})
+    creality.DECODE_TIMEOUT = old_timeout
+    check("capture timing out: no picture, the file restored all the same",
+          data is None and open(tl, "rb").read() == b"KEEP", (why,))
+    os.remove(tl)
+    # Two notifications at once: one capture, one picture for both
+    creality.REUSE = reuse
+    c.capture_bin = cap
+    c._last_picture = None
+    if os.path.exists(calls):
+        os.remove(calls)
+    got = []
+    threads = [threading.Thread(target=lambda: got.append(c.snapshot(
+        "camera", {"state": "standby", "since_end": None})))
+        for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    check("two at once: one capture, the same picture for both, the file "
+          "left as it was", len(got) == 2 and got[0][0] == got[1][0]
+          == b"\xff\xd8\xffNEW" and open(calls).read() == "capture 0\n"
+          and not os.path.exists(tl), (got, open(calls).read()))
 
     # A real ffmpeg, a real stream: each frame with its own headers
     real = shutil.which("ffmpeg")

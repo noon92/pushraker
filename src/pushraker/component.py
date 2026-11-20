@@ -3570,6 +3570,9 @@ class PushNotifications:
         """A JPEG from a camera: the printer's own ("printer:<name>",
         printers.Printer.snapshot) or an http(s) address. Blocking."""
         if url.startswith("printer:"):
+            # _job_ended starts at -1e9: with no print ended since Moonraker
+            # started, "since_end" is huge (the profile then goes by the
+            # timelapse file's own time)
             ended = getattr(self, "_job_ended", None)
             ctx = {"state": self._status["print_stats"].get("state"),
                    "since_end": (time.monotonic() - ended)
