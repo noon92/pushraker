@@ -5,7 +5,7 @@
 # Discord senders for pushraker, registered as Apprise plugins so
 # they get the same queues, retries and fallbacks as the other services:
 #
-#   discordhook://<webhook id>/<webhook token>?name=U1&ping=<mention>
+#   discordwh://<webhook id>/<webhook token>?name=U1&ping=<mention>
 #       A server channel, through a channel webhook.
 #   discorddm://<bot token>@<user id>
 #
@@ -133,7 +133,9 @@ def mention(value: str) -> str:
     return f"<@{v}>" if v else ""
 
 
-@notify(on="discordhook", name="Discord channel")
+# Older Apprise takes custom schema names of 2 to 9 characters only
+# (the Creality Hi has 1.2.0)
+@notify(on="discordwh", name="Discord channel")
 def send_webhook(body: str, title: str, notify_type: Any, attach: Any,
                  meta: Dict[str, Any], *args: Any, **kwargs: Any) -> bool:
     hook_id = meta.get("host") or ""

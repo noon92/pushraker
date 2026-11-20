@@ -1440,7 +1440,7 @@ def row_url(s: Dict[str, Any], rid: str, priority: str, env: Env) -> str:
         return (f"tgram://{s['secret']}/{quote(s['telegram_chat'], safe='@-')}"
                 f"?{query(params)}")
     if s["provider"] in ("discord", "discord_dm"):
-        # discordhook:// and discorddm:// (pushraker.discord)
+        # discordwh:// and discorddm:// (pushraker.discord)
         params = {"silent": "yes" if priority in TELEGRAM_SILENT else "no"}
         if s["provider"] == "discord_dm":
             return (f"discorddm://{s['secret']}@{s['discord_user']}"
@@ -1451,7 +1451,7 @@ def row_url(s: Dict[str, Any], rid: str, priority: str, env: Env) -> str:
         params["name"] = s["name"]
         if s["discord_mention"] and priority in DISCORD_PING:
             params["ping"] = s["discord_mention"]
-        return f"discordhook://{m.group(1)}/{m.group(2)}?{query(params)}"
+        return f"discordwh://{m.group(1)}/{m.group(2)}?{query(params)}"
     u = urlparse(s["server"])
     scheme = "ntfys" if u.scheme == "https" else "ntfy"
     params = {"image": "no", "priority": priority}

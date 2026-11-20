@@ -1023,7 +1023,7 @@ complete_camera: case
 The component (`[pushraker]` in `extended/moonraker/05_pushraker.cfg`, a
 link to the firmware's copy) builds one [Apprise](https://github.com/caronc/apprise)
 URL per enabled notification and service from this (Discord uses
-pushraker's own `discordhook://` and `discorddm://` senders). The Klipper
+pushraker's own `discordwh://` and `discorddm://` senders). The Klipper
 side is the fixed macro file `extended/klipper/05_pushraker.cfg`: the
 `_PRINT_END_NTFY` and `_CANCEL_PRINT_NTFY` [print hooks](https://snapmakeru1-extended-firmware.pages.dev/klipper_hooks),
 which the component tells what to do (`SET_GCODE_VARIABLE` on

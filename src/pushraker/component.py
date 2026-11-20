@@ -85,7 +85,7 @@ except Exception as e:
     email_html = None  # type: ignore
 
 try:
-    # Registers the discordhook:// and discorddm:// Apprise plugins
+    # Registers the discordwh:// and discorddm:// Apprise plugins
     from . import discord
 except Exception as e:
     logging.warning("[pushraker] Discord unavailable: %s", e)
@@ -1001,7 +1001,7 @@ class PushNotifications:
                 channel = "email" if email else url.split(":", 1)[0]
                 channel = {"ntfys": "ntfy", "pover": "pushover",
                            "gotifys": "gotify",
-                           "tgram": "telegram", "discordhook": "discord",
+                           "tgram": "telegram", "discordwh": "discord",
                            "discorddm": "discord", "json": "webhook",
                            "jsons": "webhook"}.get(
                     channel, channel)
