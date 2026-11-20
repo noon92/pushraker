@@ -12,7 +12,7 @@ What was learned bringing pushraker to the Creality Hi: stock firmware, a
 - [ ] **Never change, upgrade or remove the vendor's packages** (Moonraker's Python, `/usr/lib/python3.*`, opkg/apt). Old firmware is held together by exactly those versions.
 - [ ] **Permission refusals are final.** If your tool refuses an action (e.g. writing into the firmware area), don't route around it. Stage the files and let the printer's owner run the one command; that is also the real acceptance test.
 - [ ] Mask secrets (tokens, passwords, webhook URLs, e-mail addresses) in everything you write down. Logs on the printer contain them.
-- [ ] Note the printer's clock and time zone (`date`). The Hi ran on Moscow time while its owner was two time zones away.
+- [ ] Note the printer's clock and time zone (`date`). The Hi's clock ran on Moscow time, an hour ahead of local time: convert before reporting times.
 
 ## 1. Survey (read-only)
 
