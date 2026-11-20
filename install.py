@@ -295,9 +295,17 @@ def restart_method(m, proc="/proc", init_dir="/etc/init.d"):
         names = sorted(os.listdir(init_dir))
     except OSError:
         names = []
+    # The init script that starts this Moonraker: it names its script or
+    # its config (the Creality Hi's /etc/init.d/moonraker names both). A
+    # script for another Moonraker would restart the wrong one.
+    marks = [x for x in (m.get("script"), m.get("conf")) if x]
     for name in names:
-        if "moonraker" in name.lower():
-            return "initd", os.path.join(init_dir, name)
+        if "moonraker" not in name.lower():
+            continue
+        path = os.path.join(init_dir, name)
+        text = read_proc(path)
+        if any(x in text for x in marks):
+            return "initd", path
     return "api", ""
 
 

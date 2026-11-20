@@ -87,11 +87,22 @@ def run_install_tests():
           inst.components_dir(m) == "/usr/share/moonraker/components")
     init = os.path.join(work, "init.d")
     os.makedirs(init)
-    for name in ("klipper", "moonraker", "nginx"):
+    for name in ("klipper", "nginx"):
         open(os.path.join(init, name), "w").close()
+    # The Hi's /etc/init.d/moonraker (procd)
+    open(os.path.join(init, "moonraker"), "w").write(
+        "PROG=/usr/share/moonraker-env/bin/python\n"
+        "CONF=/usr/share/moonraker/moonraker.conf\n"
+        "procd_set_param command ${PROG} /usr/share/moonraker/moonraker.py "
+        "-c ${CONF}\n")
     check("Hi: restarted with its init script (procd)",
           inst.restart_method(m, proc, init) ==
           ("initd", os.path.join(init, "moonraker")))
+    other = dict(m, script="/mnt/UDISK/test/moonraker/moonraker.py",
+                 conf="/mnt/UDISK/test/printer_data/config/moonraker.conf")
+    check("...but not for another Moonraker the script doesn't start "
+          "(restarted through its API)",
+          inst.restart_method(other, proc, init) == ("api", ""))
 
     # A Raspberry Pi install: packaged layout, systemd, -d, --configfile=
     proc2 = os.path.join(work, "proc2")

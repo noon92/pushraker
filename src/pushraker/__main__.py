@@ -342,8 +342,9 @@ def cmd_install(a: argparse.Namespace) -> int:
         print(f"Updated: {path}")
     if not changed:
         print("Already installed; nothing changed.")
-    print(f"pushraker {__version__} is set up. Restart Moonraker and "
-          "Klipper to load it, then open the notifications page.")
+    print(f"pushraker {__version__} is set up. Restart Moonraker"
+          + ("" if a.no_klipper else " and Klipper")
+          + " to load it, then open the notifications page.")
     return 0
 
 
