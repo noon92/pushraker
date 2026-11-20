@@ -1041,7 +1041,8 @@ class PushNotifications:
                     srv.socket_connect_timeout = max(
                         srv.socket_connect_timeout, SEND_CONNECT_TIMEOUT)
                 channel = "email" if email else url.split(":", 1)[0]
-                channel = {"ntfys": "ntfy", "pover": "pushover",
+                channel = {"ntfys": "ntfy", "pntfy": "ntfy",
+                           "pover": "pushover",
                            "gotifys": "gotify",
                            "tgram": "telegram", "discordwh": "discord",
                            "discorddm": "discord", "json": "webhook",

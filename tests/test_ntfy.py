@@ -124,6 +124,12 @@ def run_ntfy_tests():
           and req["headers"].get("Authorization") == f"Bearer {TOKEN}", req)
     srv.shutdown()
 
+    # The component names the channel "ntfy" (its console lines, and the
+    # key Apprise's reasons are kept under)
+    import pushraker.component as pn
+    src = open(pn.__file__, encoding="utf-8").read()
+    check("pntfy:// is the ntfy channel", '"pntfy": "ntfy"' in src)
+
     # How a refusal is worded in pushraker's console line
     import pushraker.component as pn
     check("ntfy's 5-digit code: '403 Forbidden', not 'failed'",
