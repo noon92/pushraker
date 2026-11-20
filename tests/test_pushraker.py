@@ -2033,13 +2033,15 @@ async def test_backup_from():
                    "user_info": {"host_name": "Workshop"}}, f)
     hi = creality.Creality(["box"])
     hi.system_configs = (os.path.join(cfgd, "missing.json"), sysconf)
-    check("Creality: the model code wins over a renamed hostname",
+    check("Creality: the stock hostname first",
+          hi.model("Creality Hi-78E7") == "Creality Hi"
+          and hi.model("Creality K2 Plus-A1B2") == "Creality K2 Plus")
+    check("...renamed: the model code",
           hi.model("Workshop") == "Creality Hi")
     with open(sysconf, "w") as f:
         json.dump({"device_info": {"model_str": "F999"}}, f)
-    check("...an unknown code: the hostname, else a plain name",
-          hi.model("Creality K2 Plus-A1B2") == "Creality K2 Plus"
-          and hi.model("my-printer") == "Creality printer")
+    check("...renamed, code not in the table: a plain name",
+          hi.model("my-printer") == "Creality printer")
     for t in list(c._tasks):
         t.cancel()
 

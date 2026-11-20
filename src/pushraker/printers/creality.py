@@ -8,11 +8,12 @@ generic Printer reads virtual_sdcard's layer fields, which Creality's
 Klipper adds.
 
 The model, in this order:
-1. Creality's model code in its own system_config.json (device_info.
-   model_str), looked up in MODEL_CODES; the user can't change it.
-2. Klipper's hostname, "Creality <model>-<last 4 hex of the MAC>" ("Creality
-   Hi-78E7"), Creality's default; renamed in Creality's UI, it no longer
-   says the model.
+1. Klipper's hostname, "Creality <model>-<last 4 hex of the MAC>" ("Creality
+   Hi-78E7"): Creality's default, the model's own name as Creality writes
+   it, almost always left as it is.
+2. A printer renamed in Creality's UI: Creality's model code in its
+   system_config.json (device_info.model_str), looked up in MODEL_CODES
+   (kept minimal).
 3. "Creality printer".
 """
 
@@ -59,8 +60,8 @@ class Creality(Printer):
         return None
 
     def model(self, hostname: str = "") -> str:
-        code = self.model_code()
-        if code and code in MODEL_CODES:
-            return MODEL_CODES[code]
         m = RX_HOSTNAME.fullmatch(hostname.strip())
-        return m.group(1) if m else self.model_name
+        if m:
+            return m.group(1)
+        code = self.model_code()
+        return MODEL_CODES.get(code or "", self.model_name)
