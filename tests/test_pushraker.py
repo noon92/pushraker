@@ -1596,7 +1596,9 @@ async def test_generic_printer():
         WebRequest("GET"))
     meta = {m["id"]: m for m in view["meta"]["rows"]}
     check("...and hidden on the page", meta["calibration"]["hidden"]
-          and not meta["error"]["hidden"] and not meta["chamber_waiting"]["hidden"])
+          and not meta["error"]["hidden"]
+          # no heater_generic, purifier or DragonBreath: no chamber rows
+          and meta["chamber_waiting"]["hidden"])
     with open(conf, "w") as f:
         f.write(text.replace("\nwarning: off,", "\nwarning: on,"))
     os.utime(conf, None)
@@ -1923,6 +1925,64 @@ async def test_creality_layers():
           and c._status["print_stats"]["info"] == {"total_layer": None,
                                                     "current_layer": None},
           c._status["print_stats"].get("info"))
+    for t in list(c._tasks):
+        t.cancel()
+
+
+async def test_missing_hardware_rows():
+    print("Rows for hardware the printer doesn't have: hidden, settings kept")
+    reset_world()
+    STATE.pop("print_task_config", None)
+    for name in ("config/pushraker.conf", "pushraker.secrets"):
+        try:
+            os.remove(os.path.join(WORK, "data", name))
+        except OSError:
+            pass
+    STATE["heater_bed"] = {"temperature": 22}
+    server = Server()
+    c = pn.PushNotifications(Config(server, dict(name="Hi", settle_time="0.1")))
+    STATE["print_stats"] = ps("standby")
+    await server.handlers["server:klippy_ready"]()
+
+    async def meta():
+        view = await server.endpoints["/server/pushraker/config"](
+            WebRequest("GET"))
+        return {m["id"]: m for m in view["meta"]["rows"]}, view
+    m, view = await meta()
+    check("no chamber, no driver temperatures: those rows hidden",
+          all(m[r]["hidden"] and not m[r]["available"] for r in (
+              "chamber_waiting", "chamber_reached", "chamber_fault",
+              "driver_hot")), {r: m[r]["hidden"] for r in m})
+    check("...a heated bed: Bed cooled shown", not m["bed_cooled"]["hidden"])
+    check("...hidden even though their saved setting is on",
+          c.settings["rows"]["chamber_waiting"]["enabled"])
+    # The page saves without the hidden rows: their settings stay as saved
+    rows = {r: {"enabled": False, "priority": "default", "email": False}
+            for r in m if not m[r]["hidden"]}
+    await server.endpoints["/server/pushraker/config"](
+        WebRequest("POST", {"rows": rows}))
+    check("a save from the page leaves hidden rows' settings alone",
+          c.settings["rows"]["chamber_waiting"]["enabled"]
+          and not c.settings["rows"]["started"]["enabled"],
+          (c.settings["rows"]["chamber_waiting"],
+           c.settings["rows"]["started"]))
+    for t in list(c._tasks):
+        t.cancel()
+
+    # The hardware there (a chamber heater, TMC2240 X/Y): shown
+    STATE["heater_generic chamber"] = {"temperature": 30, "target": 0}
+    STATE["tmc2240 stepper_x"] = {"temperature": 40}
+    STATE["tmc2240 stepper_y"] = {"temperature": 41}
+    server = Server()
+    c = pn.PushNotifications(Config(server, dict(name="Hi", settle_time="0.1")))
+    await server.handlers["server:klippy_ready"]()
+    m, _ = await meta()
+    check("a chamber heater and driver temperatures: their rows shown",
+          not any(m[r]["hidden"] for r in ("chamber_waiting",
+                                           "chamber_fault", "driver_hot")))
+    for k in ("heater_generic chamber", "tmc2240 stepper_x",
+              "tmc2240 stepper_y", "heater_bed"):
+        STATE.pop(k, None)
     for t in list(c._tasks):
         t.cancel()
 
@@ -4502,7 +4562,7 @@ async def run_component_tests():
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
               test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_custom_events, test_camera_pictures, test_codemirror,
               test_data, test_old_moonraker, test_page_current_moonraker,
-              test_creality_layers):
+              test_creality_layers, test_missing_hardware_rows):
         try:
             await t()
         except Exception as e:  # report and carry on

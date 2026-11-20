@@ -17,7 +17,7 @@ file per printer), listed in PRINTERS below, not in the component.
 """
 
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 
 class Printer:
@@ -95,6 +95,28 @@ class Printer:
 
     def has(self, obj: str) -> bool:
         return obj in self.objects
+
+    def missing_rows(self) -> Set[str]:
+        """Rows for hardware this printer doesn't have, from Klipper's
+        objects at Klippy ready (one added later shows after a restart):
+        left off the page whatever their setting, which stays as saved.
+        One table for every printer; empty before Klipper is known."""
+        o = self.objects
+        if not o:
+            return set()
+        chamber = any(x.startswith("heater_generic ") for x in o) or \
+            "purifier" in o or "dragonbreath" in o
+        needs = {
+            # a chamber target: any heater_generic (M141/M191), Snapmaker's
+            # chamber wait (its purifier), a DragonBreath
+            "chamber_waiting": chamber,
+            "chamber_reached": chamber,
+            "chamber_fault": chamber,
+            # X/Y drivers that report their own temperature
+            "driver_hot": bool(self.drivers),
+            "bed_cooled": "heater_bed" in o,
+        }
+        return {rid for rid, ok in needs.items() if not ok}
 
     @classmethod
     def matches(cls, objects: Sequence[str]) -> bool:

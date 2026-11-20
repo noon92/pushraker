@@ -1329,6 +1329,7 @@ class PushNotifications:
                           name=self.store.default_name if self.store
                           else self.name,
                           rows_unavailable=self.printer.rows_unavailable,
+                          rows_missing=self.printer.missing_rows(),
                           preprint=bool(self.printer.preprint_calibrations),
                           time_methods=[
                               {"id": m, "label": l, "help": h}

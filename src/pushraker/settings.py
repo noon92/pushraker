@@ -310,6 +310,9 @@ class Env:
       name          the printer's default name
       rows_unavailable  rows the printer can't produce (off by default and
                     left off the page unless turned on in pushraker.conf)
+      rows_missing  rows for hardware the printer doesn't have (a chamber,
+                    driver temperatures): left off the page even when on;
+                    their settings stay as saved
       preprint      the printer has pre-print calibrations (the Print
                     started row's checkbox)
       time_methods  [{"id", "label", "help"}] the time-left methods on
@@ -320,6 +323,7 @@ class Env:
                  spoolman_url: str = "",
                  error_index_url: str = "", name: str = "Printer",
                  rows_unavailable: Sequence[str] = (),
+                 rows_missing: Sequence[str] = (),
                  preprint: bool = False,
                  time_methods: Optional[List[Dict[str, str]]] = None,
                  time_default: str = "blend") -> None:
@@ -328,6 +332,7 @@ class Env:
         self.time_default = time_default
         self.preprint = preprint
         self.rows_unavailable = set(rows_unavailable)
+        self.rows_missing = set(rows_missing)
         self.spoolman_url = spoolman_url.rstrip("/")
         self.error_index_url = error_index_url
         self.name = name
@@ -1949,12 +1954,15 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
         "version": version,
         "rows": [{"id": r[0], "label": r[1], "icon": r[2],
                   "image": r[5], "group": r[6],
-                  "available": r[0] not in env.rows_unavailable,
-                  # Left off the page only when the printer can't produce
-                  # it and it is off: one turned on in pushraker.conf shows
-                  "hidden": r[0] in env.rows_unavailable
-                  and not s["rows"][r[0]]["enabled"]
-                  and not s["rows"][r[0]]["email"]}
+                  "available": r[0] not in env.rows_unavailable
+                  and r[0] not in env.rows_missing,
+                  # Left off the page when the hardware isn't there, or
+                  # when the printer can't produce it and it is off: one
+                  # turned on in pushraker.conf shows
+                  "hidden": r[0] in env.rows_missing
+                  or (r[0] in env.rows_unavailable
+                      and not s["rows"][r[0]]["enabled"]
+                      and not s["rows"][r[0]]["email"])}
                  for r in ROWS],
         "email_presets": EMAIL_PRESETS,
         "spoolman": bool(env.spoolman_url),
