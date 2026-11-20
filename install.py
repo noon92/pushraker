@@ -756,6 +756,18 @@ def install(a, m):
     return 0
 
 
+def installed_in(m):
+    """Whether this Moonraker has pushraker's component file or section."""
+    if os.path.isfile(os.path.join(m["components"], "pushraker.py")):
+        return True
+    try:
+        with open(m["conf"], encoding="utf-8", errors="replace") as f:
+            return any(ln.strip().replace(" ", "").lower() == "[pushraker]"
+                       for ln in f)
+    except OSError:
+        return False
+
+
 def take_out(a, m):
     args = cli_args(m, a)
     if a.purge:
@@ -778,6 +790,11 @@ def remove_install_dir(m):
 
 
 def uninstall(a, m):
+    if not installed_in(m):
+        say(f"pushraker isn't in this Moonraker ({m['conf']}): nothing to "
+            f"take out, nothing restarted.")
+        remove_install_dir(m)
+        return 0
     ensure_idle(m, a)
     need_klippy = klippy_connected(m["port"])
     take_out(a, m)
@@ -809,7 +826,7 @@ def uninstall_offline(a, why):
         raise Stop("Several installs found; choose one with --install-dir:\n"
                    + "\n".join("  " + m["install_dir"] for m in found))
     m = found[0]
-    say("Moonraker isn't running; uninstalling from what install.py "
+    say("That Moonraker isn't running; uninstalling from what install.py "
         f"recorded in {marker(m['install_dir'])}")
     show(m)
     take_out(a, m)
@@ -830,19 +847,38 @@ def uninstall_offline(a, why):
     return 0
 
 
+def choose_uninstall(a, proc):
+    """The Moonraker to take pushraker out of: the running one whose
+    config is the one recorded at install; else, with an install recorded
+    (and --install-dir naming it, or none running), from the record with
+    Moonraker down. Never another Moonraker that merely happens to run."""
+    recorded = recorded_installs(a)
+    try:
+        live = find(a, proc)
+    except NoMoonraker as e:
+        return uninstall_offline(a, str(e))
+    for rec in recorded:
+        if os.path.realpath(rec["conf"]) == os.path.realpath(live["conf"]):
+            live.update(install_dir=rec["install_dir"], lib=rec["lib"])
+            show(live)
+            return uninstall(a, live)
+    if a.install_dir and recorded:
+        return uninstall_offline(a, "The running Moonraker isn't the one "
+                                 "recorded in " + recorded[0]["install_dir"])
+    show(live)
+    return uninstall(a, live)
+
+
 def main(argv=None, proc="/proc"):
     a = parse(sys.argv[1:] if argv is None else argv)
     try:
         if sys.version_info[:2] < MIN_PYTHON:
             raise Stop("install.py needs Python 3.7 or newer to run.")
-        try:
-            m = find(a, proc)
-        except NoMoonraker as e:
-            if a.uninstall:
-                return uninstall_offline(a, str(e))
-            raise
+        if a.uninstall:
+            return choose_uninstall(a, proc)
+        m = find(a, proc)
         show(m)
-        return uninstall(a, m) if a.uninstall else install(a, m)
+        return install(a, m)
     except Stop as e:
         say("")
         warn(str(e))

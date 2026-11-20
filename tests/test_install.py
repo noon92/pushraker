@@ -309,6 +309,39 @@ def run_install_tests():
     check("Moonraker down: install refuses", rc == 1
           and "No running Moonraker" in out.getvalue())
 
+    # --uninstall with another Moonraker running than the one recorded
+    # (the Hi with its own Moonraker up, a second one down): never touch it
+    idir2 = os.path.join(work, "UDISK2", inst.DEFAULT_DIR)
+    os.makedirs(os.path.join(idir2, "lib"))
+    comps4 = os.path.join(work, "UDISK2", "moonraker", "components")
+    os.makedirs(comps4)
+    open(os.path.join(comps4, "pushraker.py"), "w").write("# pushraker\n")
+    conf4 = os.path.join(work, "UDISK2", "moonraker.conf")
+    open(conf4, "w").write("[server]\n\n[pushraker]\n")
+    inst.write_marker(dict(m, components=comps4, conf=conf4,
+                           install_dir=idir2,
+                           lib=os.path.join(idir2, "lib")), "1.0")
+    restarted = []
+    real_restart = inst.restart
+    inst.restart = lambda *a_: restarted.append(a_)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            rc = inst.main(["--uninstall", "--install-dir", idir2], proc=proc)
+    finally:
+        inst.restart = real_restart
+    check("another Moonraker running: uninstall from the record, the "
+          "running one never restarted",
+          rc == 0 and not restarted and "[pushraker]" not in
+          open(conf4).read() and not os.path.exists(idir2), out.getvalue())
+    hi_live = inst.describe(*inst.moonraker_processes(proc)[0], proc=proc)
+    hi_live.update(components=comps4, install_dir=idir2,
+                   lib=os.path.join(idir2, "lib"))
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        rc = inst.uninstall(type("A", (), {"no_restart": False,
+                                           "purge": False})(), hi_live)
+    check("nothing installed in a Moonraker: nothing done, no restart",
+          rc == 0 and "nothing restarted" in out.getvalue(), out.getvalue())
+
     # The health check: Klipper only required when it was connected before
     answers = [{"components": ["pushraker"], "klippy_connected": False}]
     real_api, real_sleep, real_wait = inst.api, inst.time.sleep, \
