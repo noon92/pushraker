@@ -108,6 +108,8 @@ if TYPE_CHECKING:
 # start, it simply never fires on a printer without one
 EXCEPTION_EVENTS = printers.EXCEPTION_EVENTS
 REMOTE_METHOD = "pushraker"
+# The settings page, served by Moonraker (compat.register_page)
+PAGE_ENDPOINT = "/server/pushraker/page"
 # The 0.1 name, still answered (a Klipper macro file from 0.1 calls it)
 OLD_REMOTE_METHOD = "push_notification"
 MILESTONES = (25, 50, 75)
@@ -926,10 +928,32 @@ class PushNotifications:
                     except Exception as e:
                         logging.error("[pushraker] endpoint "
                                       "%s/%s: %s", base, path, e)
+            # The settings page itself, for printers without an nginx of
+            # their own to serve it from (open http://<printer>:7125/server/
+            # pushraker/page)
+            try:
+                compat.register_page(self.server, PAGE_ENDPOINT,
+                                     self._ep_page)
+            except Exception as e:
+                logging.error("[pushraker] page endpoint: %s", e)
             self._spawn(self._watch_settings())
             self._spawn(self._custom_watch())
             self._spawn(self._cm_follow())
             self._retire()
+
+    async def _ep_page(self, web_request: Any) -> str:
+        """The settings page (web/index.html), read again when it changed
+        (a package upgrade without a Moonraker restart)."""
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "web", "index.html")
+        try:
+            stamp = os.stat(path).st_mtime_ns
+            if self._page is None or self._page[0] != stamp:
+                with open(path, encoding="utf-8") as f:
+                    self._page = (stamp, f.read())
+        except OSError as e:
+            raise self.server.error(f"settings page unavailable: {e}", 500)
+        return self._page[1]
 
     async def close(self) -> None:
         """Moonraker shutting down or restarting (it reuses the process):
@@ -1151,6 +1175,7 @@ class PushNotifications:
         self._faults_pending: Set[FaultKey] = set()
         self._last_fault_send = 0.
         self._ready_once = False
+        self._page: Optional[Tuple[int, str]] = None
         self._status_seen = True     # logged after each Klippy ready
         # Per-job state
         self._job_active = False

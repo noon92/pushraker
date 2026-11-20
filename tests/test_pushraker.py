@@ -171,9 +171,16 @@ class Server:
     def register_remote_method(self, name, fn):
         self.remote[name] = fn
 
-    def register_endpoint(self, path, methods, handler):
+    def register_endpoint(self, path, methods, handler, transports=None,
+                          wrap_result=True, content_type=None,
+                          auth_required=True):
+        # current Moonraker's keywords (the old one: up to wrap_result)
         self.endpoints = getattr(self, "endpoints", {})
         self.endpoints[path] = handler
+        self.endpoint_kw = getattr(self, "endpoint_kw", {})
+        self.endpoint_kw[path] = dict(
+            transports=transports, wrap_result=wrap_result,
+            content_type=content_type, auth_required=auth_required)
 
     class error(Exception):
         def __init__(self, message, status=500):
@@ -1266,6 +1273,7 @@ async def test_file_mode():
               for p in ("config", "test", "objects", "preview",
                         "preview_image", "codemirror", "codemirror_js",
                         "status", "backup")}
+          | {"/server/pushraker/page"}
           and c.rows == {} and c.store is not None)
     STATE["print_stats"] = ps("standby")
     await server.handlers["server:klippy_ready"]()
@@ -1655,6 +1663,15 @@ class OldServer(Server):
             raise self.error("no component klippy_connection")
         return super().lookup_component(name, default)
 
+    def register_endpoint(self, path, methods, handler, transports=None,
+                          wrap_result=True):
+        # Moonraker before 2023: no content_type, no auth_required
+        self.endpoints = getattr(self, "endpoints", {})
+        self.endpoints[path] = handler
+        self.endpoint_kw = getattr(self, "endpoint_kw", {})
+        self.endpoint_kw[path] = dict(transports=transports,
+                                      wrap_result=wrap_result)
+
     def get_app_args(self):
         return {"data_path": os.path.join(WORK, "olddata"),
                 "config_file": os.path.join(WORK, "firmware", "moonraker",
@@ -1748,6 +1765,33 @@ async def test_old_moonraker():
     OldServer.klippy_connection.state = "shutdown"
     check("...shutdown seen", c._klippy_shutdown())
     OldServer.klippy_connection.state = "ready"
+    kw = server.endpoint_kw["/server/pushraker/page"]
+    page = await server.endpoints["/server/pushraker/page"](WebRequest("GET"))
+    check("settings page served by an old Moonraker: unwrapped, HTTP only "
+          "(tornado sends a str as text/html)",
+          kw == dict(transports=["http"], wrap_result=False)
+          and isinstance(page, str) and "/server/pushraker/config" in page
+          and page.lstrip().lower().startswith("<!doctype html"), kw)
+    for t in list(c._tasks):
+        t.cancel()
+
+
+async def test_page_current_moonraker():
+    print("Settings page served by current Moonraker")
+    reset_world()
+    server = Server()
+    c = pn.PushNotifications(Config(server, dict(name="Hi",
+                                                 settle_time="0.1")))
+    kw = server.endpoint_kw["/server/pushraker/page"]
+    check("content type and no login for the static page itself",
+          kw == dict(transports=["http"], wrap_result=False,
+                     content_type="text/html; charset=UTF-8",
+                     auth_required=False), kw)
+    check("the JSON endpoints still need authorization",
+          server.endpoint_kw["/server/pushraker/config"]["auth_required"])
+    a = await server.endpoints["/server/pushraker/page"](WebRequest("GET"))
+    b = await server.endpoints["/server/pushraker/page"](WebRequest("GET"))
+    check("page read once, then from memory", a is b and "<html" in a.lower())
     for t in list(c._tasks):
         t.cancel()
 
@@ -4378,7 +4422,7 @@ async def run_component_tests():
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
               test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_custom_events, test_camera_pictures, test_codemirror,
-              test_data, test_old_moonraker):
+              test_data, test_old_moonraker, test_page_current_moonraker):
         try:
             await t()
         except Exception as e:  # report and carry on

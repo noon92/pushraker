@@ -157,3 +157,23 @@ def config_dir(app_args: Dict[str, Any], data_path: str) -> str:
         if inside:
             return here
     return os.path.join(data_path, "config")
+
+
+def register_page(server: Any, path: str, callback: Callable[..., Any]
+                  ) -> None:
+    """A GET endpoint that answers with a whole HTML page, not JSON: the
+    settings page, served by Moonraker itself for printers where nginx
+    can't be changed. Every Moonraker with a mutable router takes
+    wrap_result=False and finishes with the string as text/html (tornado's
+    default); current ones also take content_type, and auth_required=False
+    (the page is static: its API calls still need authorization)."""
+    kw: Dict[str, Any] = {"transports": ["http"], "wrap_result": False}
+    try:
+        params = inspect.signature(server.register_endpoint).parameters
+    except (TypeError, ValueError):
+        params = {}  # type: ignore[assignment]
+    if "content_type" in params:
+        kw["content_type"] = "text/html; charset=UTF-8"
+    if "auth_required" in params:
+        kw["auth_required"] = False
+    server.register_endpoint(path, ["GET"], callback, **kw)

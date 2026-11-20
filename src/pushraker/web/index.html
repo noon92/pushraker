@@ -2598,18 +2598,23 @@
             name: el('nt-name').value.trim() || state.meta.default_name || 'Printer',
             camera: el('nt-camera').value,
             printer_url: el('nt-printer-url').value.trim(),
-            layers_complete: parseInt(el('nt-layers').value, 10) || 2,
-            first_layer_objects: el('nt-layer-objects').value,
-            filament_change_events: ['loaded', 'unloaded'].filter(e => el('nt-fc-' + e).checked).join(','),
-            driver_temp: parseInt(el('nt-driver-hot').value, 10) || 105,
+            // A row this printer doesn't show has no inputs: its settings
+            // stay as they are (e.g. filament change on a printer without
+            // the U1's feeders)
+            layers_complete: el('nt-layers') ? parseInt(el('nt-layers').value, 10) || 2 : state.layers_complete,
+            first_layer_objects: el('nt-layer-objects') ? el('nt-layer-objects').value : state.first_layer_objects,
+            filament_change_events: el('nt-fc-loaded') ? ['loaded', 'unloaded'].filter(e => el('nt-fc-' + e).checked).join(',') : [].concat(state.filament_change_events || []).join(','),
+            driver_temp: el('nt-driver-hot') ? parseInt(el('nt-driver-hot').value, 10) || 105 : state.driver_temp,
             bed_cool_temp: el('nt-bed-cool') ? parseInt(el('nt-bed-cool').value, 10) || 40 : state.bed_cool_temp,
-            report_interval: parseInt(el('nt-report-interval').value, 10) || 30,
-            complete_objects: el('nt-complete-objects').value,
+            report_interval: el('nt-report-interval') ? parseInt(el('nt-report-interval').value, 10) || 30 : state.report_interval,
+            complete_objects: el('nt-complete-objects') ? el('nt-complete-objects').value : state.complete_objects,
             filament_low_percent: parseInt(el('nt-fl-percent').value, 10) || 0,
             filament_low_grams: parseInt(el('nt-fl-grams').value, 10) || 0,
             filament_unknown: el('nt-fl-unknown').checked,
             time_left: timeMethod(),
-            progress_marks: (state.meta.progress_marks || [25, 50, 75]).filter(m => el('nt-pm-' + m) && el('nt-pm-' + m).checked).join(','),
+            progress_marks: (state.meta.progress_marks || [25, 50, 75]).some(m => el('nt-pm-' + m))
+                ? (state.meta.progress_marks || [25, 50, 75]).filter(m => el('nt-pm-' + m) && el('nt-pm-' + m).checked).join(',')
+                : progressMarks().join(','),
             email_enabled: emailEnabled,
             email_host: el('nt-email-host').value.trim(),
             email_port: parseInt(el('nt-email-port').value, 10) || 0,
