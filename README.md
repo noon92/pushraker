@@ -27,6 +27,40 @@ MMU slots) start off on other printers and are left off the page; turn
 one on in `pushraker.conf` and it shows on the page and is sent like any
 other.
 
+## Requirements
+
+- Moonraker with its `job_state` component (upstream since November 2021;
+  the older flat `moonraker.py` layout is fine, as on the Creality Hi).
+- The Python Moonraker runs with: 3.7 or newer, with apprise 1.2 or newer,
+  Jinja2 3.0 or newer and requests. Pillow (8.2 or newer) is optional:
+  without it notifications go without spool pictures and preview images.
+
+## Install on a printer whose Moonraker came with its firmware (over SSH)
+
+For printers like the Creality Hi, where Moonraker, its Python and nginx
+belong to the firmware: log in over SSH and run
+
+```sh
+python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubusercontent.com/noon92/pushraker/main/install.py').read())"
+```
+
+It finds the running Moonraker, checks the requirements above (it never
+adds, upgrades or removes a package of Moonraker's Python), downloads
+pushraker from PyPI (sha256-checked), unpacks it next to Moonraker's data
+folder (on the Hi: `/mnt/UDISK/pushraker`), adds one component file to
+Moonraker's components folder and `[pushraker]` to `moonraker.conf`
+(backed up first as `moonraker.conf.bak-pushraker`), restarts Moonraker
+(never while printing), checks it loaded, and prints the settings page's
+address: `http://<printer>:7125/server/pushraker/page`, served by Moonraker
+itself, so no web server change is needed. Klipper's config is left alone
+(`--klipper` adds the print-end snapshot macros).
+
+Run the same command again to update, or after a firmware update removed
+it: the settings are kept. Options go after the command
+(`python3 -c "..." --uninstall`): `--uninstall` (`--purge` also removes the
+settings), `--version X`, `--wheel FILE`, `--name`, `--no-restart`;
+`python3 install.py --help` lists them all.
+
 ## Install (any Moonraker printer)
 
 ```sh
@@ -49,7 +83,8 @@ location /notifications/ {
 }
 ```
 
-and open `http://<printer>/notifications/`. The page talks to Moonraker
+and open `http://<printer>/notifications/`. (Moonraker also serves the page
+itself at `http://<printer>:7125/server/pushraker/page`.) The page talks to Moonraker
 through the `/server/` proxy of that nginx; without one it falls back to
 Moonraker's own port, which needs the page's origin in `cors_domains`
 under `[authorization]` in `moonraker.conf`. With Moonraker's
@@ -89,9 +124,13 @@ it out again; `--purge` also removes the settings and secrets.
 - `src/pushraker/web/index.html` — the settings page
 - `src/pushraker/klipper/pushraker.cfg` — the Klipper macro file
 - `src/pushraker/__main__.py` — `python -m pushraker install|uninstall|status`
+- `install.py` — the one-line install over SSH (standard library only; not
+  part of the package)
 - `docs/guide.md` — the user guide
 - `tests/` — `python tests/test_pushraker.py` (the component against a
   stand-in Moonraker; also runs `test_settings.py`)
+- `tests/test_install.py` — install.py against a fake `/proc` (also run by
+  `test_pushraker.py`)
 - `tests/check_deps.py` — whether pushraker works with the Apprise, Pillow and
   Jinja2 of a printer's Python, without sending anything: copy it and the
   package to the printer and run `<Moonraker's python> check_deps.py <dir

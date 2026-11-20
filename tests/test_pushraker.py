@@ -4606,6 +4606,10 @@ def main():
     test_settings.run_installer_tests()
     _passes += test_settings._passes
     _failures += test_settings._failures
+    import test_install
+    test_install.run_install_tests()
+    _passes += test_install._passes
+    _failures += test_install._failures
     shutil.rmtree(WORK, ignore_errors=True)
     print(f"\n{_passes} passed, {_failures} failed")
     return 1 if _failures else 0
