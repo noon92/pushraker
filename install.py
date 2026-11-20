@@ -712,6 +712,10 @@ def install(a, m):
     ensure_idle(m, a)
     claim_dir(m["install_dir"])
     os.makedirs(m["install_dir"], exist_ok=True)
+    if not os.path.isfile(marker(m["install_dir"])):
+        # Marked at once: a download or unpack that fails leaves a folder
+        # the next run recognises as its own
+        write_marker(m, "?")
     work = tempfile.mkdtemp(prefix="pushraker_", dir=m["install_dir"])
     try:
         if a.wheel:

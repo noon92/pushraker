@@ -342,6 +342,49 @@ def run_install_tests():
     check("nothing installed in a Moonraker: nothing done, no restart",
           rc == 0 and "nothing restarted" in out.getvalue(), out.getvalue())
 
+    # A first install that fails (a bad wheel), then one that works: the
+    # folder is install.py's from the start
+    idir5 = os.path.join(work, "UDISK5", inst.DEFAULT_DIR)
+    comps5 = os.path.join(work, "UDISK5", "moonraker", "components")
+    os.makedirs(comps5)
+    open(os.path.join(comps5, "job_state.py"), "w").close()
+    conf5 = os.path.join(work, "UDISK5", "moonraker.conf")
+    open(conf5, "w").write("[server]\n")
+    m5 = {"python": sys.executable, "components": comps5, "conf": conf5,
+          "data_path": os.path.join(work, "UDISK5", "printer_data"),
+          "log": "/nonexistent.log", "port": 7125, "restart": ("api", ""),
+          "install_dir": idir5, "lib": os.path.join(idir5, "lib"), "pid": 1}
+
+    class A5:
+        wheel = bad
+        no_restart = True
+        version = ""
+        name = ""
+        klipper = False
+    real_floor = inst.check_floor
+    inst.check_floor = lambda m_: {"python": [3, 9, 12]}
+    try:
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                inst.install(A5(), m5)
+            check("a failing first install fails", False)
+        except inst.Stop:
+            check("a failing first install leaves its folder marked",
+                  inst.read_marker(idir5) is not None
+                  and inst.read_marker(idir5)["version"] == "?")
+        A5.wheel = whl
+        real_cli = inst.run_cli
+        inst.run_cli = lambda *a_: None
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = inst.install(A5(), m5)
+        finally:
+            inst.run_cli = real_cli
+        check("...and the next run takes it and records the version",
+              rc == 0 and inst.read_marker(idir5)["version"] == "1.0")
+    finally:
+        inst.check_floor = real_floor
+
     # The health check: Klipper only required when it was connected before
     answers = [{"components": ["pushraker"], "klippy_connected": False}]
     real_api, real_sleep, real_wait = inst.api, inst.time.sleep, \
