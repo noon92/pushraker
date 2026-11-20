@@ -565,6 +565,53 @@ def run_installer_tests():
     check("install with include directory removes the obsolete section",
           "[push_notifications]" not in moon
           and os.path.isfile(os.path.join(include_dir, "pushraker.cfg")), moon)
+
+    # A flat Moonraker with moonraker.conf in the firmware (the Creality
+    # Hi): what install.py passes
+    hi = tempfile.mkdtemp(prefix="pushraker_flat_")
+    mdir = os.path.join(hi, "usr", "share", "moonraker")
+    os.makedirs(os.path.join(mdir, "components"))
+    conf = os.path.join(mdir, "moonraker.conf")
+    original = "[server]\nport: 7125\n\n[history]\n"
+    open(conf, "w").write(original)
+    data = os.path.join(hi, "printer_data")
+    os.makedirs(os.path.join(data, "config"))
+    pcfg = os.path.join(data, "config", "printer.cfg")
+    open(pcfg, "w").write("[printer]\n")
+    args = ["--moonraker-dir", mdir, "--data-dir", data,
+            "--moonraker-conf", conf, "--no-klipper",
+            "--backup", ".bak-pushraker", "--site-packages", "/x/lib"]
+    with contextlib.redirect_stdout(_io.StringIO()):
+        rc = cli.main(["install"] + args)
+    shim = os.path.join(mdir, "components", "pushraker.py")
+    check("flat layout: the component file goes in <moonraker-dir>/components",
+          rc == 0 and os.path.isfile(shim)
+          and "'/x/lib'" in open(shim).read()
+          and "sys.path.append" in open(shim).read())
+    check("...moonraker.conf backed up before the change, then [pushraker] added",
+          open(conf + ".bak-pushraker").read() == original
+          and "[pushraker]" in open(conf).read())
+    check("--no-klipper: printer.cfg and the macro file left alone",
+          open(pcfg).read() == "[printer]\n" and not os.path.exists(
+              os.path.join(data, "config", "pushraker.cfg"))
+          and not os.path.exists(pcfg + ".bak-pushraker"))
+    with open(conf) as f:
+        edited = f.read().replace("port: 7125\n", "port: 7125\n# noon's own edit\n")
+    open(conf, "w").write(edited)
+    with contextlib.redirect_stdout(_io.StringIO()):
+        cli.main(["install"] + args)
+    check("installed again: nothing changes, the first backup stays the original",
+          open(conf + ".bak-pushraker").read() == original
+          and open(conf).read().count("[pushraker]") == 1)
+    with contextlib.redirect_stdout(_io.StringIO()):
+        cli.main(["uninstall"] + args)
+    check("uninstall: component file and section gone, the rest kept",
+          not os.path.exists(shim) and "[pushraker]" not in open(conf).read()
+          and "# noon's own edit" in open(conf).read()
+          and open(conf + ".bak-pushraker").read() == original)
+    a = cli.parse(["install", "--moonraker-dir", mdir,
+                   "--components-dir", "/elsewhere"])
+    check("--components-dir wins", cli.components_dir(a) == "/elsewhere")
     return _failures
 
 
