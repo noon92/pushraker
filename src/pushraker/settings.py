@@ -1590,10 +1590,11 @@ def backup(s: Dict[str, Any], version: str, created: str,
     return data
 
 
-def backup_name(s: Dict[str, Any], day: str, secrets: bool = False) -> str:
+def backup_name(s: Dict[str, Any], day: str) -> str:
+    """The same name with or without tokens and passwords in it: a name
+    that says so marks the file worth taking."""
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", s.get("name") or "Printer")
-    return (f"pushraker-backup-{name.strip('-') or 'Printer'}-{day}"
-            + ("-with-secrets" if secrets else "") + ".json")
+    return f"pushraker-backup-{name.strip('-') or 'Printer'}-{day}.json"
 
 
 def backup_secrets(data: Any) -> Dict[str, str]:

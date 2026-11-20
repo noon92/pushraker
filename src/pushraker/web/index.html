@@ -2840,7 +2840,7 @@
     function bkSecrets() {
         const on = bkHow === 'download' && el('bk-secrets').checked;
         const day = new Date().toISOString().slice(0, 10);
-        el('bk-out-file').textContent = `📄 pushraker-backup-${(state.name || 'Printer').replace(/[^A-Za-z0-9._-]+/g, '-')}-${day}${on ? '-with-secrets' : ''}.json`;
+        el('bk-out-file').textContent = `📄 pushraker-backup-${(state.name || 'Printer').replace(/[^A-Za-z0-9._-]+/g, '-')}-${day}.json`;
         el('bk-out-red').textContent = on
             ? '⚠️ This file contains your tokens and passwords. Anyone who has it can send notifications as you and use your email account\'s SMTP login. Keep it somewhere safe.'
             : '';

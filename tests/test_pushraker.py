@@ -1437,12 +1437,12 @@ async def test_file_mode():
         full = await server.endpoints["/server/pushraker/backup"](
             WebRequest("POST", {"how": "download", "secrets": True}))
         check("backup with secrets, when a download asks: apart from the "
-              "settings, and the file's name says so",
+              "settings, under the same file name",
               full["backup"]["secrets"] == {
                   "secret": "tok123", "email_password": "pw456",
                   "webhook_url": "https://hook.example.com/abc789"}
               and "tok123" not in json.dumps(full["backup"]["settings"])
-              and full["name"].endswith("-with-secrets.json"), full["name"])
+              and full["name"] == bk["name"], full["name"])
         got = await server.endpoints["/server/pushraker/backup"](
             WebRequest("POST", {"how": "restore", "backup": full["backup"]}))
         check("restore hands the file's secrets to the page",

@@ -735,7 +735,7 @@ Not in a backup: tokens, passwords and the webhook URL (what
 `pushraker.secrets` holds; a webhook URL usually has a token in it).
 Restoring on another printer, or after a reset, needs them entered again,
 unless you tick **Include tokens, passwords and the webhook URL** when
-downloading: the file is then named `…-with-secrets.json`. ⚠️ Anyone who
+downloading (Download then waits 5 seconds). ⚠️ Anyone who
 has that file can send notifications as you and use your email account's
 SMTP login; it isn't encrypted. A backup sent by push or email never has
 them.

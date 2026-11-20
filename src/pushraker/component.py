@@ -1484,7 +1484,7 @@ class PushNotifications:
         secrets = how == "download" and args.get("secrets") is True
         data = cfgmod.backup(s, __version__,
                              now.isoformat(timespec="seconds"), secrets)
-        name = cfgmod.backup_name(s, now.strftime("%Y-%m-%d"), secrets)
+        name = cfgmod.backup_name(s, now.strftime("%Y-%m-%d"))
         if how == "download":
             if secrets:
                 # They don't otherwise leave the printer: on the record
