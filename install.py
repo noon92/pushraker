@@ -19,8 +19,9 @@ What it does:
     component, apprise >= 1.2, Jinja2 >= 3.0, requests (it never adds,
     upgrades or removes a package of Moonraker's Python);
   * downloads the pushraker wheel from PyPI (checked against the sha256
-    PyPI gives) and unpacks it into <data path>/../pushraker/lib, outside
-    the firmware;
+    PyPI gives) and unpacks it into <data path>/../pushraker-install/lib,
+    outside
+    the firmware (pushraker-install/, marked as install.py's own);
   * has the package write the two things Moonraker needs: one component
     file in Moonraker's components folder and a [pushraker] section in
     moonraker.conf (backed up first as moonraker.conf.bak-pushraker);
@@ -29,7 +30,8 @@ What it does:
 
 Run it again to upgrade or to put back what a firmware update removed: the
 settings (printer_data/config/pushraker.conf) are kept. --uninstall takes
-it all out again except the settings (--purge: those too).
+it all out again except the settings (--purge: those too), also when
+Moonraker no longer starts (from the paths recorded at install).
 
 Python 3.7 syntax, standard library only: it runs on the printer's own
 python3.
@@ -54,6 +56,13 @@ import zipfile
 PACKAGE = "pushraker"
 PYPI = "https://pypi.org/pypi/pushraker"
 BACKUP = ".bak-pushraker"
+# install.py's own folder (code under lib/) and the file that marks it as
+# install.py's: only a folder with this file is ever deleted, and it holds
+# the paths found at install, for an uninstall while Moonraker is down
+DEFAULT_DIR = "pushraker-install"
+MARKER = ".pushraker-install.json"
+# Where an install folder is looked for when Moonraker isn't running
+SEARCH = ("/mnt/UDISK", "/usr/data", "~", "/home/*", "/root")
 MIN_PYTHON = (3, 7)
 NEEDS = (("apprise", (1, 2)), ("jinja2", (3, 0)), ("requests", None))
 OPTIONAL = (("PIL", "Pillow", (8, 2)),)
@@ -63,6 +72,10 @@ PAGE = "/server/pushraker/page"
 
 class Stop(Exception):
     """A reason to stop, already worded for the user."""
+
+
+class NoMoonraker(Stop):
+    """No running Moonraker process."""
 
 
 def say(msg=""):
@@ -336,9 +349,19 @@ def restart(m, port):
              "code is loaded.")
 
 
-def wait_healthy(port, want_loaded):
-    """Wait for Moonraker to answer again, with pushraker loaded (or not).
-    Returns (ok, info)."""
+def klippy_connected(port):
+    """Whether Moonraker is connected to Klipper now (False if it doesn't
+    answer): a restart is only expected to bring back what was there."""
+    try:
+        return bool((api(port, "/server/info", timeout=5.) or {})
+                    .get("klippy_connected"))
+    except (OSError, ValueError):
+        return False
+
+
+def wait_healthy(port, want_loaded, need_klippy=True):
+    """Wait for Moonraker to answer again, with pushraker loaded (or not),
+    and connected to Klipper if it was before. Returns (ok, info)."""
     deadline = time.monotonic() + HEALTHY_WAIT
     info = None
     time.sleep(3.)
@@ -353,7 +376,7 @@ def wait_healthy(port, want_loaded):
             if want_loaded and PACKAGE in failed:
                 return False, info
             if (PACKAGE in comps) == want_loaded and \
-                    info.get("klippy_connected"):
+                    (info.get("klippy_connected") or not need_klippy):
                 return True, info
         time.sleep(2.)
     return False, info
@@ -525,12 +548,13 @@ def parse(argv):
     p.add_argument("--name", default="",
                    help="the printer's default name in notifications")
     p.add_argument("--install-dir", default="",
-                   help="where pushraker's code goes (default: pushraker/ "
-                        "next to Moonraker's data folder)")
+                   help="where pushraker's code goes (default: "
+                        "pushraker-install/ next to Moonraker's data folder; "
+                        "an existing folder must be empty or install.py's)")
     p.add_argument("--klipper", action="store_true",
-                   help="also include pushraker's Klipper macros from "
-                        "printer.cfg (for the print-end snapshot hooks; "
-                        "Klipper needs a restart)")
+                   help="also add pushraker's Klipper macro file and an "
+                        "[include] for it to printer.cfg (for the print-end "
+                        "snapshot hooks; Klipper needs a restart)")
     p.add_argument("--no-restart", action="store_true",
                    help="change the files only; restart Moonraker yourself")
     p.add_argument("--pid", type=int, default=0,
@@ -543,7 +567,7 @@ def find(a, proc="/proc"):
     if a.pid:
         procs = [(p, argv) for p, argv in procs if p == a.pid]
     if not procs:
-        raise Stop("No running Moonraker found (no python process running "
+        raise NoMoonraker("No running Moonraker found (no python process running "
                    "moonraker.py, moonraker/server.py or -m moonraker). "
                    "Start Moonraker and run this again.")
     if len(procs) > 1:
@@ -553,8 +577,9 @@ def find(a, proc="/proc"):
     m = describe(*procs[0], proc=proc)
     m["components"] = components_dir(m)
     m["restart"] = restart_method(m, proc)
-    install_dir = a.install_dir or os.path.join(
-        os.path.dirname(m["data_path"]), PACKAGE)
+    install_dir = os.path.abspath(os.path.expanduser(
+        a.install_dir or os.path.join(os.path.dirname(m["data_path"]),
+                                      DEFAULT_DIR)))
     m["install_dir"] = install_dir
     m["lib"] = os.path.join(install_dir, "lib")
     m["port"] = moonraker_port(m["conf"])
@@ -562,7 +587,8 @@ def find(a, proc="/proc"):
 
 
 def show(m):
-    say(f"Moonraker: pid {m['pid']}, {m['python']}")
+    say(f"Moonraker: {'pid ' + str(m['pid']) if m.get('pid') else 'not running'}"
+        f", {m['python']}")
     say(f"  components: {m['components']}")
     say(f"  config:     {m['conf']}")
     say(f"  data:       {m['data_path']}")
@@ -606,6 +632,71 @@ def check_floor(m):
     return probe
 
 
+def marker(install_dir):
+    return os.path.join(install_dir, MARKER)
+
+
+def claim_dir(install_dir):
+    """The install folder is new, empty or install.py's own; anything
+    else (a clone of the repo, a home folder) is left alone."""
+    if not os.path.isdir(install_dir):
+        if os.path.exists(install_dir):
+            raise Stop(f"{install_dir} exists and isn't a folder; choose "
+                       f"another --install-dir.")
+        return
+    if os.listdir(install_dir) and not os.path.isfile(marker(install_dir)):
+        raise Stop(f"{install_dir} already exists and wasn't made by "
+                   f"install.py (no {MARKER} in it); choose another "
+                   f"--install-dir, or empty it.")
+
+
+RECORDED = ("python", "components", "conf", "data_path", "log", "port",
+            "restart", "install_dir", "lib")
+
+
+def write_marker(m, version):
+    data = {k: m[k] for k in RECORDED}
+    data["version"] = version
+    data["installed"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    with open(marker(m["install_dir"]) + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=1)
+    os.replace(marker(m["install_dir"]) + ".tmp", marker(m["install_dir"]))
+
+
+def read_marker(install_dir):
+    try:
+        with open(marker(install_dir), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not all(k in data for k in RECORDED):
+        return None
+    data["restart"] = tuple(data["restart"])
+    data["pid"] = 0
+    data["script"] = None
+    return data
+
+
+def recorded_installs(a):
+    """The install folders install.py made, from --install-dir or the
+    usual places."""
+    import glob
+    if a.install_dir:
+        dirs = [os.path.abspath(os.path.expanduser(a.install_dir))]
+    else:
+        dirs = []
+        for base in SEARCH:
+            for d in glob.glob(os.path.join(os.path.expanduser(base),
+                                            DEFAULT_DIR)):
+                dirs.append(os.path.abspath(d))
+    out = []
+    for d in dict.fromkeys(dirs):
+        m = read_marker(d)
+        if m is not None:
+            out.append(m)
+    return out
+
+
 def ensure_idle(m, a):
     if a.no_restart:
         return
@@ -619,6 +710,7 @@ def ensure_idle(m, a):
 def install(a, m):
     probe = check_floor(m)
     ensure_idle(m, a)
+    claim_dir(m["install_dir"])
     os.makedirs(m["install_dir"], exist_ok=True)
     work = tempfile.mkdtemp(prefix="pushraker_", dir=m["install_dir"])
     try:
@@ -630,13 +722,16 @@ def install(a, m):
         version = unpack(wheel, m["lib"])
     finally:
         shutil.rmtree(work, ignore_errors=True)
+    write_marker(m, version)
     say(f"pushraker {version} unpacked into {m['lib']}")
     run_cli(m, "install", cli_args(m, a))
     if a.no_restart:
         say("Restart Moonraker to load pushraker.")
         return 0
+    # Klipper down or in error before: not a reason to undo the install
+    need_klippy = klippy_connected(m["port"])
     restart(m, m["port"])
-    ok, info = wait_healthy(m["port"], True)
+    ok, info = wait_healthy(m["port"], True, need_klippy)
     if not ok:
         warn("Moonraker didn't come back with pushraker loaded within "
              f"{HEALTHY_WAIT:.0f} s. Taking pushraker out again.")
@@ -644,50 +739,108 @@ def install(a, m):
             say("  " + line)
         run_cli(m, "uninstall", cli_args(m, a))
         restart(m, m["port"])
-        back, _ = wait_healthy(m["port"], False)
+        back, _ = wait_healthy(m["port"], False, need_klippy)
         raise Stop("pushraker was removed again; Moonraker is "
                    + ("running." if back else
                       "NOT answering: check it (" + m["log"] + ")."))
     say("")
     say(f"pushraker {version} is running in Moonraker "
         f"(Python {'.'.join(map(str, probe['python']))}).")
-    say(f"Settings page: http://{lan_ip()}:{m['port']}{PAGE}")
+    say(f"Settings page (served by Moonraker): "
+        f"http://{lan_ip()}:{m['port']}{PAGE}")
+    say("  (Through the printer's own web interface only where its web "
+        "server is set up for it: see the README.)")
     say(f"Settings file: {os.path.join(m['data_path'], 'config', 'pushraker.conf')}")
     say("Run this command again to update, or after a firmware update "
         "removed it; the settings are kept.")
     return 0
 
 
-def uninstall(a, m):
-    ensure_idle(m, a)
+def take_out(a, m):
     args = cli_args(m, a)
     if a.purge:
         args.append("--purge")
-    if os.path.isfile(os.path.join(m["lib"], PACKAGE, "__main__.py")):
+    try:
         run_cli(m, "uninstall", args)
-    else:
+    except Stop:
         remove_by_hand(m)
+    if not os.path.isfile(os.path.join(m["lib"], PACKAGE, "__main__.py")):
+        remove_by_hand(m)
+
+
+def remove_install_dir(m):
+    if os.path.isfile(marker(m["install_dir"])):
+        shutil.rmtree(m["install_dir"], ignore_errors=True)
+        say(f"Removed {m['install_dir']}")
+    elif os.path.isdir(m["install_dir"]):
+        say(f"Left {m['install_dir']} alone: it isn't marked as "
+            f"install.py's ({MARKER}).")
+
+
+def uninstall(a, m):
+    ensure_idle(m, a)
+    need_klippy = klippy_connected(m["port"])
+    take_out(a, m)
     if not a.no_restart:
         restart(m, m["port"])
-        ok, _ = wait_healthy(m["port"], False)
+        ok, _ = wait_healthy(m["port"], False, need_klippy)
         if not ok:
             raise Stop("Moonraker didn't come back healthy without "
                        f"pushraker; check it ({m['log']}). pushraker's "
                        f"code is left at {m['install_dir']}.")
-    shutil.rmtree(m["install_dir"], ignore_errors=True)
-    say(f"Removed {m['install_dir']}")
+    remove_install_dir(m)
     say("pushraker is uninstalled"
         + ("." if a.purge else "; its settings are kept (--purge removes "
            "them)."))
     return 0
 
 
-def main(argv=None):
+def uninstall_offline(a, why):
+    """--uninstall with no Moonraker running (the case that matters most:
+    it doesn't start any more): the paths recorded at install, then start
+    Moonraker. There is no printing check (it would go through Moonraker);
+    starting Moonraker doesn't touch a print Klipper is running."""
+    found = recorded_installs(a)
+    if not found:
+        raise Stop(f"{why}\nNo install made by install.py found either "
+                   f"(looked for {DEFAULT_DIR}/{MARKER} in "
+                   f"{', '.join(SEARCH)}); give --install-dir.")
+    if len(found) > 1:
+        raise Stop("Several installs found; choose one with --install-dir:\n"
+                   + "\n".join("  " + m["install_dir"] for m in found))
+    m = found[0]
+    say("Moonraker isn't running; uninstalling from what install.py "
+        f"recorded in {marker(m['install_dir'])}")
+    show(m)
+    take_out(a, m)
+    how, what = m["restart"]
+    if a.no_restart or how == "api":
+        remove_install_dir(m)
+        say("Start Moonraker yourself now"
+            + ("." if a.no_restart else " (it has no service install.py "
+               "knows how to start)."))
+        return 0
+    restart(m, m["port"])
+    ok, _ = wait_healthy(m["port"], False, False)
+    remove_install_dir(m)
+    if not ok:
+        raise Stop(f"pushraker is out, but Moonraker didn't answer within "
+                   f"{HEALTHY_WAIT:.0f} s: check its log ({m['log']}).")
+    say("Moonraker is running again, without pushraker.")
+    return 0
+
+
+def main(argv=None, proc="/proc"):
     a = parse(sys.argv[1:] if argv is None else argv)
     try:
         if sys.version_info[:2] < MIN_PYTHON:
             raise Stop("install.py needs Python 3.7 or newer to run.")
-        m = find(a)
+        try:
+            m = find(a, proc)
+        except NoMoonraker as e:
+            if a.uninstall:
+                return uninstall_offline(a, str(e))
+            raise
         show(m)
         return uninstall(a, m) if a.uninstall else install(a, m)
     except Stop as e:

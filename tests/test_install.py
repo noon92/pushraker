@@ -246,6 +246,88 @@ def run_install_tests():
           and open(conf).read() == "[server]\nport: 7125\n\n[history]\n"
           and "[pushraker]" in open(conf + inst.BACKUP).read(),
           repr(open(conf).read()))
+
+    # The floor on a real tree: a Moonraker without job_state
+    comps2 = os.path.join(work, "old_moonraker", "components")
+    os.makedirs(comps2)
+    conf2 = os.path.join(work, "old_moonraker", "moonraker.conf")
+    open(conf2, "w").write("[server]\n")
+    try:
+        inst.check_floor({"components": comps2, "conf": conf2,
+                          "python": sys.executable,
+                          "lib": os.path.join(work, "x", "lib")})
+        check("no job_state component: refused", False)
+    except inst.Stop as e:
+        check("no job_state component: refused, saying what is missing",
+              "job_state" in str(e) and "November 2021" in str(e)
+              and "issues" in str(e), str(e))
+
+    # Never a folder install.py didn't make
+    clone = os.path.join(work, "home", "pushraker")
+    os.makedirs(os.path.join(clone, ".git"))
+    try:
+        inst.claim_dir(clone)
+        check("an existing folder without the marker is refused", False)
+    except inst.Stop as e:
+        check("an existing folder without the marker is refused",
+              inst.MARKER in str(e) and os.path.isdir(clone))
+    inst.claim_dir(os.path.join(work, "home", "new"))     # absent: fine
+    with contextlib.redirect_stdout(io.StringIO()):
+        inst.remove_install_dir({"install_dir": clone})
+    check("...and never deleted", os.path.isdir(os.path.join(clone, ".git")))
+
+    # Uninstall with Moonraker not running: from the marker
+    idir = os.path.join(work, "UDISK", inst.DEFAULT_DIR)
+    os.makedirs(os.path.join(idir, "lib"))
+    comps3 = os.path.join(work, "UDISK", "moonraker", "components")
+    os.makedirs(comps3)
+    shim = os.path.join(comps3, "pushraker.py")
+    open(shim, "w").write("# pushraker shim\n")
+    conf3 = os.path.join(work, "UDISK", "moonraker", "moonraker.conf")
+    open(conf3, "w").write("[server]\n\n[pushraker]\nname: Hi\n")
+    m = {"python": sys.executable, "components": comps3, "conf": conf3,
+         "data_path": os.path.join(work, "UDISK", "printer_data"),
+         "log": "/nonexistent.log", "port": 7125,
+         "restart": ("api", ""), "install_dir": idir,
+         "lib": os.path.join(idir, "lib")}
+    inst.write_marker(m, "1.0")
+    check("the marker records the paths", inst.read_marker(idir)["conf"]
+          == conf3 and inst.read_marker(idir)["restart"] == ("api", ""))
+    empty = os.path.join(work, "proc_empty")
+    os.makedirs(empty)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = inst.main(["--uninstall", "--install-dir", idir], proc=empty)
+    check("Moonraker down: --uninstall works from the recorded paths",
+          rc == 0 and not os.path.exists(shim)
+          and "[pushraker]" not in open(conf3).read()
+          and not os.path.exists(idir)
+          and "Start Moonraker yourself" in out.getvalue(), out.getvalue())
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = inst.main(["--install-dir", idir], proc=empty)
+    check("Moonraker down: install refuses", rc == 1
+          and "No running Moonraker" in out.getvalue())
+
+    # The health check: Klipper only required when it was connected before
+    answers = [{"components": ["pushraker"], "klippy_connected": False}]
+    real_api, real_sleep, real_wait = inst.api, inst.time.sleep, \
+        inst.HEALTHY_WAIT
+    inst.api = lambda *a, **k: answers[0]
+    inst.time.sleep = lambda *_: None
+    inst.HEALTHY_WAIT = 0.2
+    try:
+        ok_down, _ = inst.wait_healthy(7125, True, need_klippy=False)
+        ok_need, _ = inst.wait_healthy(7125, True, need_klippy=True)
+        answers[0] = {"components": [], "failed_components": ["pushraker"],
+                      "klippy_connected": True}
+        ok_failed, _ = inst.wait_healthy(7125, True, need_klippy=False)
+    finally:
+        inst.api, inst.time.sleep = real_api, real_sleep
+        inst.HEALTHY_WAIT = real_wait
+    check("Klipper down before and after: a loaded pushraker is fine",
+          ok_down and not ok_need)
+    check("pushraker among failed components: not fine", not ok_failed)
     return _failures
 
 

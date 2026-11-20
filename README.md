@@ -47,18 +47,20 @@ python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubuserco
 It finds the running Moonraker, checks the requirements above (it never
 adds, upgrades or removes a package of Moonraker's Python), downloads
 pushraker from PyPI (sha256-checked), unpacks it next to Moonraker's data
-folder (on the Hi: `/mnt/UDISK/pushraker`), adds one component file to
+folder (on the Hi: `/mnt/UDISK/pushraker-install`, marked as install.py's
+own: it never deletes a folder it didn't make), adds one component file to
 Moonraker's components folder and `[pushraker]` to `moonraker.conf`
 (backed up first as `moonraker.conf.bak-pushraker`), restarts Moonraker
 (never while printing), checks it loaded, and prints the settings page's
 address: `http://<printer>:7125/server/pushraker/page`, served by Moonraker
-itself, so no web server change is needed. Klipper's config is left alone
+itself, so no web server change is needed (through the printer's own web
+interface's port only where its web server is set up for it, as below). Klipper's config is left alone
 (`--klipper` adds the print-end snapshot macros).
 
 Run the same command again to update, or after a firmware update removed
 it: the settings are kept. Options go after the command
-(`python3 -c "..." --uninstall`): `--uninstall` (`--purge` also removes the
-settings), `--version X`, `--wheel FILE`, `--name`, `--no-restart`;
+(`python3 -c "..." --uninstall`): `--uninstall` (also when Moonraker no
+longer starts; `--purge` also removes the settings), `--version X`, `--wheel FILE`, `--name`, `--no-restart`;
 `python3 install.py --help` lists them all.
 
 ## Install (any Moonraker printer)
