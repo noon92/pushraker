@@ -83,9 +83,11 @@ page and is sent like any other.
 
 - Moonraker with its `job_state` component (upstream since November 2021;
   the older flat `moonraker.py` layout is fine, as on the Creality Hi).
-- The Python Moonraker runs with: 3.7 or newer, with apprise 1.2 or newer,
-  Jinja2 3.0 or newer and requests. Pillow (8.2 or newer) is optional:
-  without it notifications go without spool pictures and preview images.
+- The Python Moonraker runs with: 3.7 or newer with install.py (3.9 or
+  newer for `pip install`), with apprise 1.2 or newer, Jinja2 3.0 or newer
+  and requests. Pillow (8.2 or newer) is optional with install.py (pip
+  installs it): without it notifications go without spool pictures and
+  preview images.
 
 ## Install on a printer whose Moonraker came with its firmware (over SSH)
 
@@ -139,12 +141,13 @@ python -m pushraker install      # ~/moonraker and ~/printer_data by default
 ```
 
 `install` puts a one-file shim into Moonraker's `components/` folder, adds
-`[pushraker]` to `moonraker.conf`, includes the Klipper macro
-file from `printer.cfg`, and creates `printer_data/config/pushraker.conf`.
-Restart Moonraker and Klipper. Then serve the settings page
-(`src/pushraker/web/index.html`, or `python -c "import pushraker, os;
-print(os.path.dirname(pushraker.__file__) + '/web')"`) from the same nginx
-that serves Fluidd or Mainsail, e.g.
+`[pushraker]` to `moonraker.conf`, and includes the Klipper macro file
+from `printer.cfg` (`--no-klipper` skips it). Restart Moonraker and
+Klipper; pushraker writes `printer_data/config/pushraker.conf` at its
+first start. Open `http://<printer>:7125/server/pushraker/page`.
+Optionally, serve the page from the nginx that serves Fluidd or Mainsail
+too (`src/pushraker/web/index.html`, or `python -c "import pushraker, os;
+print(os.path.dirname(pushraker.__file__) + '/web')"`), e.g.
 
 ```nginx
 location /notifications/ {
@@ -153,8 +156,7 @@ location /notifications/ {
 }
 ```
 
-and open `http://<printer>/notifications/`. (Moonraker also serves the page
-itself at `http://<printer>:7125/server/pushraker/page`.) The page talks to Moonraker
+and open `http://<printer>/notifications/`. The page talks to Moonraker
 through the `/server/` proxy of that nginx; without one it falls back to
 Moonraker's own port, which needs the page's origin in `cors_domains`
 under `[authorization]` in `moonraker.conf`. With Moonraker's
@@ -176,18 +178,28 @@ it out again; `--purge` also removes the settings and secrets.
   (also editable by hand; the component re-reads it when it changes).
 - `printer_data/pushraker.secrets`: tokens and passwords, mode 0600,
   outside the config folder so Moonraker never serves it.
-- Moonraker endpoints: `GET/POST /server/pushraker/config`,
-  `POST /server/pushraker/test`, `GET /server/pushraker/status` (also
-  under `/server/push_notifications/`, the 0.1 names).
+- Moonraker endpoints: `GET /server/pushraker/page` (the settings page),
+  `GET/POST /server/pushraker/config`, `POST /server/pushraker/test`,
+  `GET /server/pushraker/status`, `POST /server/pushraker/backup`, and the
+  page's helpers (`objects`, `preview`, `preview_image`, `codemirror`,
+  `codemirror_js`); all but the page also under
+  `/server/push_notifications/`, the 0.1 names.
 
 ## Layout
 
 - `src/pushraker/component.py` — the Moonraker component
 - `src/pushraker/settings.py` — the settings: validation, storage, the
   Apprise URLs built from them
-- `src/pushraker/printers/` — what differs between printers (the harness
-  side of the package), one module per printer; `snapmaker_u1.py` is the
-  first
+- `src/pushraker/printers/` — what differs between printers, one module
+  per printer: `snapmaker_u1.py`, `creality.py` (the Creality Hi); the
+  generic `Printer` in `__init__.py`
+- `src/pushraker/compat.py` — older Moonraker versions
+- `src/pushraker/discover.py` — camera servers and web pages on the printer
+- `src/pushraker/preprint.py` — pre-print calibrations from stock Klipper
+- `src/pushraker/gmeta.py`, `src/pushraker/thumbs.py` — estimate, layers,
+  filament and the render from the G-code file itself
+- `src/pushraker/ntfy.py` — ntfy with an access token on Apprise versions
+  that can't send one
 - `src/pushraker/images.py` — spool pictures (Pillow)
 - `src/pushraker/email_html.py`, `src/pushraker/discord.py` — email card,
   Discord senders
@@ -197,7 +209,7 @@ it out again; `--purge` also removes the settings and secrets.
 - `install.py` — the one-line install over SSH (standard library only; not
   part of the package)
 - `docs/guide.md` — the user guide
-- `docs/porting-guide.md` — for agents bringing pushraker to another printer
+- `docs/porting-guide.md` — bringing pushraker to another printer
 - `tests/` — `python tests/test_pushraker.py` (the component against a
   stand-in Moonraker; also runs `test_settings.py`)
 - `tests/test_install.py` — install.py against a fake `/proc` (also run by
