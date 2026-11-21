@@ -2190,6 +2190,34 @@ async def test_notification_files():
         check("a camera this printer doesn't have: the one here stays",
               (back["template"] or {}).get("camera", "") == here,
               (back, here))
+        # The topic: private, in neither direction
+        c.settings["templates"]["paused"] = dict(
+            c.settings["templates"].get("paused") or {}, topic="mine")
+        back = await call("notification_import", file=stock(
+            "paused", topic="theirs"))
+        check("a topic in a file is ignored: the one here stays",
+              back["template"].get("topic") == "mine", back)
+        out = await call("notification", via="download", notification=stock(
+            "paused", enabled=True))
+        check("...and never exported, though this one has a topic",
+              "topic" not in out["file"]["notification"], out["file"])
+        r = await call("notification_inspect", file=stock(
+            "paused", topic="theirs"))
+        check("...named under Not used",
+              "Not used by this version: topic." in r["notes"], r["notes"])
+        c.settings["custom"] = [dict(pn.cfgmod.CUSTOM_DEFAULT,
+                                     name="Every5th", topic="mine2")]
+        back = await call("notification_import", file=dict(
+            custom, notification=dict(custom["notification"],
+                                      topic="theirs")))
+        check("...a custom one of the same name keeps its own",
+              back["custom"]["topic"] == "mine2", back)
+        back = await call("notification_import", file=dict(
+            custom, name="Brand_new", notification=dict(
+                custom["notification"], topic="theirs")))
+        check("...a new one has none", back["custom"]["topic"] == "", back)
+        c.settings["custom"] = []
+        c.settings["templates"].pop("paused", None)
         # Refused, with why
         for what, file, why in (
                 ("no kind", {"pushraker_notification": 1, "notification": {}},
@@ -2250,7 +2278,54 @@ async def test_notification_files():
             except Exception as e:
                 bad.append((b[:60], str(e)))
         check("docs/notification-files.md: every example imports, with no "
-              "unknown values or keys", len(blocks) >= 7 and not bad, bad)
+              "unknown values or keys", len(blocks) >= 8 and not bad, bad)
+        prompt = re.search(r"```text\n(.*?)```", doc, re.S).group(1)
+        check("...the prompt to paste: short, plain, the three raw links",
+              len(prompt.split()) <= 150 and all(
+                  "https://raw.githubusercontent.com/noon92/pushraker/main/"
+                  f"docs/{d}.md" in prompt for d in (
+                      "notification-files", "values", "values-by-printer"))
+              and "`" not in prompt and "**" not in prompt,
+              len(prompt.split()))
+        # noon's example, for real: Wednesdays, layer 35, PLA, render, once
+        ex = json.loads(blocks[-1])
+        today = datetime.datetime.now().isoweekday()
+        ex["notification"]["when"] = ex["notification"]["when"].replace(
+            "weekday_number == 3", f"weekday_number == {today}")
+        made = (await call("notification_import", file=ex))["custom"]
+        log = []
+        ntfy = FakeService(log, "ntfy")
+        rid = pn.cfgmod.custom_rid(made["name"])
+        keep_s, keep_r = c.settings, c.rows
+        c.store.changed = lambda: False
+        await start_job(server)
+        await asyncio.sleep(0.1)
+        c.settings = dict(c.settings, custom=[made])
+        c.rows = {rid: ("render", [pn.Destination("ntfy", ntfy, False)])}
+        c._job_slicer = {"filament_type": "PLA;PETG",
+                         "filament used [g]": "10.69, 0.00"}
+        for layer in (34, 35, 35):
+            c._custom_sent.pop(made["name"], None)   # past the 10 s gap
+            c._custom_fire("layer", {"layer": layer,
+                                     "previous_layer": layer - 1})
+            await asyncio.sleep(0.15)
+        check("noon's example: sent at layer 35 only, once per print job",
+              len(log) == 1 and "layer 35" in log[0]["title"],
+              [e["title"] for e in log])
+        log.clear()
+        c._job_number += 1
+        made2 = dict(made, name=made["name"], when=made["when"].replace(
+            '"PLA"', '"PETG"'))
+        c.settings = dict(c.settings, custom=[made2])
+        c._custom_sent.pop(made["name"], None)
+        c._custom_fire("layer", {"layer": 35, "previous_layer": 34})
+        await asyncio.sleep(0.15)
+        check("...a filament in the project but not printed doesn't count",
+              not log, [e["title"] for e in log])
+        c.settings, c.rows = keep_s, keep_r
+        c._job_active = False
+        STATE["print_stats"] = ps("standby")
+        del c.store.changed
         # Sent by push / email, the backup's way
         pn.apprise.Apprise = FakeAp
         c.settings = dict(c.settings, server="https://ntfy.example.com",

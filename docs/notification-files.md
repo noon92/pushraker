@@ -9,8 +9,9 @@ email), and **Import…** under the custom notifications.
   (push, email, priority), its title and contents (Jinja templates), its
   image and camera, and the settings under its row.
 - **Never in a file**: tokens, passwords, addresses, server settings,
-  and a notification's own topic (on a public ntfy server a topic is as
-  good as a password).
+  and a notification's own topic (ntfy topic or Telegram topic: private to
+  you). On import the notification keeps the topic it has here, if any; a
+  topic in a file is ignored and named under "Not used".
 - Import checks a file like Save does and says what doesn't fit this
   printer. Nothing is saved until **Save & Apply**; **Discard changes**
   undoes it.
@@ -186,9 +187,42 @@ after a print.
    "priority": "high", "repeat": "minutes", "repeat_minutes": 30}}
 ```
 
+**7. Several conditions, once per print**: on Wednesdays, at layer 35, if
+the print uses PLA, with the render instead of a photo. `weekday_number` is
+1 (Monday) to 7, in the time zone set on the page; `job.filaments.materials`
+lists the materials the print really uses, from the file on any printer;
+`repeat: job` sends it once per print job.
+
+```json
+{"pushraker_notification": 1, "kind": "custom", "name": "wednesday_layer_35",
+ "notification": {
+   "evaluate": "layer",
+   "when": "event.time.weekday_number == 3 and event.layer == 35 and \"PLA\" in job.filaments.materials",
+   "title": "🧵 {{ machine.name }}: layer 35 of {{ job.file }}",
+   "contents": "{{ job.time.remaining|duration }} left",
+   "image": "render", "repeat": "job"}}
+```
+
 ## Writing one with an AI assistant
 
-Give it this page and [values](values.md). Rules for the assistant:
+Paste this into any AI assistant, and add what you want at the end:
+
+```text
+pushraker sends 3D printer notifications from Klipper and Moonraker. Help me create one importable notification JSON file.
+
+First read these, and use only the keys and values listed there. Never invent names.
+https://raw.githubusercontent.com/noon92/pushraker/main/docs/notification-files.md
+https://raw.githubusercontent.com/noon92/pushraker/main/docs/values.md
+https://raw.githubusercontent.com/noon92/pushraker/main/docs/values-by-printer.md
+
+Before writing it, ask me anything I haven't said: printer model; push, email or both; priority; image (render, camera, graphic or none); title and wording; when it fires and how often (once per print or every time); whether to show time left. Then confirm your understanding in one sentence.
+
+Output exactly one JSON code block that I can save as a .json file. Omit "from" and any topic. Then explain in two lines how to import it (Import... on the settings page) and what each condition does.
+
+What I want:
+```
+
+Rules for the assistant:
 
 - Write exactly one JSON object in the format above. `pushraker_notification`
   is `1`. Leave out `from`.

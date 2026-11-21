@@ -1756,19 +1756,18 @@ def notification_read(data: Any) -> Tuple[str, str, Dict[str, Any],
             raise ConfigError(f'No stock notification "{ident}" in this '
                               "version")
         allowed = set(ROW_KEYS) | set(FILE_TEMPLATE_FIELDS) | set(
-            ROW_OPTIONS.get(ident, ())) | {"topic"}
+            ROW_OPTIONS.get(ident, ()))
     elif kind == "custom":
         ident = str(data.get("name") or n.get("name") or "").strip()
         if not RX_CUSTOM_NAME.fullmatch(ident):
             raise ConfigError(
                 f'Custom notification "{ident}": the name is up to 32 '
                 "letters, digits and _, starting with a letter")
-        allowed = set(CUSTOM_DEFAULT) | {"name"}
+        allowed = set(FILE_CUSTOM_FIELDS) | {"name"}
     else:
         raise ConfigError('"kind" is "stock" or "custom"')
     unused = sorted(k for k in n if k not in allowed)
-    return kind, ident, {k: v for k, v in n.items() if k in allowed
-                         and k != "topic"}, unused
+    return kind, ident, {k: v for k, v in n.items() if k in allowed}, unused
 
 
 def notification_values(s: Dict[str, Any], kind: str, ident: str,

@@ -5321,7 +5321,8 @@ class PushNotifications:
             name = c["name"]
             try:
                 now = (await self._render(text, dict(
-                    ctx, event={"name": name, "trigger": "condition"}))
+                    ctx, event=dict(ctx["event"], name=name,
+                                    trigger="condition")))
                 ) == "1"
             except jj.TemplateTimeout as e:
                 self._custom_stuck[name] = c["when"]
@@ -5568,8 +5569,9 @@ class PushNotifications:
                 try:
                     true = (await self._render(
                         cfgmod.when_template(c["when"]), dict(
-                            ctx, event={"name": name, "trigger": kind,
-                                        **values}))) == "1"
+                            ctx, event=dict(ctx["event"], name=name,
+                                            trigger=kind, **values)))
+                            ) == "1"
                 except jj.TemplateTimeout as e:
                     self._custom_stuck[name] = c["when"]
                     logging.warning("[pushraker] ⚠️ custom notification "

@@ -15,7 +15,8 @@ It grew out of the Push Notifications feature of the
 where it is built in. User documentation: the
 [Push Notifications guide](docs/guide.md). Every template value:
 [values](docs/values.md) ([by printer](docs/values-by-printer.md)). One
-notification in a file, to share or to have an AI assistant write:
+notification in a file, to share or to have an AI assistant write (with a
+[prompt to paste](docs/notification-files.md#writing-one-with-an-ai-assistant)):
 [notification files](docs/notification-files.md). Bringing it to another
 printer: the [porting guide](docs/porting-guide.md).
 

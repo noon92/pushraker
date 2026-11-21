@@ -781,8 +781,9 @@ values it doesn't have or this version doesn't know, settings this
 version doesn't use). A stock notification replaces that one; a custom
 one replaces the one with its name (both after a 5-second countdown), or
 is added. Like Restore, it lands on the page: Save & Apply saves it. The
-format, with examples (also for having an AI assistant write one):
-[notification files](notification-files.md).
+format, with examples: [notification files](notification-files.md),
+which also has [a prompt to paste into an AI assistant](notification-files.md#writing-one-with-an-ai-assistant)
+so it writes one for you.
 
 **Restore…** loads a backup file onto the page. ⚠️ All settings are
 replaced by the backup's (excluding tokens, passwords and the webhook URL,
