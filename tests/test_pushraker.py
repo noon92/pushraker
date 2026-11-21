@@ -3486,6 +3486,49 @@ async def test_bed_cooled():
               and "after the print failed" in [
                   e for e in log if "bed cooled" in e["title"]][0]["body"],
               [(e["title"], e["body"]) for e in log])
+        # Moonraker restarted after a print ended (an update): the watch is
+        # resumed from Moonraker's job history, once
+        await asyncio.sleep(0.3)
+        log.clear()
+        STATE["print_stats"] = ps("complete")
+        c._status["print_stats"] = dict(STATE["print_stats"])
+        fname = STATE["print_stats"].get("filename") or ""
+        ended = {"end_time": time.time() - 600, "filename": fname,
+                 "status": "completed"}
+
+        class Hist:
+            cached_job_ids = ["000007"]
+
+            async def get_job(self, job_id):
+                return dict(ended) if job_id == "000007" else None
+        server.extra_components = {"history": Hist()}
+        STATE["heater_bed"] = {"temperature": 55.0, "target": 0.0}
+        c._spawn(c._resume_bed_watch())
+        await asyncio.sleep(0.25)
+        await c._resume_bed_watch()        # a second Klippy ready: no double
+        check("after a restart: resumed, not sent while the bed is hot",
+              c._bed_watching and not log, (c._bed_watching, log))
+        STATE["heater_bed"] = {"temperature": 38.0, "target": 0.0}
+        await asyncio.sleep(0.4)
+        cooled = [e for e in log if "bed cooled" in e["title"]]
+        check("...sent once when cool, timed from the print's end",
+              len(cooled) == 1
+              and "10m after the print finished" in cooled[0]["body"],
+              [(e["title"], e["body"]) for e in log])
+        log.clear()
+        STATE["heater_bed"] = {"temperature": 55.0, "target": 0.0}
+        ended["end_time"] = time.time() - pn.BED_COOL_MAX - 60
+        await c._resume_bed_watch()
+        ended["end_time"] = time.time() - 60
+        ended["filename"] = "another.gcode"
+        await c._resume_bed_watch()
+        STATE["print_stats"] = ps("printing")
+        c._status["print_stats"] = dict(STATE["print_stats"])
+        ended["filename"] = fname
+        await c._resume_bed_watch()
+        check("...not for an old end, another file, or while printing",
+              not c._bed_watching and not log, (c._bed_watching, log))
+        server.extra_components = {}
     finally:
         pn.BED_COOL_POLL = poll
 

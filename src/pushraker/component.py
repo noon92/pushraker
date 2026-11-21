@@ -1271,6 +1271,7 @@ class PushNotifications:
         self._found_cams: Dict[str, Dict[str, str]] = {}
         # Moonraker webcams whose snapshot gave no picture at Klippy ready
         self._bad_webcams: Set[str] = set()
+        self._bed_watching = False
         # The printer's web pages (pushraker.discover.web_pages), for the
         # page's Printer URL "Fill in"; found at Klippy ready
         self._web_pages: List[Dict[str, Any]] = []
@@ -4971,14 +4972,56 @@ class PushNotifications:
         return " & ".join(m for m, on in (("push", push), ("email", email))
                           if on)
 
-    async def _watch_bed(self, ended: str, filename: str) -> None:
+    async def _watch_bed(self, ended: str, filename: str,
+                         ended_ago: float = 0.) -> None:
         """Bed cooled: after a print ends (complete, cancelled or failed), once
         the bed is below the set temperature. Not when it already was (an
         unheated bed), when a new print job starts, or after
-        BED_COOL_MAX."""
-        if "bed_cooled" not in self.rows:
+        BED_COOL_MAX. `ended_ago`: seconds since the end, for a watch
+        resumed after a restart (_resume_bed_watch). One watch at a time."""
+        if "bed_cooled" not in self.rows or self._bed_watching:
             return
-        job, start = self._job_number, time.monotonic()
+        self._bed_watching = True
+        try:
+            await self._watch_bed_run(ended, filename, ended_ago)
+        finally:
+            self._bed_watching = False
+
+    async def _resume_bed_watch(self) -> None:
+        """After Moonraker restarted (an update, a crash) the bed watch of a
+        print that just ended is gone: resumed when Klipper reports the job
+        ended (complete, cancelled, error), Moonraker's job history has its
+        end within BED_COOL_MAX, and it is the same file. Sent once; the
+        watch itself skips a bed already cool."""
+        if "bed_cooled" not in self.rows or self._bed_watching:
+            return
+        ps = self._status.get("print_stats") or {}
+        ended = {"complete": "complete", "cancelled": "cancelled",
+                 "error": "error"}.get(str(ps.get("state") or ""))
+        if not ended:
+            return
+        try:
+            hist = self.server.lookup_component("history", None)
+            ids = list(getattr(hist, "cached_job_ids", None) or [])
+            job = await hist.get_job(ids[-1]) if ids else None
+        except Exception as e:
+            logging.debug("[pushraker] bed_cooled resume: %s", e)
+            job = None
+        if not isinstance(job, dict) or not job.get("end_time"):
+            return
+        filename = str(job.get("filename") or "")
+        if filename != str(ps.get("filename") or ""):
+            return
+        ago = time.time() - float(job["end_time"])
+        if not 0 <= ago < BED_COOL_MAX:
+            return
+        logging.info("[pushraker] bed_cooled: resuming the watch for %s "
+                     "(ended %s ago)", filename, format_duration(ago))
+        await self._watch_bed(ended, filename, ended_ago=ago)
+
+    async def _watch_bed_run(self, ended: str, filename: str,
+                             ended_ago: float) -> None:
+        job, start = self._job_number, time.monotonic() - ended_ago
         limit = self.bed_cool
         first = True
         while time.monotonic() - start < BED_COOL_MAX:
@@ -6094,6 +6137,8 @@ class PushNotifications:
                                        self._progress(), check_start=False)
         else:
             self._job_active = False
+        # A print that ended just before a restart: its Bed cooled
+        self._spawn(self._resume_bed_watch())
         if first_ready and "power_loss" in self.rows and \
                 self.printer.power_loss_env_paths and self._booted_recently():
             self._spawn(self._check_power_loss())
