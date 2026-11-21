@@ -874,7 +874,9 @@ python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubuserco
 - **Layers** (*First layer started*, *Layer complete*, `job.layer`): from
   Creality's own layer count.
 - **Camera**: choose **Printer camera**. The picture comes from the Hi's
-  own camera, through the firmware's own ffmpeg.
+  own camera, through the firmware's own ffmpeg. With a Printer URL set,
+  notifications get a **Live Camera** link to the Hi's own live view
+  (port 8000), which plays in any browser.
 - Notifications for hardware the Hi doesn't have (a chamber heater, driver
   temperatures) are left off the page.
 - Print hooks (the print-end snapshot lift) are not installed on the Hi;

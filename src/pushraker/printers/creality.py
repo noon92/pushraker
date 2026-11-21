@@ -48,6 +48,11 @@ MODEL_CODES: Dict[str, str] = {
 # `capture 0` makes cam_app append one H.264 frame to the timelapse file;
 # the firmware's own ffmpeg decodes it.
 CAPTURE = "/usr/bin/capture"
+# Creality's own live view (WebRTC): a page at / on port 8000 that plays the
+# camera in a plain browser (the Hi; confirmed by noon, 2026-11-21). The
+# notification's Live Camera link, on the Printer URL's host
+WEBRTC = "/usr/bin/webrtc_local"
+LIVE_STREAM = ":8000/"
 TIMELAPSE = "/mnt/UDISK/timelapse/main_output.h264"
 # delay_image.switch: Creality's timelapse on (1) or off (0); read by its
 # Klipper (virtual_sdcard.get_delay_photography_info) for every capture
@@ -92,6 +97,7 @@ class Creality(Printer):
     model_name = "Creality printer"
     system_configs: Sequence[str] = SYSTEM_CONFIGS
     capture_bin = CAPTURE
+    webrtc_bin = WEBRTC
     timelapse = TIMELAPSE
     print_refer = PRINT_REFER
     proc = "/proc"
@@ -106,8 +112,9 @@ class Creality(Printer):
 
     def cameras(self) -> Dict[str, Dict[str, str]]:
         if self.ffmpeg and os.path.exists(self.capture_bin):
+            live = LIVE_STREAM if os.path.exists(self.webrtc_bin) else ""
             return {CAMERA_NAME: {"snapshot": "printer:camera",
-                                  "stream": ""}}
+                                  "stream": live}}
         return {}
 
     def timelapse_on(self) -> bool:

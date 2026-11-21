@@ -74,6 +74,7 @@ Floor: Moonraker with the `job_state` component (Nov 2021 on), Python 3.7. Below
   3. **a decoder already in the firmware** (the Hi ships `/usr/bin/ffmpeg`, 200 KB plus shared libs: one frame in 0.8 s);
   4. only then a small download (budget 1–3 MB);
   5. never a WebRTC client.
+- [ ] The live link can still be the vendor's: the Hi's `webrtc_local` serves a page at `:8000/` that plays in a plain browser; the camera's stream `":8000/"` becomes the Live Camera link on the Printer URL's host.
 - [ ] The Hi (`printers/creality.py`, "Printer camera"): `capture 0` appends one self-contained H.264 frame (SPS, PPS, IDR) to Creality's **timelapse file** `/mnt/UDISK/timelapse/main_output.h264`.
   - Printing with timelapse on (`user_print_refer.json` `delay_image.switch`): read the last frame, read only.
   - Otherwise: capture, then restore the file exactly (size and times, or remove it).

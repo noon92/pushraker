@@ -83,9 +83,19 @@ open(a[-1], "wb").write(b"\\xff\\xd8\\xff" + src[-3:])
         with open(refer, "w") as f:
             f.write('{"delay_image": {"switch": %d}}' % on)
 
+    c.webrtc_bin = os.path.join(work, "no-webrtc_local")
     check("the camera is offered when ffmpeg and capture exist",
           c.cameras() == {"Printer camera": {"snapshot": "printer:camera",
                                              "stream": ""}})
+    c.webrtc_bin = cap   # any file that exists
+    check("with Creality's webrtc_local: the live page on port 8000",
+          c.cameras()["Printer camera"]["stream"] == ":8000/")
+    from pushraker import settings as _settings
+    _s = {"printer_url": "http://192.168.0.220/", "camera": "Printer camera"}
+    check("its Live Camera link is port 8000 on the Printer URL's host",
+          _settings.camera_live_url(dict(_settings.defaults(), **_s),
+                                    _settings.Env(cameras=c.cameras()))
+          == "http://192.168.0.220:8000/")
     nof = creality.Creality(["box"])
     nof.ffmpeg = None
     check("no ffmpeg: no camera", nof.cameras() == {}
