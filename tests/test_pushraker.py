@@ -3741,6 +3741,11 @@ async def test_preprint_generic():
           "row", c.printer.name == "generic" and c.printer.generic_preprint
           and "preprint_done" not in c.printer.rows_unavailable,
           (c.printer.name, getattr(c.printer, "generic_preprint", None)))
+    env = await c._env()
+    check("...and the settings offer the row (Env.preprint), so a saved "
+          "\"on\" is sent (missed on the Hi with .3f-.3l)",
+          env.preprint and "preprint_done" in pn.cfgmod.available_rows(
+              env), env.preprint)
     check("...the U1 doesn't (its own detection stays)",
           not pn.printers.SnapmakerU1(["bed_mesh", "z_tilt"])
           .generic_preprint)

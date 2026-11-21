@@ -1442,7 +1442,12 @@ class PushNotifications:
                           rows_unavailable=self.printer.rows_unavailable,
                           rows_missing=self.printer.missing_rows(),
                           ntfy_token=ntfy is None or ntfy.apprise_has_token(),
-                          preprint=bool(self.printer.preprint_calibrations),
+                          # The profile's own (the U1) or stock Klipper's
+                          # (printers.Printer.generic_preprint: the Hi)
+                          preprint=bool(self.printer.preprint_calibrations
+                                        or getattr(self.printer,
+                                                   "generic_preprint",
+                                                   False)),
                           time_methods=[
                               {"id": m, "label": l, "help": h}
                               for m, (l, h) in self._time_methods().items()],
