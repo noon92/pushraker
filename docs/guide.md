@@ -40,24 +40,33 @@ server), and/or to a webhook for home automation.
 | ⚠️ Warning | Camera | Faults that don't stop a print, e.g. a toolhead contact warning |
 | 🛑 Klipper shutdown | Camera | Heater, thermistor and MCU faults, emergency stop |
 | 🔌 Power loss recovery | Camera | Sent after boot when an interrupted print can be resumed, with a photo of the part (the camera gets up to 45 seconds to start) |
-| 🌡️ Driver running hot | Camera | When the X or Y stepper driver reaches the set temperature (default 105 °C; the TMC2240 reports its own temperature, and warns itself at 120 °C). Once per print job, and again after a pause, so a print job paused for the heat and resumed can warn a second time, while a driver hovering at the limit doesn't send one after another. Shows both drivers' temperatures |
+| 🌡️ Driver running hot | Camera | When the X or Y stepper driver reaches the set temperature (default 105 °C; TMC2240 and TMC5160 drivers report their own temperature; the TMC2240 warns itself at 120 °C). Once per print job, and again after a pause, so a print job paused for the heat and resumed can warn a second time, while a driver hovering at the limit doesn't send one after another. Shows both drivers' temperatures |
 | ▶️ Resumed after power loss | Camera | Sent instead of *Print started* when a recovered print continues (uses the *Resumed* settings), with time left and ETA |
 | 🧵 Not enough filament | Spools | Spoolman: when a toolhead the print uses has less filament than the rest of the print needs (red), or only just enough, within 20 g or 5% (orange: "may be insufficient"). Checked at print start, as one notification for all toolheads at risk, and again during the print when a toolhead gets worse. If refill is on, says which spools the printer can refill from, in the order it would use them (exact colour match first, in toolhead order; with "ignore colour", then the nearest colour; each one refilling the next as it runs out), shown as a chain of arrows in the picture, how much each has, and which same-material toolheads the printer will *not* refill from and why (no filament info set, another nozzle, a different vendor or sub-type, or the colour with exact match required), whether it's an exact match or only a compatible spool, and whether together they're enough, or that no refill spool was found. With multiACE, the slots its Quad Replenish would reload the toolhead from (same material and colour, in the order it tries them) are in the chain too, before the other toolheads unless `quad_first` is off; their amounts are not known. A loaded spool that Spoolman shows at 0 g or less is reported once, at print start, as "amount of filament left is unknown" (it isn't used for any other check); turn that warning off in the Spoolman section of the form if you don't track spool weights. Nothing is sent when all spools are fine |
 | 🧵 Spool running low | Spool | Spoolman: when a spool is down to a set % of a full spool (default 10%) or a set weight (default 50 g), whichever comes first. Sent once per spool, until it is refilled or replaced; time to buy a new one. Spools that run low at the same time (e.g. at print job start) come in one notification. With refill on, it shows the spool the printer would refill from (or that there is none) |
 | 🔄 Switched to backup spool | Spools | When the printer refills a filament from another toolhead mid-print (its own refill, with or without Spoolman). The runout that caused it isn't reported as an error when this row is on: the printer refills by itself within seconds. With Spoolman: the spools' names and remaining weights. With [multiACE](https://github.com/multiace/multiace): also when its Quad Replenish reloads a toolhead from another slot of the ACE ("From ACE 1 slot 4 (Generic PLA) on Toolhead 4. To ACE 1 slot 2 (Generic PLA)."), with the slots it would use next; the runout is held for up to 3 minutes while the ACE loads |
 | 🧵 Spool in ACE slot ran out | Spools | multiACE: the slot feeding a toolhead has run out of filament at the ACE while the toolhead prints what is left in the filament path — the pause (or Quad Replenish's reload) comes some minutes later. Once per slot, with the slots Quad Replenish would use next, or that the print job will pause when the toolhead runs out. Slots are named as multiACE names them, "ACE 1 slot 2", with the slot's brand and material |
 
+Not every printer can send every row: those that need the Snapmaker U1's
+firmware (manual calibrations, filament loaded/unloaded, warnings, power
+loss, backup spools, ACE slots) are left off the page on other printers,
+and the chamber, driver and *Bed cooled* rows only show when the printer
+has a chamber heater, X/Y drivers that report their temperature (TMC2240,
+TMC5160) or a heated bed. A row left off can still be turned on in
+`pushraker.conf`. See [Features by printer](#features-by-printer).
+
 Each notification can be sent by push, by email, or both, with its own
 priority (push) and image setting. For example: progress by push only, and
 errors by push and email. By default, faults and power loss are also emailed.
 
-- **Time left and ETA**: Calculated like Fluidd's default estimate (print
-  time so far, divided by file progress). This also holds after a
+- **Time left and ETA**: by the method chosen on the page (default
+  *Blend*; on the U1, Snapmaker's own): see
+  [Time left and ETA](#time-left-and-eta). This also holds after a
   power-loss recovery, which keeps the print time and progress of the
-  interrupted print. The printer's clock runs on UTC, so ETAs use the **Time zone**
+  interrupted print. The printer's clock often runs on UTC, so ETAs use the **Time zone**
   setting: **Browser** (the time zone of the browser the page was last saved
   from) or one you pick.
-- **Error codes**: Error, warning and shutdown notifications include the
+- **Error codes** (Snapmaker U1): Error, warning and shutdown notifications include the
   Snapmaker error code in the same format the printer uses
   (`level-module-index-code`, e.g. `0002-0532-0000-0001: detected dirty bed`)
   with the same title and advice the printer's screen shows for that code
@@ -76,15 +85,21 @@ errors by push and email. By default, faults and power loss are also emailed.
   printer's own end/cancel moves carry on, so the image shows the part and the
   nozzle doesn't stop over it and ooze onto it. There is no lift if Z is
   not homed, and the lift is reduced near the top of the build volume so the
-  stock end/cancel moves stay in range. For *Paused*, the snapshot is taken
+  stock end/cancel moves stay in range. This needs the print hooks: built
+  into the U1 firmware; elsewhere call `_PRINT_END_NTFY` and
+  `_CANCEL_PRINT_NTFY` at the start of your end and cancel macros (the
+  README). Without them, *Print complete* and *Cancelled* are still sent,
+  with the picture taken as the print ends. For *Paused*, the snapshot is taken
   3 seconds after the pause starts, once the nozzle has moved off the part.
 - **Images never block a notification**: Images are uploaded as files, so your
-  phone doesn't need to reach the printer. If the camera is unavailable, the
-  notification is sent without the image. A printer camera picture more
+  phone doesn't need to reach the printer. If the camera gives no picture,
+  the notification still goes out, with the model render when there is a
+  print job, and its text ends with "Error sending camera image:
+  <reason>". A printer camera picture more
   than a minute old says so at the end of the text ("Camera image from
   74 s ago."; minutes from 2 minutes on).
 - **Spoolman**: The Spoolman notifications appear when the
-  [Spoolman integration](https://snapmakeru1-extended-firmware.pages.dev/spoolman) is enabled. They use each toolhead's
+  [Spoolman integration](https://snapmakeru1-extended-firmware.pages.dev/spoolman) (U1) or Moonraker's `[spoolman]` is enabled. They use each toolhead's
   assigned spool and the slicer's per-filament weights, mapped to toolheads
   the way the print was started (including touchscreen remapping). With
   refill on, backup spools count as "any compatible spool" (same material)
@@ -139,7 +154,7 @@ errors by push and email. By default, faults and power loss are also emailed.
 | **Discord (server channel)** | A webhook for a channel on a server you manage (see [Discord](#discord)) | Everyone who can see the channel |
 
 To use the public server, choose **ntfy** and click **Use public server** next
-to the Server URL. Firmware Config asks you to confirm the privacy warning and
+to the Server URL. The settings page asks you to confirm the privacy warning and
 keeps showing it under the server field. The public server is fine for
 testing; for everyday use, setting up your own ntfy server is a good idea. On
 the public server, use a long, unguessable topic: the **Random** button
@@ -755,9 +770,14 @@ that is also when the tokens and passwords are removed.
 
 **Restore…** loads a backup file onto the page. ⚠️ All settings are
 replaced by the backup's (excluding tokens, passwords and the webhook URL,
-which stay as they are, unless the file has them). A backup from another
-printer model keeps this printer's **Printer URL** and camera. Nothing is
-saved until you click Save & Apply.
+which stay as they are, unless the file has them). Cameras this printer
+doesn't have (the default, or a notification's) are replaced by the ones
+set here. A backup from another printer model (backups record the model
+they were made on; one without counts as a Snapmaker U1's) also keeps this
+printer's **Printer URL**, or fills in this printer's own web page when it
+has none. The dialog says where the backup is from and which of its
+notifications this printer can't send. Nothing is saved until you click
+Save & Apply.
 
 ## Requirements
 
@@ -765,9 +785,15 @@ saved until you click Save & Apply.
   (`base-url` and `attachment-cache-dir` in the server's `server.yml`, see
   [ntfy server](#ntfy-server)). Otherwise notifications arrive without
   images.
-- For camera images, a webcam Moonraker knows (**Camera for snapshots**
-  lists them; the internal camera is `case` with the default **paxx12**
-  service, see [Camera Support](https://snapmakeru1-extended-firmware.pages.dev/camera_support)).
+- For camera images, a camera from **Default camera**: Moonraker's
+  webcams that give a picture (on the U1 firmware the internal camera is
+  `case` with the default **paxx12** service, see
+  [Camera Support](https://snapmakeru1-extended-firmware.pages.dev/camera_support)),
+  the printer's own (the Creality Hi's *Printer camera*, chosen by
+  default), or a camera server found on the printer (ports 8080/8081,
+  nginx `/webcam/`). A webcam that only shows a web page (Fluidd's
+  "iframe"), or whose snapshot address gave no picture when Klipper
+  started, isn't offered unless it is already chosen.
 - For *Layer complete*, the slicer must emit `SET_PRINT_STATS_INFO`
   layer information (the Snapmaker U1 Orca profile includes it), or the
   printer's firmware must count layers itself (Creality's does: see
@@ -780,17 +806,22 @@ saved until you click Save & Apply.
 ## Setup
 
 Push notifications are [pushraker](https://github.com/noon92/pushraker), a
-Moonraker component that works on any Moonraker printer. The firmware
-includes it, and each firmware release brings the pushraker release it was
-built with. Nothing is sent until you set it up:
+Moonraker component that works on any Moonraker printer. The Snapmaker U1
+Extended Firmware includes it (each firmware release brings the pushraker
+release it was built with); on other printers, install it as in the
+[README](../README.md) (the [Creality Hi](#creality-hi): one command over
+SSH). Nothing is sent until you set it up:
 
-1. Open **Push Notifications** from the Links list at the top of
-   [Firmware Config](https://snapmakeru1-extended-firmware.pages.dev/firmware_config) (`http://<printer>/notifications/`).
+1. Open the settings page: on the U1 firmware, **Push Notifications** from
+   the Links list at the top of
+   [Firmware Config](https://snapmakeru1-extended-firmware.pages.dev/firmware_config) (`http://<printer>/notifications/`);
+   on any other printer, `http://<printer>:7125/server/pushraker/page`
+   (or your own nginx alias, see the README).
    Check **Enable notifications**. Push, email and the webhook each have
    their own checkbox; at least one must be on. For push, choose the
    **Push service**:
    - **ntfy**: enter your **Server URL** (e.g. `http://192.168.1.10:8080`), or
-     click **Use public server** for ntfy.sh. Keep the default **Topic** (`u1`),
+     click **Use public server** for ntfy.sh. Keep the default **Topic** (`printer`),
      or enter or generate another, and
      subscribe to it in the ntfy app. On your own server, choose
      **Authentication**: none, an access token (`tk_...`), or username &
@@ -805,7 +836,9 @@ built with. Nothing is sent until you set it up:
    provider**, and enter the username, password, From and To (see
    [Email](#email)).
 3. Optionally set a **Printer URL** for the links. On first setup it is the
-   address you opened the page with (e.g. `http://u1.home`). Clear it for no
+   printer's web page: its own for printers pushraker knows, otherwise the
+   address you opened the page with (from Moonraker's port: a web page
+   found on the printer instead). Clear it for no
    links, or pick another from **Fill in**: this page's address, or the IP
    address of each of the printer's network interfaces (e.g. `wlan0`, `eth0`,
    or a VPN's, such as `tailscale0`). Printers pushraker knows (the Snapmaker
@@ -828,8 +861,9 @@ built with. Nothing is sent until you set it up:
 6. Click **Save & Apply**. Settings take effect at once, during a print
    job too: nothing restarts.
 
-To stop all notifications, uncheck **Enable notifications**. Upgrades
-come with the firmware: there is no separate pushraker update.
+To stop all notifications, uncheck **Enable notifications**. On the U1
+firmware, pushraker updates with the firmware; elsewhere, run the install
+command again (install.py), or `pip install -U pushraker`.
 
 ## Features by printer
 
@@ -933,7 +967,7 @@ python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubuserco
   the token itself (the Apprise version the Hi ships can't).
 - **Render** and **time left** for files from Creality Print, OrcaSlicer
   and Snapmaker Orca: pushraker reads the picture and the slicer's estimate
-  from the file itself.
+  from the file itself (on any Moonraker that doesn't know these slicers).
 - **Layers** (*First layer started*, *Layer complete*, `job.layer`): from
   Creality's own layer count.
 - **Pre-print calibrations**: the bed mesh Creality's start routine runs
@@ -943,8 +977,8 @@ python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubuserco
 - **Printer URL**: Fluidd's address, `http://<the Hi's IP>:4408/`, filled
   in on first setup and the first **Fill in** choice. The Hi's port 80 is
   Creality's own service, not a web page.
-- **Camera**: choose **Printer camera**. The picture comes from the Hi's
-  own camera, through the firmware's own ffmpeg. With a Printer URL set,
+- **Camera**: **Printer camera**, the Hi's own, selected by default. The
+  picture comes from the Hi's own camera, through the firmware's own ffmpeg. With a Printer URL set,
   notifications get a **Live Camera** link to the Hi's own live view
   (port 8000), which plays in any browser.
 - **The picture** is the camera's current frame, read from the Hi's own
@@ -953,13 +987,18 @@ python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubuserco
   a print with timelapse on adds a frame to the timelapse file and removes
   it again: if it coincides with Creality's own per-layer frame, it leaves
   it, so the timelapse video may very rarely contain one extra frame
-  (1/15 s). If the capture fails too, the Hi's last per-layer picture is
-  sent, and when that is more than a minute old the text ends with e.g.
-  "Camera image from 74 s ago: Creality takes one per layer."
+  (1/15 s). If the capture fails too while printing with timelapse on, or
+  just after a print, the Hi's last per-layer picture is sent, and when
+  that is more than a minute old the text ends with e.g. "Camera image
+  from 74 s ago: Creality takes one per layer." Otherwise there is no
+  picture, and the text says why.
 - Notifications for hardware the Hi doesn't have (a chamber heater, driver
   temperatures) are left off the page.
 - Print hooks (the print-end snapshot lift) are not installed on the Hi;
   *Print complete* and *Print cancelled* are sent all the same.
+- **Bed cooled** also comes after pushraker was updated while the bed was
+  still hot: the watch resumes when Moonraker restarts (a print that ended
+  less than 3 hours ago).
 
 ## Self-hosting a push server
 
@@ -1019,7 +1058,7 @@ reach it from wherever you want notifications: on your home network, over
    `ntfy user add printer`, `ntfy access printer u1 write-only` and
    `ntfy token add printer` instead (each after `docker exec -it ntfy`).
 
-5. **In Firmware Config**: Push service **ntfy**, Server URL
+5. **On the settings page**: Push service **ntfy**, Server URL
    `http://192.168.1.10:8080`, Topic `u1`, Authentication **Access token**,
    and paste the token. **Send Test**.
 
@@ -1053,7 +1092,7 @@ reach it from wherever you want notifications: on your home network, over
    [iOS instant notifications](https://docs.ntfy.sh/config/#ios-instant-notifications).
 
 **Reaching it from outside your home**: either over [Tailscale](https://snapmakeru1-extended-firmware.pages.dev/vpn) (use
-the server's Tailscale address in Firmware Config and in the app), or behind a
+the server's Tailscale address on the settings page and in the app), or behind a
 reverse proxy with HTTPS (Caddy, nginx, Cloudflare Tunnel). Behind Cloudflare,
 keep its *Browser Integrity Check* in mind: it blocks requests from clients it
 doesn't recognise as browsers (error 1010), which can catch scripts and
@@ -1077,7 +1116,7 @@ services:
 
 Start it with `docker compose up -d`, sign in to `http://<server>:8081` as
 `admin` with that password (and change it), then **Apps > Create
-Application** and copy the app token. In Firmware Config: Push service
+Application** and copy the app token. On the settings page: Push service
 **Gotify**, the Server URL and the token. Install the Gotify app on Android
 and log in to the same server; Gotify has no official iPhone app. Gotify
 notifications are text only (see [Gotify](#gotify)).
@@ -1095,13 +1134,15 @@ notifications are text only (see [Gotify](#gotify)).
   who has them send messages as the bot. If one leaks, reset it (BotFather
   `/revoke`, Developer Portal **Reset Token**, or delete the webhook).
 - Tokens, passwords and the webhook address are kept in
-  `/home/lava/printer_data/pushraker.secrets` (mode 0600, readable by
+  `printer_data/pushraker.secrets` (`/home/lava/…` on the U1,
+  `/mnt/UDISK/…` on the Creality Hi; mode 0600, readable by
   Moonraker only), never in `pushraker.conf`, and the settings page never
   receives them back (only whether one is saved). Moonraker does not serve
   files outside its config folder. The page talks to Moonraker, so
   Moonraker's own authorization applies: anyone who can reach Fluidd can
-  change where notifications go; enable **Web Authentication** under
-  **Settings > Remote Access** if your network isn't trusted.
+  change where notifications go. If your network isn't trusted, turn on
+  Moonraker's authorization (on the U1 firmware: **Web Authentication**
+  under **Settings > Remote Access**); the page then asks for an API key.
 - A saved token or password is only reused for the service and server it
   was entered for: switching the push service, the ntfy server, or the
   email server, port, security or username asks for it again, so a secret
@@ -1130,7 +1171,7 @@ telegram_chat:
 discord_user:
 discord_mention:
 printer_url: http://100.64.0.10
-camera: case                 # a Moonraker webcam name; empty for none
+camera: case                 # a camera name from the page; empty: the printer's own, if it has one
 name: U1
 layers_complete: 2
 driver_temp: 105             # °C, X or Y stepper driver
@@ -1155,19 +1196,24 @@ error: on, max, email
 ...
 # Templates and images, where they differ from the defaults (\n for a line break):
 # <notification>_title, _contents, _image (none|render|camera|graphic),
-# _camera (a Moonraker webcam name), _remaining (true|false)
+# _camera (a camera name from the page), _remaining (true|false)
 started_contents: {{ job.file }}\nToolheads: {{ job.extruders.names|toolhead }}
 paused_image: none
 complete_camera: case
 ...
 ```
 
-The component (`[pushraker]` in `extended/moonraker/05_pushraker.cfg`, a
-link to the firmware's copy) builds one [Apprise](https://github.com/caronc/apprise)
+The component builds one [Apprise](https://github.com/caronc/apprise)
 URL per enabled notification and service from this (Discord uses
-pushraker's own `discordwh://` and `discorddm://` senders). The Klipper
-side is the fixed macro file `extended/klipper/05_pushraker.cfg`: the
-`_PRINT_END_NTFY` and `_CANCEL_PRINT_NTFY` [print hooks](https://snapmakeru1-extended-firmware.pages.dev/klipper_hooks),
+pushraker's own `discordwh://` and `discorddm://` senders, and ntfy with an
+access token uses its own `pntfy://` where the installed Apprise can't
+send the token). Where the pieces are: on the U1 firmware, `[pushraker]` in
+`extended/moonraker/05_pushraker.cfg` (a link to the firmware's copy) and
+the fixed macro file `extended/klipper/05_pushraker.cfg`; elsewhere,
+`[pushraker]` in `moonraker.conf` and the macros in
+`printer_data/config/pushraker.cfg`, included from `printer.cfg`
+(`python -m pushraker install`; install.py only with `--klipper`). The
+macros are the `_PRINT_END_NTFY` and `_CANCEL_PRINT_NTFY` [print hooks](https://snapmakeru1-extended-firmware.pages.dev/klipper_hooks),
 which the component tells what to do (`SET_GCODE_VARIABLE` on
 `_NTFY_HOOKS`) whenever the settings change, so no setting ever needs a
 Klipper or Moonraker restart.
@@ -1175,7 +1221,7 @@ Klipper or Moonraker restart.
 For other services
 (Slack, Matrix, etc.), add your own Moonraker
 [`[notifier]`](https://moonraker.readthedocs.io/en/latest/configuration/#notifier)
-section in a separate file in `extended/moonraker/` (see
+section (on the U1 firmware, in a separate file in `extended/moonraker/`, see
 [Klipper and Moonraker Custom Includes](https://snapmakeru1-extended-firmware.pages.dev/klipper_includes)).
 
 ## Troubleshooting
@@ -1185,8 +1231,8 @@ section in a separate file in `extended/moonraker/` (see
   picture`, and each failed attempt with a few words on why, e.g. `!! Failed
   to send notification "✅ U1 complete" to email (timed out), attempt 2/4,
   will retry in 10 seconds`.
-- **Nothing arrives**: use **Send Test** first. Then check
-  `/home/lava/printer_data/logs/moonraker.log` for lines starting with
+- **Nothing arrives**: use **Send Test** first. Then check Moonraker's log
+  (`printer_data/logs/moonraker.log`) for lines starting with
   `[pushraker]`.
   Each notification is logged per service, e.g. `error (email): sent`, or as
   `attempt N failed` for each retry and `send failed after 4 attempts` (with
@@ -1206,7 +1252,10 @@ section in a separate file in `extended/moonraker/` (see
 - **Discord: "the bot can't message you"**: the bot isn't in a server you
   are in, or that server doesn't allow DMs from its members (see
   [Discord](#discord)).
-- **Notifications arrive without images**: check the camera service, and on a
-  self-hosted ntfy server that attachments are enabled.
+- **Notifications arrive without images**: read the last line of the text
+  ("Error sending camera image: …" says why the camera gave none); check the
+  camera service, and on a self-hosted ntfy server that attachments are
+  enabled.
 - **No layer-complete notification**: the G-code file has no
-  `SET_PRINT_STATS_INFO` lines; enable layer information in the slicer.
+  `SET_PRINT_STATS_INFO` lines; enable layer information in the slicer
+  (not needed on Creality's firmware, which counts layers itself).
