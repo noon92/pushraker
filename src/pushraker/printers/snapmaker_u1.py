@@ -19,7 +19,8 @@ class SnapmakerU1(Printer):
     exception_text_paths = ("/home/lava/resource/text/exception_en-GB.json",)
     runout_exception_id = 523
     # The extended firmware's web UI, served by its nginx at "/" (which
-    # also serves this page at /notifications/)
+    # also serves this page at /notifications/); confirmed by noon on her
+    # U1 (http://snapmaker-u1/), 2026-11-21
     web_page = "http://{host}/"
     web_page_name = "Web UI"
     # machine_state_manager.main_state values of the manual calibrations run
