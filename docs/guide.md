@@ -808,9 +808,13 @@ built with. Nothing is sent until you set it up:
    address you opened the page with (e.g. `http://u1.home`). Clear it for no
    links, or pick another from **Fill in**: this page's address, or the IP
    address of each of the printer's network interfaces (e.g. `wlan0`, `eth0`,
-   or a VPN's, such as `tailscale0`). When the page is opened from Moonraker's
-   own port (`:7125`, e.g. on the Creality Hi), **Fill in** offers the
-   printer's web pages it found instead, e.g. **Fluidd (port 4408)**: the
+   or a VPN's, such as `tailscale0`). Printers pushraker knows (the Snapmaker
+   U1, the Creality Hi) have their web page built in: it is the field's
+   placeholder, the first **Fill in** choice (e.g. **Fluidd**:
+   `192.168.0.220:4408` on the Hi), and filled in on first setup and after
+   restoring another model's backup. On other printers, when the page is
+   opened from Moonraker's own port (`:7125`), **Fill in** offers the web
+   pages it found on the printer instead, e.g. **Fluidd (port 4408)**: the
    **Web UI** button should open the web UI, not Moonraker. The buttons work wherever your phone can
    reach that address: a LAN address only on the same network, a VPN address
    wherever the phone is on the VPN. Telegram does not make links from an
@@ -883,9 +887,9 @@ python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubuserco
   (on prints started from Fluidd or Mainsail, every time) is reported at
   the first layer with how long it took (*Pre-print calibrations
   complete*).
-- **Printer URL**: Fluidd's address, `http://<the Hi's IP>:4408` (**Fill
-  in** offers it). The Hi's port 80 is Creality's own service, not a web
-  page.
+- **Printer URL**: Fluidd's address, `http://<the Hi's IP>:4408/`, filled
+  in on first setup and the first **Fill in** choice. The Hi's port 80 is
+  Creality's own service, not a web page.
 - **Camera**: choose **Printer camera**. The picture comes from the Hi's
   own camera, through the firmware's own ffmpeg. With a Printer URL set,
   notifications get a **Live Camera** link to the Hi's own live view

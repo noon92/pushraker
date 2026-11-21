@@ -2120,6 +2120,31 @@ async def test_web_pages():
         check("...never asking Moonraker's port or the camera's",
               WEB_SKIPS and 7125 in WEB_SKIPS[-1] and 8000 in WEB_SKIPS[-1],
               WEB_SKIPS)
+        check("the printer profile's own web page, for the page (the Hi: "
+              "Fluidd on 4408)", view["meta"].get("web_page")
+              == {"url": "http://{host}:4408/", "name": "Fluidd"},
+              view["meta"].get("web_page"))
+        # Restore from another model with no Printer URL here: the page is
+        # told, to fill in the profile's web page
+        bk = await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "download"}))
+        u1 = json.loads(json.dumps(bk["backup"]))
+        u1.setdefault("from", {})["printer"] = "Snapmaker U1"
+        u1["settings"]["printer_url"] = "http://snapmaker-u1"
+        res = await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "restore", "backup": u1}))
+        check("restore from another model: flagged, its Printer URL left "
+              "out (empty here), the profile's web page given",
+              res["view"]["meta"].get("other_model") is True
+              and res["view"]["printer_url"] == ""
+              and res["view"]["meta"].get("web_page", {}).get("url")
+              == "http://{host}:4408/", (res["view"]["meta"].get(
+                  "other_model"), res["view"]["printer_url"]))
+        same = json.loads(json.dumps(bk["backup"]))
+        res = await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "restore", "backup": same}))
+        check("...the same model's: not flagged",
+              res["view"]["meta"].get("other_model") is False)
     finally:
         _cr.Creality.cameras = real_cams
         STATE.pop("box", None)
@@ -2129,6 +2154,16 @@ async def test_web_pages():
     check("the page: served by Moonraker, the web pages instead of its "
           "own address", "viaMoonraker()" in page
           and "data.meta.web_pages" in page)
+    check("...the profile's web page first, as placeholder and filled in "
+          "on first setup and after another model's restore",
+          "data.meta.web_page" in page and "otherModel" in page
+          and ".placeholder = profilePage" in page)
+    from pushraker import printers as _pr
+    check("printer profiles: the Hi's Fluidd, the U1's web UI, none for "
+          "a generic printer",
+          _cr.Creality.web_page == "http://{host}:4408/"
+          and _pr.SnapmakerU1.web_page == "http://{host}/"
+          and _pr.Printer.web_page == "")
     for t in list(c._tasks):
         t.cancel()
 

@@ -18,6 +18,10 @@ class SnapmakerU1(Printer):
     exception_event = "snapmaker:exception_notification"
     exception_text_paths = ("/home/lava/resource/text/exception_en-GB.json",)
     runout_exception_id = 523
+    # The extended firmware's web UI, served by its nginx at "/" (which
+    # also serves this page at /notifications/)
+    web_page = "http://{host}/"
+    web_page_name = "Web UI"
     # machine_state_manager.main_state values of the manual calibrations run
     # from the touchscreen (klippy/extras/machine_state_manager.py); the
     # calibration is complete when the state goes back to IDLE (0; PRINTING

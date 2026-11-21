@@ -101,6 +101,13 @@ class Printer:
     # counts layers there instead of in print_stats.info
     status_fields: Dict[str, List[str]] = {
         "virtual_sdcard": ["layer", "layer_count"]}
+    # The printer's own web page (its web UI), for the Printer URL: a URL
+    # with "{host}" for the printer's address as the browser reaches it
+    # ("http://{host}:4408/"), and what to call it on the page. "": none
+    # declared, the web pages found on the machine are offered instead
+    # (pushraker.discover.web_pages)
+    web_page = ""
+    web_page_name = ""
     # Why this printer's own camera picture can be old (snapshot() giving a
     # Frame taken earlier): the end of the text's "Camera image from 74 s
     # ago: ..." line; "" says only how old

@@ -2175,24 +2175,42 @@
     // Web UI button: the printer's own web pages are offered instead
     // (meta.web_pages, found by the server: "Fluidd (port 4408)"), or the
     // address without a port when none was found.
+    // A printer profile that declares its web page (meta.web_page, a URL
+    // with {host}: the Creality Hi's Fluidd on 4408) comes first, with
+    // this browser's host, and is the field's placeholder; the web pages
+    // found on the machine only when the profile declares none.
     let fillChoices = null;
     let webPages = [];
+    let profilePage = null;
     const viaMoonraker = () => location.pathname.startsWith('/server/pushraker');
+    const hostname = () => location.hostname.includes(':') ? '[' + location.hostname + ']' : location.hostname;
     function pageHost(port) {
-        return location.hostname + (port && port !== 80 ? ':' + port : '');
+        return hostname() + (port && port !== 80 ? ':' + port : '');
     }
+    function profileUrl(host) {
+        return profilePage ? profilePage.url.split('{host}').join(host) : '';
+    }
+    const shown = url => url.replace(/^https?:\/\//, '').replace(/\/$/, '');
     // The address the Web UI button should open, from this browser
     function ownAddress() {
         if (!/^https?:$/.test(location.protocol) || !location.hostname) return '';
+        if (profilePage) return profileUrl(hostname());
         if (!viaMoonraker()) return location.protocol + '//' + location.host;
         return 'http://' + pageHost(webPages.length ? webPages[0].port : 0);
     }
     async function fillOptions() {
         if (fillChoices) return fillChoices;
         const out = [];
-        const port = viaMoonraker() && webPages.length ? webPages[0].port : 0;
+        const port = !profilePage && viaMoonraker() && webPages.length ? webPages[0].port : 0;
         if (/^https?:$/.test(location.protocol) && location.hostname) {
-            if (!viaMoonraker()) {
+            if (profilePage) {
+                const url = profileUrl(hostname());
+                out.push({ url, html: `${esc(profilePage.name)}: <code>${esc(shown(url))}</code><small>This printer's web page</small>` });
+                const mine = location.protocol + '//' + location.host;
+                if (!viaMoonraker() && shown(mine) !== shown(url)) {
+                    out.push({ url: mine, html: `This browser's address: <code>${esc(location.host)}</code>` });
+                }
+            } else if (!viaMoonraker()) {
                 out.push({ url: location.protocol + '//' + location.host, html:
                     `This browser's address: <code>${esc(location.host)}</code><small>Works wherever this address works for you</small>` });
             } else if (webPages.length) {
@@ -2212,13 +2230,20 @@
                 if (name === 'lo') continue;
                 for (const a of iface.ip_addresses || []) {
                     if (a.family !== 'ipv4' || a.is_link_local || !a.address || a.address.startsWith('127.')) continue;
+                    if (profilePage) {
+                        const url = profileUrl(a.address);
+                        out.push({ url, html: `${esc(name)}: <code>${esc(shown(url))}</code>` });
+                        continue;
+                    }
                     const at = a.address + (port && port !== 80 ? ':' + port : '');
                     out.push({ url: 'http://' + at, html: `${esc(name)}: <code>${esc(at)}</code>` });
                 }
             }
         } catch (e) { /* the browser's address is still offered */ }
-        fillChoices = out;
-        return out;
+        // An interface with the browser's own address: listed once
+        const seen = new Set();
+        fillChoices = out.filter(c => !seen.has(shown(c.url)) && seen.add(shown(c.url)));
+        return fillChoices;
     }
     function closeFill() {
         el('nt-fill-menu').classList.remove('open');
@@ -2485,8 +2510,13 @@
         // saved, an empty field means "no buttons" and is left alone.
         const firstSetup = !data.enabled && !data.server && !data.pushover_user && !data.has_secret;
         webPages = (data.meta && data.meta.web_pages) || [];
+        profilePage = (data.meta && data.meta.web_page) || null;
         fillChoices = null;
-        if (firstSetup && !data.printer_url && ownAddress()) {
+        el('nt-printer-url').placeholder = profilePage && location.hostname ? profileUrl(hostname()) : 'http://u1.home';
+        // First setup, or a backup from another printer model restored
+        // with no Printer URL here: this printer's own web page
+        const otherModel = data.meta && data.meta.other_model;
+        if ((firstSetup || otherModel) && !data.printer_url && ownAddress()) {
             el('nt-printer-url').value = ownAddress();
         }
         updatePrinterUrl();

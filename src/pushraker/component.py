@@ -1526,10 +1526,20 @@ class PushNotifications:
         # What is being sent right now: the file's settings, the ones from
         # before a change that can't be applied, or nothing (it couldn't
         # be applied since the start)
-        out["meta"]["web_pages"] = list(self._web_pages)
+        self._page_meta(out)
         out["meta"]["sending"] = "nothing" if not self.rows else \
             "previous" if out["meta"].get("stored_error") else "current"
         return out
+
+    def _page_meta(self, out: Dict[str, Any]) -> None:
+        """For the page's Printer URL: the printer profile's web page
+        (Printer.web_page) and the web pages found on the machine."""
+        tpl = str(getattr(self.printer, "web_page", "") or "")
+        out["meta"]["web_page"] = {
+            "url": tpl, "name": str(getattr(self.printer, "web_page_name",
+                                            "") or "Web UI")} \
+            if "{host}" in tpl else None
+        out["meta"]["web_pages"] = list(self._web_pages)
 
     async def _refresh(self) -> None:
         """Before answering the page: pick up a hand edit (and apply it,
@@ -1757,8 +1767,9 @@ class PushNotifications:
                     tpl["camera"] = mine.get("camera", "")
             # Another printer model's backup: its Printer URL is that
             # printer's address; the one here stays (same model: restored)
-            if cfgmod.other_model(backup,
-                                  self.printer.model(self._hostname)):
+            other = cfgmod.other_model(backup,
+                                       self.printer.model(self._hostname))
+            if other:
                 data["printer_url"] = self.settings.get("printer_url", "")
             # Tokens and passwords the file has: as if typed into the page
             secrets = cfgmod.backup_secrets(backup)
@@ -1781,6 +1792,10 @@ class PushNotifications:
             raise self.server.error(f"Can't restore this backup: {e}", 400)
         out = cfgmod.public_view(s, self.env, self._busy(), __version__)
         out["meta"]["sending"] = (await self._view())["meta"]["sending"]
+        self._page_meta(out)
+        # Another model's backup and no Printer URL here: the page fills in
+        # this printer's own web page (Printer.web_page)
+        out["meta"]["other_model"] = bool(other)
         # The page puts them in its fields: Save & Apply stores them
         return {"view": out, "secrets": secrets}
 
