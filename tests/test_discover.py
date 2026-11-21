@@ -140,7 +140,67 @@ def run_discover_tests():
     check("...also behind a name and https",
           st.camera_live_url(s2, env)
           == "https://printer.example.com:8080/?action=stream")
+    run_web_page_tests()
     return _failures
+
+
+def run_web_page_tests():
+    """The printer's web pages, for the page's Printer URL "Fill in"."""
+    import tempfile
+
+    class Page(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body, kind, code = PAGES.get(self.server.server_address[1],
+                                         (b"", "text/html", 404))
+            self.send_response(code)
+            self.send_header("Content-Type", kind)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    servers = [ThreadingHTTPServer(("127.0.0.1", 0), Page) for _ in range(4)]
+    ports = [srv.server_address[1] for srv in servers]
+    for srv in servers:
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    PAGES = {
+        ports[0]: (b"<html><head><title>fluidd</title></head></html>",
+                   "text/html", 200),
+        ports[1]: (b'{"error": "not found"}', "text/html", 404),
+        ports[2]: (b"<title>Moonraker</title>", "text/html", 200),
+        ports[3]: (b"<HTML><TITLE> Video\n On Demand </TITLE>",
+                   "text/html; charset=utf-8", 200)}
+    check("page_title: a page's title, none for a 404",
+          d.page_title(ports[0]) == "fluidd"
+          and d.page_title(ports[1]) is None)
+    conf = tempfile.mkdtemp()
+    with open(os.path.join(conf, "nginx.conf"), "w") as f:
+        f.write(f"server {{\n    listen {ports[3]} default_server;\n"
+                f"    listen [::]:{ports[3]};\n}}\n"
+                f"server {{ listen 127.0.0.1:{ports[1]}; }}\n"
+                "# listen 1;\n")
+    check("nginx_ports: every listen, once, comments aside",
+          d.nginx_ports([conf]) == [ports[3], ports[1]],
+          d.nginx_ports([conf]))
+    found = d.web_pages(skip=[], ports=ports[:3], nginx=[conf])
+    check("web_pages: Fluidd first, a titled page by its title; no 404, "
+          "never Moonraker's own page",
+          found == [{"port": ports[0], "name": "Fluidd"},
+                    {"port": ports[3], "name": "Video On Demand"}], found)
+    found = d.web_pages(skip=[ports[3]], ports=ports[:3], nginx=[conf])
+    check("...a port to skip (Moonraker's, a camera's) is never asked",
+          found == [{"port": ports[0], "name": "Fluidd"}], found)
+    check("page_name: the known UIs by name",
+          d.page_name("Mainsail") == "Mainsail" and d.page_name("") ==
+          "Web page")
+    for srv in servers:
+        srv.shutdown()
+    free = socket.socket()
+    free.bind(("127.0.0.1", 0))
+    closed = free.getsockname()[1]
+    free.close()
+    check("a port nothing listens on: no page", d.page_title(closed) is None)
 
 
 if __name__ == "__main__":

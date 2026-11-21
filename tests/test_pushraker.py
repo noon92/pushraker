@@ -92,6 +92,11 @@ DISCOVERED = {}
 pn.FIND_CAMERAS = lambda known=(), *a, **k: {
     n: c for n, c in DISCOVERED.items()
     if not any(pn.discover.same_url(c["snapshot"], x) for x in known)}
+# The same for the web pages (test_web_pages drives it)
+WEB_PAGES = []
+WEB_SKIPS = []
+pn.FIND_WEB_PAGES = lambda skip=(): (WEB_SKIPS.append(list(skip)),
+                                     list(WEB_PAGES))[1]
 RANK_RED = 2
 CONSOLE = []
 pn.PAUSE_SNAPSHOT_DELAY = 0.1
@@ -2084,6 +2089,46 @@ async def test_discovered_cameras():
               "Camera (port 8080)" in c.env.cameras)
     finally:
         DISCOVERED.clear()
+    for t in list(c._tasks):
+        t.cancel()
+
+
+async def test_web_pages():
+    print("The printer's web pages, for the Printer URL's Fill in")
+    reset_world()
+    STATE.pop("print_task_config", None)
+    STATE["box"] = {}           # a Creality: its camera's live page on 8000
+    WEB_PAGES[:] = [{"port": 4408, "name": "Fluidd"}]
+    WEB_SKIPS.clear()
+    from pushraker.printers import creality as _cr
+    real_cams = _cr.Creality.cameras
+    _cr.Creality.cameras = lambda self: {"Printer camera": {
+        "snapshot": "printer:camera", "stream": ":8000/"}}
+    server = Server()
+    try:
+        c = pn.PushNotifications(Config(server, dict(name="Hi",
+                                                     settle_time="0.1")))
+        STATE["print_stats"] = ps("standby")
+        await server.handlers["server:klippy_ready"]()
+        await asyncio.sleep(0.2)
+        view = await server.endpoints["/server/pushraker/config"](
+            WebRequest("GET"))
+        check("found at Klippy ready, given to the page",
+              view["meta"].get("web_pages") == [{"port": 4408,
+                                                 "name": "Fluidd"}],
+              view["meta"].get("web_pages"))
+        check("...never asking Moonraker's port or the camera's",
+              WEB_SKIPS and 7125 in WEB_SKIPS[-1] and 8000 in WEB_SKIPS[-1],
+              WEB_SKIPS)
+    finally:
+        _cr.Creality.cameras = real_cams
+        STATE.pop("box", None)
+        WEB_PAGES.clear()
+    page = open(os.path.join(os.path.dirname(pn.__file__), "web",
+                             "index.html"), encoding="utf-8").read()
+    check("the page: served by Moonraker, the web pages instead of its "
+          "own address", "viaMoonraker()" in page
+          and "data.meta.web_pages" in page)
     for t in list(c._tasks):
         t.cancel()
 
@@ -5124,7 +5169,7 @@ async def run_component_tests():
               test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_custom_events, test_camera_pictures, test_codemirror,
               test_data, test_old_moonraker, test_page_current_moonraker,
               test_creality_layers, test_missing_hardware_rows,
-              test_backup_from, test_discovered_cameras,
+              test_backup_from, test_discovered_cameras, test_web_pages,
               test_header_thumbnail, test_file_metadata,
               test_printer_camera_route, test_camera_error_line):
         try:

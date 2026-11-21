@@ -122,6 +122,7 @@ EXCEPTION_EVENTS = printers.EXCEPTION_EVENTS
 REMOTE_METHOD = "pushraker"
 # Camera servers Moonraker doesn't know (the tests swap it)
 FIND_CAMERAS = discover.discover
+FIND_WEB_PAGES = discover.web_pages
 # The settings page, served by Moonraker (compat.register_page)
 PAGE_ENDPOINT = "/server/pushraker/page"
 # The 0.1 name, still answered (a Klipper macro file from 0.1 calls it)
@@ -1265,6 +1266,9 @@ class PushNotifications:
         self._gmeta_cache: Dict[Tuple[str, int, int], Dict[str, Any]] = {}
         # Camera servers Moonraker doesn't know, found at Klippy ready
         self._found_cams: Dict[str, Dict[str, str]] = {}
+        # The printer's web pages (pushraker.discover.web_pages), for the
+        # page's Printer URL "Fill in"; found at Klippy ready
+        self._web_pages: List[Dict[str, Any]] = []
         self._status_seen = True     # logged after each Klippy ready
         # Per-job state
         self._job_active = False
@@ -1522,6 +1526,7 @@ class PushNotifications:
         # What is being sent right now: the file's settings, the ones from
         # before a change that can't be applied, or nothing (it couldn't
         # be applied since the start)
+        out["meta"]["web_pages"] = list(self._web_pages)
         out["meta"]["sending"] = "nothing" if not self.rows else \
             "previous" if out["meta"].get("stored_error") else "current"
         return out
@@ -6064,13 +6069,36 @@ class PushNotifications:
             found = await self.eventloop.run_in_thread(FIND_CAMERAS, known)
         except Exception as e:
             logging.warning("[pushraker] camera discovery: %s", e)
-            return
+            found = {}
         self._found_cams = found
         if found:
             self.env = await self._env()
             logging.info("[pushraker] cameras Moonraker doesn't list: %s",
                          ", ".join(f"{n} ({c['snapshot']})"
                                    for n, c in found.items()))
+        await self._discover_web_pages()
+
+    async def _discover_web_pages(self) -> None:
+        """The printer's web pages (pushraker.discover.web_pages), once per
+        Klippy ready, leaving out Moonraker's port and the cameras'."""
+        skip = set()
+        try:
+            skip.add(int(self.server.get_host_info().get("port") or 7125))
+        except Exception:
+            skip.add(7125)
+        for cam in self.env.cameras.values():
+            m = re.match(r":(\d+)", str(cam.get("stream") or ""))
+            if m:
+                skip.add(int(m.group(1)))
+        try:
+            self._web_pages = await self.eventloop.run_in_thread(
+                FIND_WEB_PAGES, sorted(skip))
+        except Exception as e:
+            logging.warning("[pushraker] web page discovery: %s", e)
+            return
+        if self._web_pages:
+            logging.info("[pushraker] web pages: %s", ", ".join(
+                f"{p['name']} (port {p['port']})" for p in self._web_pages))
 
     async def _on_status_event(self, data: Dict[str, Any],
                                *_: Any) -> None:

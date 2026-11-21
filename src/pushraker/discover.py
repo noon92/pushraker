@@ -14,10 +14,12 @@ Blocking: run it in a thread.
 """
 
 from __future__ import annotations
+import os
+import re
 import socket
 import urllib.parse
 import urllib.request
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 CONNECT_TIMEOUT = 0.3
 GET_TIMEOUT = 2.0
@@ -106,4 +108,95 @@ def discover(known: Iterable[str] = (),
     return found
 
 
-__all__: List[str] = ["discover", "probe", "CANDIDATES"]
+# The printer's web pages, for the page's Printer URL "Fill in" when the
+# page is served by Moonraker itself (its port is the API's, wrong for the
+# Web UI button): the ports web UIs usually listen on (Fluidd and Mainsail
+# on 80; KIAUH's and Creality's second UIs on 4408/4409; 81, 8080, 8888
+# seen elsewhere) and every `listen` in nginx's configuration. Only ports
+# that are listening are asked, with one GET of "/" that must answer
+# 200 with HTML. (The Creality Hi: Fluidd on 4408; its port 80 is
+# Creality's API, 404 at "/".)
+WEB_PORTS = (80, 81, 4408, 4409, 8080, 8888)
+NGINX_CONFS = ("/etc/nginx/nginx.conf", "/etc/nginx/conf.d",
+               "/etc/nginx/sites-enabled")
+RX_LISTEN = re.compile(r"(?<![\w-])listen\s+(?:[\w.:\[\]]*:)?(\d+)\b")
+RX_TITLE = re.compile(rb"<title[^>]*>([^<]*)", re.I)
+KNOWN_UIS = (("fluidd", "Fluidd"), ("mainsail", "Mainsail"),
+             ("octoprint", "OctoPrint"))
+PAGE_BYTES = 65536
+
+
+def nginx_ports(paths: Sequence[str] = NGINX_CONFS) -> List[int]:
+    """The ports nginx's configuration listens on."""
+    files: List[str] = []
+    for p in paths:
+        if os.path.isdir(p):
+            try:
+                files += [os.path.join(p, n) for n in sorted(os.listdir(p))]
+            except OSError:
+                pass
+        elif os.path.isfile(p):
+            files.append(p)
+    out: List[int] = []
+    for f in files:
+        try:
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                text = fh.read(1 << 20)
+        except OSError:
+            continue
+        for m in RX_LISTEN.finditer(re.sub(r"#[^\n]*", "", text)):
+            port = int(m.group(1))
+            if 0 < port < 65536 and port not in out:
+                out.append(port)
+    return out
+
+
+def page_title(port: int, timeout: float = GET_TIMEOUT) -> Optional[str]:
+    """The title of the HTML page at "/" on this port ("" untitled), or
+    None when it isn't one."""
+    url = f"http://127.0.0.1:{port}/"
+    if not port_open(url):
+        return None
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            if r.status != 200 or "html" not in \
+                    (r.headers.get("Content-Type") or "").lower():
+                return None
+            data = r.read(PAGE_BYTES)
+    except (OSError, ValueError):
+        return None
+    m = RX_TITLE.search(data)
+    return m.group(1).decode("utf-8", "replace").strip() if m else ""
+
+
+def page_name(title: str) -> str:
+    low = title.lower()
+    for key, name in KNOWN_UIS:
+        if key in low:
+            return name
+    title = " ".join(title.split())
+    return title[:40] if title else "Web page"
+
+
+def web_pages(skip: Iterable[int] = (), ports: Sequence[int] = WEB_PORTS,
+              nginx: Sequence[str] = NGINX_CONFS,
+              title=page_title) -> List[Dict[str, Any]]:
+    """[{"port", "name"}] of the web pages on this machine, the known web
+    UIs first: never a port in `skip` (Moonraker's own, the cameras'),
+    never Moonraker's own page."""
+    skip = set(skip)
+    found: List[Dict[str, Any]] = []
+    for port in list(ports) + [p for p in nginx_ports(nginx)
+                               if p not in ports]:
+        if port in skip:
+            continue
+        t = title(port)
+        if t is None or "moonraker" in t.lower():
+            continue
+        found.append({"port": port, "name": page_name(t)})
+    known = [n for _, n in KNOWN_UIS]
+    found.sort(key=lambda p: (p["name"] not in known, p["port"]))
+    return found
+
+
+__all__: List[str] = ["discover", "probe", "CANDIDATES", "web_pages"]
