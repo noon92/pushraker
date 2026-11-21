@@ -792,15 +792,55 @@ class SnapshotProblem(str):
 
 
 CAMERA_ERROR = "Error sending camera image: {why}"
+# A picture older than this says how old (a printer's camera that only
+# takes its own pictures now and then: the Creality Hi, one per layer)
+CAMERA_OLD = 60.
+CAMERA_AGE = "Camera image from {age} ago"
+
+
+class SnapshotPath(str):
+    """A camera picture's file, with a line for the text (`note`: how old
+    the picture is, when it's old)."""
+    note = ""
+
+    def __new__(cls, path: str, note: str) -> "SnapshotPath":
+        obj = super().__new__(cls, path)
+        obj.note = note
+        return obj
+
+
+def age_text(seconds: float) -> str:
+    """74 s under 2 minutes, 4 min above."""
+    t = max(0, int(seconds))
+    return f"{t} s" if t < 120 else f"{t // 60} min"
+
+
+def camera_age_line(age: Optional[float], why: str = "") -> str:
+    """"Camera image from 74 s ago: <why>." for a picture older than
+    CAMERA_OLD seconds (`why`: the printer's reason, its frame_note), else
+    ""."""
+    if age is None or age <= CAMERA_OLD:
+        return ""
+    line = CAMERA_AGE.format(age=age_text(age))
+    return f"{line}: {why}." if why else f"{line}."
+
+
+def camera_line(path: Any) -> str:
+    """The camera's line for the text: its error (a SnapshotProblem), or
+    the picture's age (a SnapshotPath of an old picture); else ""."""
+    why = getattr(path, "why", "")
+    if why:
+        return CAMERA_ERROR.format(why=why)
+    return getattr(path, "note", "") or ""
 
 
 def with_camera_error(body: str, path: Any) -> str:
-    """The text with the camera's error appended (a blank line, then the
-    line), when `path` is a SnapshotProblem; else as it was."""
-    why = getattr(path, "why", "")
-    if not why:
+    """The text with the camera's line appended (a blank line, then the
+    line): its error, or how old an old picture is; else as it was."""
+    line = camera_line(path)
+    if not line:
         return body
-    return f"{body}\n\n" + CAMERA_ERROR.format(why=why)
+    return f"{body}\n\n{line}"
 
 
 class AppriseLog(logging.Handler):
@@ -1799,7 +1839,7 @@ class PushNotifications:
                          "Gotify.")
         cam = cfgmod.camera(s, env)
         path = None
-        problem: Optional[str] = None     # a failed camera picture
+        problem: Optional[str] = None     # the camera's line (error, age)
         if cam and cam.get("snapshot"):
             path = await self.eventloop.run_in_thread(
                 self._fetch_snapshot_sync, True, cam["snapshot"])
@@ -1812,6 +1852,11 @@ class PushNotifications:
                 lines.append("Attaching a camera snapshot" if path else
                              "Camera snapshot unavailable; sending "
                              "without an image")
+                if getattr(path, "note", ""):
+                    # An old picture: how old, in the text and the console
+                    lines.append(path.note)
+                    body = with_camera_error(body, path)
+                    problem = path
         elif s["camera"]:
             lines.append(f'No webcam named "{s["camera"]}" in Moonraker; '
                          "sending without an image")
@@ -1821,7 +1866,7 @@ class PushNotifications:
             for target, url, text in dests:
                 if text is not None:
                     # Push and webhook texts were made before the camera:
-                    # its error goes at their end too (email is made below,
+                    # its line goes at their end too (email is made below,
                     # from `body`, which has it)
                     text = with_camera_error(text, problem)
                 if text is None and email_html is not None:
@@ -3637,7 +3682,12 @@ class PushNotifications:
             shutil.rmtree(tmpdir, ignore_errors=True)
             logging.warning("[pushraker] snapshot not saved: %s", e)
             return None
-        return path
+        # A printer's own picture taken earlier (printers.Frame): how old
+        taken = getattr(data, "taken", None)
+        note = camera_age_line(
+            time.time() - taken if taken is not None else None,
+            getattr(self.printer, "frame_note", ""))
+        return SnapshotPath(path, note) if note else path
 
     def _picture(self, url: str) -> Tuple[Optional[bytes], str]:
         """A JPEG from a camera: the printer's own ("printer:<name>",

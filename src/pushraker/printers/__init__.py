@@ -22,6 +22,18 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from .. import preprint
 
 
+class Frame(bytes):
+    """A JPEG from snapshot() that was taken earlier, not just now:
+    `taken` is when (time.time()). The notification then says how old it
+    is, when it's old."""
+    taken: Optional[float] = None
+
+    def __new__(cls, data: bytes, taken: Optional[float]) -> "Frame":
+        obj = super().__new__(cls, data)
+        obj.taken = taken
+        return obj
+
+
 class Printer:
     """A plain Moonraker printer."""
     name = "generic"
@@ -89,6 +101,10 @@ class Printer:
     # counts layers there instead of in print_stats.info
     status_fields: Dict[str, List[str]] = {
         "virtual_sdcard": ["layer", "layer_count"]}
+    # Why this printer's own camera picture can be old (snapshot() giving a
+    # Frame taken earlier): the end of the text's "Camera image from 74 s
+    # ago: ..." line; "" says only how old
+    frame_note = ""
 
     def __init__(self, objects: Sequence[str]) -> None:
         self.objects = list(objects)
@@ -134,7 +150,8 @@ class Printer:
         """A JPEG from one of this printer's own cameras ("printer:<name>"
         addresses from cameras()), or why there's none. `ctx`: "state"
         (print_stats.state), "since_end" (seconds since a print ended, or
-        None). Blocking: called in a thread."""
+        None). Blocking: called in a thread. A picture taken earlier
+        comes as a Frame, with when."""
         return None, "this printer has no camera of its own"
 
     def model(self, hostname: str = "") -> str:

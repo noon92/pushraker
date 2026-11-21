@@ -2289,6 +2289,50 @@ async def test_camera_error_line():
     check("a picture taken: no error line, the picture attached",
           log and all("Error sending" not in e["body"] and e["attach"]
                       for e in log), [(e["body"], e["attach"]) for e in log])
+    log.clear()
+    # The printer's own picture, taken earlier (printers.Frame): how old,
+    # when over a minute
+    from pushraker.printers import Frame
+    jpeg = b"\xff\xd8\xff\xe0" + b"\0" * 64
+    c.printer.snapshot = lambda name, ctx: (Frame(jpeg, time.time() - 74.4),
+                                            "")
+    await c._send_unchecked("paused", "⏸️ Hi paused", "Benchy.gcode")
+    await asyncio.sleep(0.3)
+    push = [e for e in log if e["channel"] == "ntfy"]
+    email = [e for e in log if e["channel"] == "email"]
+    check("an old picture: attached, its age after a blank line",
+          push and push[-1]["attach"] and push[-1]["body"]
+          == "Benchy.gcode\n\nCamera image from 74 s ago.",
+          push and push[-1]["body"])
+    check("...email too", email and "Camera image from 74 s ago."
+          in email[-1]["body"], email and email[-1]["body"][:300])
+    log.clear()
+    c.printer.frame_note = "Creality takes one per layer"
+    c.printer.snapshot = lambda name, ctx: (Frame(jpeg, time.time() - 250),
+                                            "")
+    await c._send_unchecked("paused", "⏸️ Hi paused", "Benchy.gcode")
+    await asyncio.sleep(0.3)
+    push = [e for e in log if e["channel"] == "ntfy"]
+    check("...minutes from 2 minutes on, the printer profile's reason",
+          push and push[-1]["body"] == "Benchy.gcode\n\nCamera image from "
+          "4 min ago: Creality takes one per layer.",
+          push and push[-1]["body"])
+    log.clear()
+    c.printer.snapshot = lambda name, ctx: (Frame(jpeg, time.time() - 30),
+                                            "")
+    await c._send_unchecked("paused", "⏸️ Hi paused", "Benchy.gcode")
+    await asyncio.sleep(0.3)
+    check("...under a minute old: no line",
+          log and all("Camera image from" not in e["body"] and e["attach"]
+                      for e in log), [e["body"] for e in log])
+    check("age wording: seconds under 2 minutes, minutes above",
+          pn.camera_age_line(60) == "" and pn.camera_age_line(None) == ""
+          and pn.camera_age_line(61) == "Camera image from 61 s ago."
+          and pn.camera_age_line(119.9) == "Camera image from 119 s ago."
+          and pn.camera_age_line(120, "x") == "Camera image from 2 min "
+          "ago: x."
+          and pn.camera_age_line(3599) == "Camera image from 59 min ago.",
+          [pn.camera_age_line(a) for a in (60, 61, 119.9, 120, 3599)])
     for t in list(c._tasks):
         t.cancel()
     # Send Test with that camera chosen
@@ -2334,6 +2378,24 @@ async def test_camera_error_line():
               "\n\nError sending camera image: the camera took no picture")
           and "Error sending camera image: the camera took no picture"
           in res["lines"], (sent, res.get("lines")))
+    from pushraker.printers import Frame
+    c2.printer.snapshot = lambda name, ctx: (
+        Frame(b"\xff\xd8\xff\xe0" + b"\0" * 64, time.time() - 74.4), "")
+    c2.printer.frame_note = "Creality takes one per layer"
+    sent.clear()
+    pn.apprise.Apprise = FakeAp
+    try:
+        res = await server.endpoints["/server/pushraker/test"](
+            WebRequest("POST", dict(provider="ntfy",
+                                    server="https://ntfy.example.com",
+                                    topic="hi_x9", camera="Printer camera")))
+    finally:
+        pn.apprise.Apprise = real
+    age = "Camera image from 74 s ago: Creality takes one per layer."
+    check("Send Test: an old picture's age in the text and the console",
+          sent and sent[0].endswith("\n\n" + age) and age in res["lines"]
+          and "Attaching a camera snapshot" in res["lines"],
+          (sent, res.get("lines")))
     for t in list(c2._tasks):
         t.cancel()
     # The printer's own camera is the default when none is set

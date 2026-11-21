@@ -80,7 +80,9 @@ errors by push and email. By default, faults and power loss are also emailed.
   3 seconds after the pause starts, once the nozzle has moved off the part.
 - **Images never block a notification**: Images are uploaded as files, so your
   phone doesn't need to reach the printer. If the camera is unavailable, the
-  notification is sent without the image.
+  notification is sent without the image. A printer camera picture more
+  than a minute old says so at the end of the text ("Camera image from
+  74 s ago."; minutes from 2 minutes on).
 - **Spoolman**: The Spoolman notifications appear when the
   [Spoolman integration](https://snapmakeru1-extended-firmware.pages.dev/spoolman) is enabled. They use each toolhead's
   assigned spool and the slicer's per-filament weights, mapped to toolheads
@@ -881,7 +883,10 @@ python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubuserco
 - **Camera**: choose **Printer camera**. The picture comes from the Hi's
   own camera, through the firmware's own ffmpeg. With a Printer URL set,
   notifications get a **Live Camera** link to the Hi's own live view
-  (port 8000), which plays in any browser.
+  (port 8000), which plays in any browser. While printing, the Hi takes
+  its own picture at each layer change, so a picture can be some time old:
+  more than a minute, and the text ends with e.g. "Camera image from 74 s
+  ago: Creality takes one per layer."
 - Notifications for hardware the Hi doesn't have (a chamber heater, driver
   temperatures) are left off the page.
 - Print hooks (the print-end snapshot lift) are not installed on the Hi;

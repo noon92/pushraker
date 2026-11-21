@@ -28,7 +28,7 @@ import threading
 import time
 from typing import Any, Dict, Optional, Sequence, Tuple
 
-from . import Printer
+from . import Frame, Printer
 
 RX_HOSTNAME = re.compile(r"(Creality [A-Za-z0-9 +]+?)-[0-9A-Fa-f]{4}")
 # Where Creality's firmware keeps system_config.json: the Hi (and its
@@ -107,6 +107,8 @@ class Creality(Printer):
     model_name = "Creality printer"
     system_configs: Sequence[str] = SYSTEM_CONFIGS
     capture_bin = CAPTURE
+    # Its pictures while printing are its own, one per layer change
+    frame_note = "Creality takes one per layer"
     webrtc_bin = WEBRTC
     timelapse = TIMELAPSE
     print_refer = PRINT_REFER
@@ -199,9 +201,15 @@ class Creality(Printer):
         if (printing and self.timelapse_on()) or just_ended:
             if printing:
                 self._await_creality_frame()
+            try:
+                # The last frame was appended then: when it was taken
+                taken: Optional[float] = os.path.getmtime(self.timelapse)
+            except OSError:
+                taken = None
             frame = self._last_timelapse_frame()
             if frame is not None:
-                return self.decode(frame)
+                data, why = self.decode(frame)
+                return (Frame(data, taken) if data else data), why
             if printing or os.path.exists(self.timelapse):
                 return None, ("no camera frame yet (Creality takes one per "
                               "layer)" if printing else

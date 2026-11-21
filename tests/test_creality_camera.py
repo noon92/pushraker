@@ -112,6 +112,9 @@ open(a[-1], "wb").write(b"\\xff\\xd8\\xff" + src[-3:])
     check("...read only: no capture, the file untouched",
           not os.path.exists(calls) and os.stat(tl).st_size == old.st_size
           and os.stat(tl).st_mtime == old.st_mtime)
+    check("...with when Creality took it (the file's time)",
+          getattr(data, "taken", None) == old.st_mtime,
+          getattr(data, "taken", None))
 
     # A layer just changed: Creality's frame for it is due, wait for it
     st = {"print_stats": {"state": "printing", "info": {}},
@@ -170,6 +173,8 @@ open(a[-1], "wb").write(b"\\xff\\xd8\\xff" + src[-3:])
     data, why = c.snapshot("camera", {"state": "printing"})
     check("printing, timelapse off: a captured frame",
           data == b"\xff\xd8\xffNEW", (data, why))
+    check("...taken just now (no age)",
+          getattr(data, "taken", None) is None)
     check("...the timelapse file cut back, its time too",
           open(tl, "rb").read() == b"OLD"
           and os.stat(tl).st_mtime == 1000000)

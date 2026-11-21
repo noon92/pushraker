@@ -77,6 +77,7 @@ Floor: Moonraker with the `job_state` component (Nov 2021 on), Python 3.7. Below
 - [ ] The live link can still be the vendor's: the Hi's `webrtc_local` serves a page at `:8000/` that plays in a plain browser; the camera's stream `":8000/"` becomes the Live Camera link on the Printer URL's host.
 - [ ] The Hi (`printers/creality.py`, "Printer camera"): `capture 0` appends one self-contained H.264 frame (SPS, PPS, IDR) to Creality's **timelapse file** `/mnt/UDISK/timelapse/main_output.h264`.
   - Printing with timelapse on (`user_print_refer.json` `delay_image.switch`): read the last frame, read only. Creality's master-server captures at each layer change, the same moment as the layer notifications: wait (≤4 s) for that frame to land, or the picture is the previous layer's.
+  - Such a frame can be old (tall or slow layers). `snapshot()` returns it as a `printers.Frame` with `taken` (the file's mtime: when the last frame was appended); over 60 s the text ends with "Camera image from 74 s ago: <frame_note>." (`frame_note` is the profile's own reason, "Creality takes one per layer"; none: just the age).
   - Otherwise: capture, then restore the file exactly (size and times, or remove it).
   - Never within 10 minutes of a print's end (Creality builds the video then), never while a `capture` runs.
   - Decode with the firmware's ffmpeg at low priority, in a temp folder removed at once: pictures of the room never stay on the printer.
