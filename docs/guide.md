@@ -884,15 +884,15 @@ python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubuserco
   own camera, through the firmware's own ffmpeg. With a Printer URL set,
   notifications get a **Live Camera** link to the Hi's own live view
   (port 8000), which plays in any browser.
-- **Timelapse on, during a print**: pushraker takes its own fresh frame
-  through Creality's capture and removes it again. If it coincides with
-  Creality's own per-layer frame, it leaves it, so the timelapse video may
-  very rarely contain one extra frame (1/15 s). After a print it waits
-  the few seconds the Hi takes to make its video, so *Print complete*
-  has a current picture too. If its capture fails, the
-  Hi's last per-layer picture is sent, and when that is more than a minute
-  old the text ends with e.g. "Camera image from 74 s ago: Creality takes
-  one per layer."
+- **The picture** is the camera's current frame, read from the Hi's own
+  live stream (the one its live view plays); nothing is written. Only if
+  that fails does pushraker fall back to Creality's capture, which during
+  a print with timelapse on adds a frame to the timelapse file and removes
+  it again: if it coincides with Creality's own per-layer frame, it leaves
+  it, so the timelapse video may very rarely contain one extra frame
+  (1/15 s). If the capture fails too, the Hi's last per-layer picture is
+  sent, and when that is more than a minute old the text ends with e.g.
+  "Camera image from 74 s ago: Creality takes one per layer."
 - Notifications for hardware the Hi doesn't have (a chamber heater, driver
   temperatures) are left off the page.
 - Print hooks (the print-end snapshot lift) are not installed on the Hi;

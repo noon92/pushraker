@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
@@ -90,6 +91,18 @@ REUSE = 5.
 LAYER_HOLD = 2.
 FRAME_WAIT = 4.
 CAMERA_NAME = "Printer camera"
+# The live stream (findings-rev5): cam_app sends every frame of the camera's
+# own H.264 (1280x720, 15 fps, a keyframe each second; SPS, PPS, IDR) to up
+# to 6 clients of this Unix socket, each its own copy: the live page
+# (webrtc_local) and Creality's cloud view read it. pushraker reads one
+# keyframe as one more client and leaves: nothing written anywhere. cam_app
+# sends blocking, so the read never pauses and always ends within
+# STREAM_LIMIT seconds (tested on noon's Hi with the live page playing:
+# keyframe in 0.07-0.62 s, no frame dropped). It failing (no socket, refused,
+# no keyframe in time): `capture 0`, the fallback, with its own rules.
+H264_UDS = "/var/run/h264_uds"
+STREAM_LIMIT = 2.5
+STREAM_MAX = 8 * 1024 * 1024
 
 
 def _sps_starts(data: bytes) -> list:
@@ -103,6 +116,38 @@ def _sps_starts(data: bytes) -> list:
         if data[i + 3] & 0x1F == 7:
             out.append(i - 1 if i > 0 and data[i - 1] == 0 else i)
         i += 3
+
+
+def _nal_starts(data: bytes) -> list:
+    """(where each NAL unit's start code begins, its type)."""
+    out, i = [], 0
+    while True:
+        i = data.find(b"\x00\x00\x01", i)
+        if i < 0 or i + 3 >= len(data):
+            return out
+        out.append((i - 1 if i > 0 and data[i - 1] == 0 else i,
+                    data[i + 3] & 0x1F))
+        i += 3
+
+
+def keyframe(data: bytes) -> Tuple[Optional[bytes], int]:
+    """The first complete keyframe in a stretch of H.264: from an SPS
+    (type 7) through its IDR slices (5), up to the next frame's first unit
+    (a P slice 1, an SPS 7 or a delimiter 9). (None, where to keep reading
+    from) while incomplete."""
+    nals = _nal_starts(data)
+    for k, (start, kind) in enumerate(nals):
+        if kind != 7:
+            continue
+        idr = False
+        for at, t in nals[k + 1:]:
+            if t == 5:
+                idr = True
+            elif idr and t in (1, 7, 9):
+                return data[start:at], 0
+        return None, start
+    # No SPS yet: keep only a possible partial start code
+    return None, max(0, len(data) - 4)
 
 
 def last_frame(data: bytes) -> Optional[bytes]:
@@ -119,6 +164,7 @@ class Creality(Printer):
     # Its pictures while printing are its own, one per layer change
     frame_note = "Creality takes one per layer"
     webrtc_bin = WEBRTC
+    h264_uds = H264_UDS
     timelapse = TIMELAPSE
     print_refer = PRINT_REFER
     proc = "/proc"
@@ -210,6 +256,8 @@ class Creality(Printer):
         print_stats.state, "since_end" = seconds since a print ended or
         None; the component gives a huge number when none ended since it
         started, which the timelapse file's own time then covers):
+        - first, always: the current keyframe from the live stream
+          (stream_frame), which writes nothing. Failing that:
         - printing with timelapse on: `capture 0` once Creality's own
           capture for a layer change is done (_await_quiet), the timelapse
           file put back only when nothing but pushraker's frame was added
@@ -225,6 +273,14 @@ class Creality(Printer):
         None only when neither gives a frame, with the reason."""
         if not self.ffmpeg:
             return None, "no ffmpeg on this printer"
+        # The live stream's current keyframe: writes nothing, so the same
+        # whatever the printer is doing
+        frame, why = self.stream_frame()
+        if frame:
+            data, why = self.decode(frame)
+            if data:
+                return data, why
+        # The fallback: `capture 0` and Creality's timelapse file
         state = str(ctx.get("state") or "")
         printing = state in ("printing", "paused")
         since = ctx.get("since_end")
@@ -259,6 +315,41 @@ class Creality(Printer):
         if self.capturing():
             return None, "the printer is taking a timelapse frame"
         return self.capture_frame()
+
+    def stream_frame(self) -> Tuple[Optional[bytes], str]:
+        """One complete keyframe from cam_app's live stream (H264_UDS), as
+        one more client: read without pause, closed within STREAM_LIMIT
+        seconds whatever happens. Or why there's none."""
+        if not os.path.exists(self.h264_uds):
+            return None, "no live stream"
+        start = time.monotonic()
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        buf = b""
+        try:
+            sock.settimeout(0.5)
+            sock.connect(self.h264_uds)
+            while True:
+                left = STREAM_LIMIT - (time.monotonic() - start)
+                if left <= 0:
+                    return None, "no keyframe from the live stream in time"
+                sock.settimeout(min(0.5, left))
+                try:
+                    chunk = sock.recv(262144)
+                except socket.timeout:
+                    continue
+                if not chunk:
+                    return None, "the live stream closed"
+                buf += chunk
+                frame, keep = keyframe(buf)
+                if frame:
+                    return frame, ""
+                buf = buf[keep:]
+                if len(buf) > STREAM_MAX:
+                    return None, "no keyframe in the live stream"
+        except OSError as e:
+            return None, f"the live stream: {e}"
+        finally:
+            sock.close()
 
     def _last_frame_read_only(self) -> Tuple[Tuple[Optional[bytes], str],
                                              bool]:

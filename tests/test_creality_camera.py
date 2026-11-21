@@ -53,6 +53,202 @@ def script(path, body):
     os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
 
 
+def pframe(tag: bytes) -> bytes:
+    """A stand-in P frame (one non-IDR slice)."""
+    return b"\x00\x00\x00\x01\x41\x9a" + tag
+
+
+class FakeStream:
+    """cam_app's live stream: a Unix socket server sending `script` (a list
+    of bytes, or a float to pause) to each client, then holding the
+    connection (`then`: "hold" or "close")."""
+
+    def __init__(self, path, script, then="hold", refuse=False):
+        import socket as _s
+        self.path, self.script, self.then = path, script, then
+        self.refuse = refuse
+        self.clients = 0
+        self.closed_by_client = 0
+        self.srv = _s.socket(_s.AF_UNIX, _s.SOCK_STREAM)
+        self.srv.bind(path)
+        self.srv.listen(8)
+        self.srv.settimeout(0.2)
+        self.stop = False
+        self.th = threading.Thread(target=self._run, daemon=True)
+        self.th.start()
+
+    def _run(self):
+        import socket as _s
+        while not self.stop:
+            try:
+                conn, _ = self.srv.accept()
+            except (_s.timeout, OSError):
+                continue
+            self.clients += 1
+            if self.refuse:         # "Support 6 socket client only!"
+                conn.close()
+                continue
+            threading.Thread(target=self._serve, args=(conn,),
+                             daemon=True).start()
+
+    def _serve(self, conn):
+        try:
+            for item in self.script:
+                if isinstance(item, float):
+                    time.sleep(item)
+                else:
+                    conn.sendall(item)
+            if self.then == "hold":
+                t0 = time.monotonic()
+                while time.monotonic() - t0 < 10 and not self.stop:
+                    conn.sendall(pframe(b"PPP"))
+                    time.sleep(0.066)
+        except OSError:
+            self.closed_by_client += 1
+        finally:
+            conn.close()
+
+    def close(self):
+        self.stop = True
+        self.srv.close()
+        try:
+            os.remove(self.path)
+        except OSError:
+            pass
+
+
+def run_stream_tests(c, work, tl, calls, refer_switch, cap):
+    """The live stream first; `capture 0` only when it gives nothing."""
+    sockdir = tempfile.mkdtemp(dir="/tmp", prefix="crs")
+    path = os.path.join(sockdir, "h264_uds")
+    c.h264_uds = path
+    c.capture_bin = cap
+    limit, reuse = creality.STREAM_LIMIT, creality.REUSE
+    creality.STREAM_LIMIT = 1.0
+    creality.REUSE = 0
+    c._last_picture = None
+    refer_switch(1)
+    orig = frame(b"L01")
+
+    def fresh():
+        with open(tl, "wb") as f:
+            f.write(orig)
+        os.utime(tl, (3000000, 3000000))
+        if os.path.exists(calls):
+            os.remove(calls)
+
+    def untouched():
+        return open(tl, "rb").read() == orig \
+            and os.stat(tl).st_mtime == 3000000 \
+            and not os.path.exists(calls)
+    try:
+        # Mid-stream: P frames, then a keyframe, then P frames
+        fs = FakeStream(path, [pframe(b"P01")[3:], pframe(b"P02"),
+                               frame(b"UDS"), pframe(b"P03")])
+        fresh()
+        t0 = time.monotonic()
+        data, why = c.snapshot("camera", {"state": "printing"})
+        took = time.monotonic() - t0
+        check("live stream: its keyframe, nothing written, no capture",
+              data == b"\xff\xd8\xffUDS" and untouched(), (data, why))
+        check("...at once, also printing (no wait for Creality's frame)",
+              took < 0.8, took)
+        check("...a fresh picture: no age", getattr(data, "taken", None)
+              is None)
+        time.sleep(0.3)
+        check("...the connection closed again (the server's next send "
+              "fails)", fs.closed_by_client == 1, fs.closed_by_client)
+        # After a print, during Creality's video: still the stream, no wait
+        d = os.path.join(c.proc, "88")
+        os.makedirs(d)
+        with open(os.path.join(d, "cmdline"), "wb") as f:
+            f.write(b"/usr/bin/ffmpeg\x00-i\x00" + tl.encode() + b"\x00")
+        fresh()
+        t0 = time.monotonic()
+        data, why = c.snapshot("camera", {"state": "complete",
+                                          "since_end": 0.5})
+        took = time.monotonic() - t0
+        shutil.rmtree(d)
+        check("...just after a print, the video being made: the stream at "
+              "once, the file untouched", data == b"\xff\xd8\xffUDS"
+              and took < 0.8 and untouched(), (data, took))
+        fs.close()
+
+        # A slow sender: the keyframe in pieces, within the limit
+        kf = frame(b"SLW")
+        fs = FakeStream(path, [pframe(b"P01"), kf[:6], 0.3, kf[6:12], 0.3,
+                               kf[12:], pframe(b"P02")])
+        fresh()
+        data, why = c.snapshot("camera", {"state": "standby",
+                                          "since_end": None})
+        check("slow sender: the keyframe put together",
+              data == b"\xff\xd8\xffSLW" and untouched(), (data, why))
+        fs.close()
+
+        # No keyframe within the limit: `capture 0` instead
+        fs = FakeStream(path, [pframe(b"P01")])
+        fresh()
+        t0 = time.monotonic()
+        data, why = c.snapshot("camera", {"state": "standby",
+                                          "since_end": None})
+        took = time.monotonic() - t0
+        check("no keyframe in time: the capture fallback",
+              data == b"\xff\xd8\xffNEW" and open(calls).read()
+              == "capture 0\n", (data, why))
+        check("...after STREAM_LIMIT, not longer",
+              creality.STREAM_LIMIT - 0.1 <= took
+              < creality.STREAM_LIMIT + 1.5, took)
+        frame_alone, why = c.stream_frame()
+        check("...and why", frame_alone is None and "in time" in why, why)
+        fs.close()
+
+        # Refused (six clients already): fallback at once
+        fs = FakeStream(path, [], refuse=True)
+        fresh()
+        t0 = time.monotonic()
+        data, why = c.snapshot("camera", {"state": "standby",
+                                          "since_end": None})
+        took = time.monotonic() - t0
+        check("refused (6 clients): the capture fallback, quickly",
+              data == b"\xff\xd8\xffNEW" and took < 1.0 and fs.clients == 1,
+              (data, took, fs.clients))
+        fs.close()
+
+        # The server closes mid-keyframe: fallback
+        kf = frame(b"CUT")
+        fs = FakeStream(path, [pframe(b"P01"), kf[:8]], then="close")
+        fresh()
+        data, why = c.snapshot("camera", {"state": "standby",
+                                          "since_end": None})
+        check("the stream closing mid-keyframe: the capture fallback",
+              data == b"\xff\xd8\xffNEW", (data, why))
+        fs.close()
+
+        # Printing, the stream failing: the fallback's own rules (guarded)
+        fs = FakeStream(path, [], refuse=True)
+        fresh()
+        data, why = c.snapshot("camera", {"state": "printing"})
+        check("printing, the stream refused: capture, guarded restore",
+              data == b"\xff\xd8\xffNEW" and open(tl, "rb").read() == orig,
+              (data, why))
+        fs.close()
+
+        check("keyframe(): SPS..IDR up to the next frame",
+              creality.keyframe(pframe(b"a") + frame(b"K") + pframe(b"b"))[0]
+              == frame(b"K"))
+        check("...incomplete: none, kept from the SPS on",
+              creality.keyframe(pframe(b"a") + frame(b"K"))
+              == (None, len(pframe(b"a"))))
+    finally:
+        creality.STREAM_LIMIT, creality.REUSE = limit, reuse
+        c.h264_uds = os.path.join(work, "no-h264_uds")
+        shutil.rmtree(sockdir, ignore_errors=True)
+        if os.path.exists(tl):
+            os.remove(tl)
+        if os.path.exists(calls):
+            os.remove(calls)
+
+
 def run_creality_camera_tests():
     print("The Creality Hi's camera (capture + the firmware's ffmpeg)")
     work = tempfile.mkdtemp(prefix="creality_cam_")
@@ -75,6 +271,8 @@ open(a[-1], "wb").write(b"\\xff\\xd8\\xff" + src[-3:])
     c = creality.Creality(["box"])
     c.ffmpeg, c.capture_bin, c.timelapse = ff, cap, tl
     c.print_refer, c.proc = refer, proc
+    # No live stream unless a case sets one up (the fallback's cases)
+    c.h264_uds = os.path.join(work, "no-h264_uds")
     # Each case below takes its own picture (the reuse is tested at the end)
     reuse = creality.REUSE
     creality.REUSE = 0
@@ -418,6 +616,8 @@ time.sleep(3)
           "left as it was", len(got) == 2 and got[0][0] == got[1][0]
           == b"\xff\xd8\xffNEW" and open(calls).read() == "capture 0\n"
           and not os.path.exists(tl), (got, open(calls).read()))
+
+    run_stream_tests(c, work, tl, calls, refer_switch, cap)
 
     # A real ffmpeg, a real stream: each frame with its own headers
     real = shutil.which("ffmpeg")
