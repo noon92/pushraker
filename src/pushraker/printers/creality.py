@@ -72,13 +72,12 @@ _LOCK = threading.Lock()
 REUSE = 5.
 # Creality's master-server runs `capture 0` itself at every layer change
 # (its log: 0.1-0.8 s after the change; the frame lands up to ~1.2 s after
-# that), the same moment pushraker's layer notifications fire. Read too
-# early, the newest frame is the previous layer's (the Hi, 2026-11-21: the
-# "Layer complete" picture was the start of layer 1, 75 s old). So within
-# FRAME_EXPECT seconds of a layer change, wait for that frame to start
-# landing, then for any capture to end and the file to settle; FRAME_WAIT
-# bounds the whole wait.
-FRAME_EXPECT = 2.5
+# that), the same moment pushraker's layer notifications fire. During a
+# print with Creality's timelapse on, pushraker takes its own frame too
+# (fresh, not the last layer's), but not alongside Creality's: it waits
+# until LAYER_HOLD seconds after a layer change, with no `capture` running
+# and the file settled, FRAME_WAIT at most, then goes.
+LAYER_HOLD = 2.
 FRAME_WAIT = 4.
 CAMERA_NAME = "Printer camera"
 
@@ -140,14 +139,16 @@ class Creality(Printer):
         except (OSError, ValueError, TypeError, AttributeError):
             return True
 
-    def capturing(self) -> bool:
+    def capturing(self, exclude: Optional[int] = None) -> bool:
         """Whether a `capture` is running (Creality's own, for its
-        timelapse)."""
+        timelapse; `exclude`: pushraker's own one's pid)."""
         try:
             pids = [p for p in os.listdir(self.proc) if p.isdigit()]
         except OSError:
             return False
         for pid in pids:
+            if exclude is not None and pid == str(exclude):
+                continue
             try:
                 with open(os.path.join(self.proc, pid, "cmdline"),
                           "rb") as f:
@@ -176,9 +177,13 @@ class Creality(Printer):
         print_stats.state, "since_end" = seconds since a print ended or
         None; the component gives a huge number when none ended since it
         started, which the timelapse file's own time then covers):
-        - printing with timelapse on, or within VIDEO_SETTLE after a print
-          (Creality makes the video then): the newest frame in the
-          timelapse file, read only (Creality's own last picture);
+        - printing with timelapse on: `capture 0` once Creality's own
+          capture for a layer change is done (_await_quiet), the timelapse
+          file put back only when nothing but pushraker's frame was added
+          (capture_frame, guarded). The capture failing: Creality's last
+          frame instead, read only, with when it was taken;
+        - within VIDEO_SETTLE after a print (Creality makes the video
+          then): the newest frame in the timelapse file, read only;
         - otherwise (printing with timelapse off, idle, or just ended with
           no file, so no video pending): `capture 0`, then the timelapse
           file put back exactly as it was; never while a `capture` runs.
@@ -195,30 +200,41 @@ class Creality(Printer):
             written = None
         just_ended = not printing and any(
             t is not None and t < VIDEO_SETTLE for t in (since, written))
-        # Where touching Creality's timelapse file isn't safe (its video is
-        # being recorded, or made from it now), its newest frame is read,
-        # read only: Creality's own last picture
-        if (printing and self.timelapse_on()) or just_ended:
-            if printing:
-                self._await_creality_frame()
-            try:
-                # The last frame was appended then: when it was taken
-                taken: Optional[float] = os.path.getmtime(self.timelapse)
-            except OSError:
-                taken = None
-            frame = self._last_timelapse_frame()
-            if frame is not None:
-                data, why = self.decode(frame)
-                return (Frame(data, taken) if data else data), why
-            if printing or os.path.exists(self.timelapse):
-                return None, ("no camera frame yet (Creality takes one per "
-                              "layer)" if printing else
-                              "the printer is making its timelapse video "
+        if printing and self.timelapse_on():
+            quiet = self._await_quiet()
+            data, why = self.capture_frame(guarded=True, quiet=quiet)
+            if data:
+                return data, why
+            last, _ = self._last_frame_read_only()
+            return last if last[0] else (None, why)
+        if just_ended:
+            # Creality is making its video from the file: read only
+            got, frame_found = self._last_frame_read_only()
+            if frame_found:
+                return got
+            if os.path.exists(self.timelapse):
+                return None, ("the printer is making its timelapse video "
                               "and its last frame couldn't be read")
             # Just ended, but no file: no video pending, a capture is safe
         if self.capturing():
             return None, "the printer is taking a timelapse frame"
         return self.capture_frame()
+
+    def _last_frame_read_only(self) -> Tuple[Tuple[Optional[bytes], str],
+                                             bool]:
+        """Creality's newest frame in the timelapse file, decoded, as a
+        Frame with when it was taken; and whether there was one."""
+        try:
+            # The last frame was appended then: when it was taken
+            taken: Optional[float] = os.path.getmtime(self.timelapse)
+        except OSError:
+            taken = None
+        frame = self._last_timelapse_frame()
+        if frame is None:
+            return (None, "no camera frame yet (Creality takes one per "
+                    "layer)"), False
+        data, why = self.decode(frame)
+        return ((Frame(data, taken) if data else data), why), True
 
     def adjust_status(self, data: Dict[str, Any],
                       status: Dict[str, Dict[str, Any]]) -> None:
@@ -231,41 +247,31 @@ class Creality(Printer):
             if layer:
                 self._layer_changed = time.monotonic()
 
-    def _await_creality_frame(self) -> None:
-        """Creality's frame for a layer that just started: wait (at most
-        FRAME_WAIT) for it to start landing, for its `capture` to end and
-        the file to settle, so the newest frame is this layer's."""
-        def size() -> int:
-            try:
-                return os.path.getsize(self.timelapse)
-            except OSError:
-                return -1
+    def _size(self) -> int:
+        try:
+            return os.path.getsize(self.timelapse)
+        except OSError:
+            return -1
+
+    def _await_quiet(self) -> bool:
+        """Until Creality isn't capturing: LAYER_HOLD seconds after a layer
+        change, no `capture` running, the timelapse file's size held for
+        SETTLE_STEADY. FRAME_WAIT at most; whether it got there."""
         start = time.monotonic()
-        deadline = start + FRAME_WAIT
-        changed = getattr(self, "_layer_changed", None)
-        size0, grew = size(), False
-        if changed is not None and start - changed < FRAME_EXPECT:
-            # A layer just changed: Creality's frame is due
-            until = min(changed + FRAME_EXPECT, deadline)
-            while time.monotonic() < until:
-                if size() != size0 or self.capturing():
-                    grew = True
-                    break
-                time.sleep(0.05)
-        if not grew and not self.capturing():
-            return              # nothing on its way: read now
-        while self.capturing() and time.monotonic() < deadline:
+        last, since = self._size(), start
+        while True:
+            now = time.monotonic()
+            size = self._size()
+            if size != last:
+                last, since = size, now
+            changed = getattr(self, "_layer_changed", None)
+            if (changed is None or now - changed >= LAYER_HOLD) \
+                    and now - since >= SETTLE_STEADY \
+                    and not self.capturing():
+                return True
+            if now - start >= FRAME_WAIT:
+                return False
             time.sleep(0.05)
-        # `capture` may return before the frame lands: the size must hold
-        end = deadline
-        last, since = size(), time.monotonic()
-        while time.monotonic() < end:
-            time.sleep(0.05)
-            now = size()
-            if now != last:
-                last, since = now, time.monotonic()
-            elif time.monotonic() - since >= SETTLE_STEADY and now >= 0:
-                return
 
     def _last_timelapse_frame(self) -> Optional[bytes]:
         try:
@@ -277,38 +283,64 @@ class Creality(Printer):
             return None
         return last_frame(tail)
 
-    def capture_frame(self) -> Tuple[Optional[bytes], str]:
+    def capture_frame(self, guarded: bool = False, quiet: bool = True
+                      ) -> Tuple[Optional[bytes], str]:
         """`capture 0`, the new frame decoded, the timelapse file restored
-        (cut back to its size, or removed if it wasn't there)."""
+        (cut back to its size, or removed if it wasn't there).
+        `guarded` (Creality's timelapse recording): restored only when
+        exactly one self-contained frame was added and Creality wasn't
+        capturing meanwhile (no other `capture`, no layer change; `quiet`:
+        nor before). Otherwise left as it is: Creality's own frame is
+        never cut, the video gets ours as one extra frame at worst."""
         path = self.timelapse
         before = os.path.getsize(path) if os.path.exists(path) else None
         times = (os.stat(path).st_atime, os.stat(path).st_mtime) \
             if before is not None else None
+        layer0 = getattr(self, "_layer_changed", None)
+        seen = not quiet          # Creality's capture in our window
         failed = ""
         new = b""
         try:
             try:
-                r = subprocess.run([self.capture_bin, "0"],
-                                   stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL,
-                                   timeout=DECODE_TIMEOUT)
-                if r.returncode:
-                    failed = f"exit {r.returncode}"
+                proc = subprocess.Popen([self.capture_bin, "0"],
+                                        stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL)
+                end = time.monotonic() + DECODE_TIMEOUT
+                while proc.poll() is None:
+                    if guarded and self.capturing(exclude=proc.pid):
+                        seen = True
+                    if time.monotonic() > end:
+                        proc.kill()
+                        proc.wait()
+                        raise subprocess.TimeoutExpired(
+                            self.capture_bin, DECODE_TIMEOUT)
+                    time.sleep(0.02)
+                if proc.returncode:
+                    failed = f"exit {proc.returncode}"
             except (OSError, subprocess.TimeoutExpired) as e:
                 failed = str(e)
             # Whatever happened, wait for cam_app's write to land, so the
             # restore below takes all of it back
-            self.settle(path)
-            if not failed:
-                try:
-                    with open(path, "rb") as f:
-                        f.seek(before or 0)
-                        new = f.read()
-                except OSError as e:
+            if self.settle(path, self.capturing if guarded else None):
+                seen = True
+            try:
+                with open(path, "rb") as f:
+                    f.seek(before or 0)
+                    new = f.read()
+            except OSError as e:
+                if not failed:
                     failed = str(e)
         finally:
             try:
-                if before is None:
+                restore = True
+                if guarded:
+                    restore = not seen and len(_sps_starts(new)) == 1 \
+                        and getattr(self, "_layer_changed", None) == layer0 \
+                        and not self.capturing() \
+                        and self._size() == (before or 0) + len(new)
+                if not restore:
+                    pass
+                elif before is None:
                     if os.path.exists(path):
                         os.remove(path)
                 elif os.path.getsize(path) > before:
@@ -325,9 +357,10 @@ class Creality(Printer):
         return self.decode(frame)
 
     @staticmethod
-    def settle(path: str) -> None:
+    def settle(path: str, watch: Any = None) -> bool:
         """Until the file's size has held for SETTLE_STEADY seconds (at most
-        SETTLE_MAX)."""
+        SETTLE_MAX). `watch`: a check run meanwhile; whether it was ever
+        true."""
         def size() -> int:
             try:
                 return os.path.getsize(path)
@@ -335,13 +368,17 @@ class Creality(Printer):
                 return -1
         end = time.monotonic() + SETTLE_MAX
         last, since = size(), time.monotonic()
+        seen = False
         while time.monotonic() < end:
             time.sleep(0.05)
+            if watch is not None and watch():
+                seen = True
             now = size()
             if now != last:
                 last, since = now, time.monotonic()
             elif time.monotonic() - since >= SETTLE_STEADY and now >= 0:
-                return
+                break
+        return seen
 
     def decode(self, h264: bytes) -> Tuple[Optional[bytes], str]:
         """One H.264 frame to a JPEG with the firmware's ffmpeg, at low

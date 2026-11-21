@@ -101,69 +101,139 @@ open(a[-1], "wb").write(b"\\xff\\xd8\\xff" + src[-3:])
     check("no ffmpeg: no camera", nof.cameras() == {}
           and nof.snapshot("camera", {"state": "printing"})[0] is None)
 
-    # Printing, timelapse on: the last frame, read only
+    # Printing, timelapse on: a fresh frame of our own, the file put back
+    # only when nothing but our frame was added
     refer_switch(1)
-    with open(tl, "wb") as f:
-        f.write(frame(b"L01") + frame(b"L02") + frame(b"L03"))
-    old = os.stat(tl)
-    data, why = c.snapshot("camera", {"state": "printing", "since_end": None})
-    check("printing, timelapse on: the newest frame Creality took",
-          data == b"\xff\xd8\xffL03", (data, why))
-    check("...read only: no capture, the file untouched",
-          not os.path.exists(calls) and os.stat(tl).st_size == old.st_size
-          and os.stat(tl).st_mtime == old.st_mtime)
-    check("...with when Creality took it (the file's time)",
-          getattr(data, "taken", None) == old.st_mtime,
-          getattr(data, "taken", None))
+    orig = frame(b"L01") + frame(b"L02") + frame(b"L03")
 
-    # A layer just changed: Creality's frame for it is due, wait for it
+    def fresh_file():
+        with open(tl, "wb") as f:
+            f.write(orig)
+        os.utime(tl, (1000000, 1000000))
+        if os.path.exists(calls):
+            os.remove(calls)
+
+    def untouched():
+        return open(tl, "rb").read() == orig \
+            and os.stat(tl).st_mtime == 1000000
+
+    fresh_file()
+    data, why = c.snapshot("camera", {"state": "printing", "since_end": None})
+    check("printing, timelapse on: a fresh frame (`capture 0`)",
+          data == b"\xff\xd8\xffNEW" and open(calls).read() == "capture 0\n",
+          (data, why))
+    check("...no collision: the file restored byte for byte, its time too",
+          untouched(), os.path.getsize(tl))
+    check("...a fresh picture: no age", getattr(data, "taken", None) is None)
+
+    # Collision: two frames added (Creality's landed with ours): left alone
+    both = os.path.join(work, "capture_both")
+    script(both, f"""open({tl!r}, "ab").write({frame(b"CRE") + frame(b"NEW")!r})
+""")
+    c.capture_bin = both
+    fresh_file()
+    data, why = c.snapshot("camera", {"state": "printing"})
+    check("collision (two frames added): the file left as it is, "
+          "Creality's frame kept", open(tl, "rb").read()
+          == orig + frame(b"CRE") + frame(b"NEW"), os.path.getsize(tl))
+    check("...the picture is the newest frame", data == b"\xff\xd8\xffNEW",
+          data)
+
+    # Creality's `capture` seen while ours runs: one frame, still left
+    other = os.path.join(work, "capture_other")
+    script(other, f"""import os, time
+d = os.path.join({proc!r}, "43")
+os.makedirs(d)
+open(os.path.join(d, "cmdline"), "wb").write(b"capture\\x000\\x00")
+time.sleep(0.3)
+open({tl!r}, "ab").write({frame(b"NEW")!r})
+os.remove(os.path.join(d, "cmdline"))
+os.rmdir(d)
+""")
+    c.capture_bin = other
+    fresh_file()
+    data, why = c.snapshot("camera", {"state": "printing"})
+    check("Creality capturing during ours: left as it is",
+          data == b"\xff\xd8\xffNEW"
+          and open(tl, "rb").read() == orig + frame(b"NEW"), (data, why))
+
+    # A layer change during ours (Creality's capture follows): left alone
+    slowcap = os.path.join(work, "capture_slowish")
+    script(slowcap, f"""import time
+time.sleep(0.9)
+open({tl!r}, "ab").write({frame(b"NEW")!r})
+""")
+    c.capture_bin = slowcap
+    fresh_file()
     st = {"print_stats": {"state": "printing", "info": {}},
           "virtual_sdcard": {"layer": 3, "layer_count": 0}}
     c.adjust_status({"virtual_sdcard": {"layer": 3}}, st)
     c._layer_changed -= 100     # as if layer 3 started long ago
-    t0 = time.monotonic()
-    data, why = c.snapshot("camera", {"state": "printing"})
-    check("a layer changed long ago: the newest frame at once",
-          data == b"\xff\xd8\xffL03" and time.monotonic() - t0 < 0.5,
-          (data, why))
-    c.adjust_status({"virtual_sdcard": {"layer": 3}}, st)
-    check("...the same layer again doesn't count as a change",
-          time.monotonic() - c._layer_changed > 50)
-    st["virtual_sdcard"]["layer"] = 4
-    c.adjust_status({"virtual_sdcard": {"layer": 4}}, st)
 
-    def creality_captures():
-        time.sleep(0.6)
-        with open(tl, "ab") as f:
-            f.write(frame(b"L04")[:10])
-        time.sleep(0.2)
-        with open(tl, "ab") as f:
-            f.write(frame(b"L04")[10:])
-    th = threading.Thread(target=creality_captures)
+    def next_layer():
+        # After the quiet wait (SETTLE_STEADY), while ours runs
+        time.sleep(creality.SETTLE_STEADY + 0.3)
+        st["virtual_sdcard"]["layer"] = 4
+        c.adjust_status({"virtual_sdcard": {"layer": 4}}, st)
+    th = threading.Thread(target=next_layer)
     th.start()
-    t0 = time.monotonic()
     data, why = c.snapshot("camera", {"state": "printing"})
-    took = time.monotonic() - t0
     th.join()
-    check("a layer just changed: Creality's frame for it, not the last "
-          "layer's", data == b"\xff\xd8\xffL04", (data, why))
-    check("...after it landed whole, within the bound",
-          0.8 <= took < creality.FRAME_WAIT + 0.5, took)
-    check("...still read only", not os.path.exists(calls))
+    check("a layer change during ours: left as it is",
+          data == b"\xff\xd8\xffNEW"
+          and open(tl, "rb").read() == orig + frame(b"NEW"), (data, why))
+
+    # Hold-off: just after a layer change, wait LAYER_HOLD before capturing
+    c.capture_bin = cap
+    fresh_file()
     st["virtual_sdcard"]["layer"] = 5
     c.adjust_status({"virtual_sdcard": {"layer": 5}}, st)
     t0 = time.monotonic()
     data, why = c.snapshot("camera", {"state": "printing"})
     took = time.monotonic() - t0
-    check("a layer changed but no frame comes: the newest one after "
-          "FRAME_EXPECT", data == b"\xff\xd8\xffL04"
-          and creality.FRAME_EXPECT - 0.2 <= took
-          < creality.FRAME_EXPECT + 0.5, (data, took))
-    c._layer_changed = None
+    check("a layer just changed: ours waits until LAYER_HOLD after it",
+          creality.LAYER_HOLD - 0.1 <= took < creality.FRAME_WAIT + 1,
+          took)
+    check("...then a fresh frame, the file restored",
+          data == b"\xff\xd8\xffNEW" and untouched(), (data, why))
+    c._layer_changed -= 100
+
+    # Creality's `capture` still running after FRAME_WAIT: go, leave it
+    os.makedirs(os.path.join(proc, "42"))
+    with open(os.path.join(proc, "42", "cmdline"), "wb") as f:
+        f.write(b"/usr/bin/capture\x000\x00")
+    fresh_file()
+    t0 = time.monotonic()
+    data, why = c.snapshot("camera", {"state": "printing"})
+    took = time.monotonic() - t0
+    shutil.rmtree(os.path.join(proc, "42"))
+    check("Creality's capture running throughout: ours after FRAME_WAIT, "
+          "the file left as it is", data == b"\xff\xd8\xffNEW"
+          and creality.FRAME_WAIT - 0.1 <= took
+          and open(tl, "rb").read() == orig + frame(b"NEW"), (data, took))
+
+    # Our capture fails: Creality's last frame, read only, with its time
+    bad = os.path.join(work, "capture_bad")
+    script(bad, "import sys\nsys.exit(1)\n")
+    c.capture_bin = bad
+    fresh_file()
+    data, why = c.snapshot("camera", {"state": "printing"})
+    check("our capture fails: Creality's last frame instead",
+          data == b"\xff\xd8\xffL03" and untouched(), (data, why))
+    check("...with when it was taken (the file's time: the age line)",
+          getattr(data, "taken", None) == 1000000,
+          getattr(data, "taken", None))
     os.remove(tl)
     data, why = c.snapshot("camera", {"state": "printing"})
-    check("...no frame yet (before the first layer): none, and why",
-          data is None and "per layer" in why, why)
+    check("...and no frame at all: none, with the capture's reason",
+          data is None and "didn't take a picture" in why, why)
+    c.capture_bin = cap
+    data, why = c.snapshot("camera", {"state": "printing"})
+    check("no file yet while printing: a fresh frame, the file removed "
+          "again", data == b"\xff\xd8\xffNEW" and not os.path.exists(tl),
+          (data, why))
+    if os.path.exists(calls):
+        os.remove(calls)
 
     # Printing, timelapse off: capture, then the file exactly as before
     refer_switch(0)
