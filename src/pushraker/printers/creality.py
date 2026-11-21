@@ -157,42 +157,51 @@ class Creality(Printer):
         print_stats.state, "since_end" = seconds since a print ended or
         None; the component gives a huge number when none ended since it
         started, which the timelapse file's own time then covers):
-        - printing, timelapse on: the last timelapse frame Creality took
-          (one per layer), read only;
-        - printing, timelapse off, or idle: `capture 0`, then the timelapse
-          file put back exactly as it was;
-        - not within VIDEO_SETTLE after a print (the video is being made),
-          never while a `capture` runs."""
+        - printing with timelapse on, or within VIDEO_SETTLE after a print
+          (Creality makes the video then): the newest frame in the
+          timelapse file, read only (Creality's own last picture);
+        - otherwise (printing with timelapse off, idle, or just ended with
+          no file, so no video pending): `capture 0`, then the timelapse
+          file put back exactly as it was; never while a `capture` runs.
+        None only when neither gives a frame, with the reason."""
         if not self.ffmpeg:
             return None, "no ffmpeg on this printer"
         state = str(ctx.get("state") or "")
-        if state in ("printing", "paused") and self.timelapse_on():
-            try:
-                size = os.path.getsize(self.timelapse)
-                with open(self.timelapse, "rb") as f:
-                    f.seek(max(0, size - TAIL_BYTES))
-                    tail = f.read()
-            except OSError:
-                return None, ("no timelapse frame yet (Creality takes one "
-                              "per layer)")
-            frame = last_frame(tail)
-            if frame is None:
-                return None, "no timelapse frame yet"
-            return self.decode(frame)
+        printing = state in ("printing", "paused")
         since = ctx.get("since_end")
         try:
             # Also after a Moonraker restart, which forgets the print
             written = time.time() - os.path.getmtime(self.timelapse)
         except OSError:
             written = None
-        if state not in ("printing", "paused") and any(
-                t is not None and t < VIDEO_SETTLE for t in (since, written)):
-            return None, ("the printer is making its timelapse video "
-                          f"(about {VIDEO_SETTLE / 60:.0f} minutes after a "
-                          "print)")
+        just_ended = not printing and any(
+            t is not None and t < VIDEO_SETTLE for t in (since, written))
+        # Where touching Creality's timelapse file isn't safe (its video is
+        # being recorded, or made from it now), its newest frame is read,
+        # read only: Creality's own last picture
+        if (printing and self.timelapse_on()) or just_ended:
+            frame = self._last_timelapse_frame()
+            if frame is not None:
+                return self.decode(frame)
+            if printing or os.path.exists(self.timelapse):
+                return None, ("no camera frame yet (Creality takes one per "
+                              "layer)" if printing else
+                              "the printer is making its timelapse video "
+                              "and its last frame couldn't be read")
+            # Just ended, but no file: no video pending, a capture is safe
         if self.capturing():
             return None, "the printer is taking a timelapse frame"
         return self.capture_frame()
+
+    def _last_timelapse_frame(self) -> Optional[bytes]:
+        try:
+            size = os.path.getsize(self.timelapse)
+            with open(self.timelapse, "rb") as f:
+                f.seek(max(0, size - TAIL_BYTES))
+                tail = f.read()
+        except OSError:
+            return None
+        return last_frame(tail)
 
     def capture_frame(self) -> Tuple[Optional[bytes], str]:
         """`capture 0`, the new frame decoded, the timelapse file restored

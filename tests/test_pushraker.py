@@ -2246,10 +2246,31 @@ async def test_camera_error_line():
     check("push: sent, the reason after a blank line",
           push and push[-1]["ok"] and push[-1]["body"] == want,
           push and push[-1]["body"])
+    check("...no stand-in picture (no print file: no render either)",
+          push[-1]["attach"] is None, push[-1]["attach"])
     check("email: the same line", email and email[-1]["ok"]
           and "Error sending camera image: the printer is making its "
               "timelapse video" in email[-1]["body"],
           email and email[-1]["body"][:300])
+    log.clear()
+    # With a print file: its render instead of the camera's picture
+    from PIL import Image
+    thumb_dir = tempfile.mkdtemp(dir=WORK)
+    thumb = os.path.join(thumb_dir, "render.png")
+    Image.new("RGB", (32, 32), (9, 9, 9)).save(thumb)
+    c._thumbnail = lambda *_a: thumb
+    await c._send_unchecked("paused", "⏸️ Hi paused", "Benchy.gcode",
+                            filename="Benchy.gcode")
+    await asyncio.sleep(0.3)
+    push = [e for e in log if e["channel"] == "ntfy"]
+    check("camera failed, the job has a render: that one is attached, the "
+          "text says why", push and push[-1]["attach"]
+          and push[-1]["attach"].endswith(".png")
+          and "Error sending camera image" in push[-1]["body"],
+          push and (push[-1]["attach"], push[-1]["body"]))
+    check("...and the render's own file is left alone",
+          os.path.exists(thumb))
+    c._thumbnail = lambda *_a: None
     log.clear()
     # No camera chosen: nothing asked for, no line
     c.snapshot_url = None
@@ -2315,6 +2336,58 @@ async def test_camera_error_line():
           in res["lines"], (sent, res.get("lines")))
     for t in list(c2._tasks):
         t.cancel()
+    # The printer's own camera is the default when none is set
+    reset_world()
+    STATE.pop("print_task_config", None)
+    STATE["box"] = {}
+    for name in ("config/pushraker.conf", "pushraker.secrets"):
+        try:
+            os.remove(os.path.join(WORK, "data", name))
+        except OSError:
+            pass
+    from pushraker.printers import creality as _cr
+    real_cams = _cr.Creality.cameras
+    _cr.Creality.cameras = lambda self: {"Printer camera": {
+        "snapshot": "printer:camera", "stream": ""}}
+    try:
+        server = Server()
+        c3 = pn.PushNotifications(Config(server, dict(name="Hi",
+                                                      settle_time="0.1")))
+        STATE["print_stats"] = ps("standby")
+        await server.handlers["server:klippy_ready"]()
+        check("fresh install: the printer's own camera is the default",
+              c3.printer.name == "creality"
+              and c3.settings["camera"] == "Printer camera",
+              c3.settings.get("camera"))
+        view = await server.endpoints["/server/pushraker/config"](
+            WebRequest("POST", {"camera": ""}))
+        check("...also when the camera is emptied again",
+              c3.settings["camera"] == "Printer camera")
+        # Restore: a camera this printer doesn't have keeps the one here
+        bk = await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "download"}))
+        other = json.loads(json.dumps(bk["backup"]))
+        other["settings"]["camera"] = "case"
+        other["settings"].setdefault("templates", {})["paused"] = {
+            "camera": "case"}
+        res = await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "restore", "backup": other}))
+        tpl = (res["view"].get("templates") or {}).get("paused") or {}
+        check("restore: another printer's camera names are ignored, this "
+              "printer's camera stays", res["view"]["camera"]
+              == "Printer camera" and tpl.get("camera", "") in ("", None),
+              (res["view"]["camera"], tpl))
+        own = json.loads(json.dumps(bk["backup"]))
+        own["settings"]["camera"] = "Printer camera"
+        res = await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "restore", "backup": own}))
+        check("...a camera this printer has is used",
+              res["view"]["camera"] == "Printer camera")
+        for t in list(c3._tasks):
+            t.cancel()
+    finally:
+        _cr.Creality.cameras = real_cams
+        STATE.pop("box", None)
     check("with_camera_error leaves other paths alone",
           pn.with_camera_error("x", "/tmp/snap.jpg") == "x"
           and pn.with_camera_error("x", None) == "x"
@@ -4446,20 +4519,16 @@ async def test_camera_pictures():
     check("a PNG: converted", (got["pic.png"][0] or b"")[:2] == b"\xff\xd8")
     check("something else: what it starts with", got["page.html"][0] is None
           and "<html>404" in got["page.html"][1], got["page.html"])
-    # A notification's camera picture that can't be read: a 4:3 picture
-    # saying why, in its place
+    # A notification's camera picture that can't be read: no stand-in
+    # picture, the reason for the text
     reset_world()
     server, c = make({}, {"paused": [("ntfy", FakeService([], "ntfy"),
                                       False)]})
     path = c._fetch_snapshot_sync(quiet=True,
                                   url=base + "page.html")
-    ok = bool(path) and os.path.exists(path)
-    size = Image.open(path).size if ok else None
-    check("unreadable camera: a 4:3 picture saying why",
-          ok and size[0] * 3 == size[1] * 4
-          and open(path, "rb").read(2) == b"\xff\xd8", (path, size))
-    if ok:
-        shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+    check("unreadable camera: no picture, and why",
+          path == "" and "<html>404" in getattr(path, "why", ""),
+          (path, getattr(path, "why", None)))
     path = c._fetch_snapshot_sync(quiet=True,
                                   url=base + "snap.jpg")
     check("readable camera: its own picture",

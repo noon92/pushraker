@@ -779,9 +779,9 @@ def short_cause(messages: List[str]) -> str:
 
 
 class SnapshotProblem(str):
-    """The picture that stands in for a camera picture that couldn't be
-    taken (or "" when not even that could be drawn), with the reason: the
-    notification still goes out, and its text says why."""
+    """A camera picture that couldn't be taken: no picture (""), with the
+    reason. The notification still goes out (with the print's render when
+    it has one), and its text says why."""
     why = ""
 
     def __new__(cls, path: str, why: str) -> "SnapshotProblem":
@@ -1406,7 +1406,7 @@ class PushNotifications:
         if self.store is None:
             return
         self.env = await self._env()
-        self.settings = self.store.load()
+        self.settings = self._own_camera(self.store.load())
         try:
             err = cfgmod.stored_error(self.settings, self.env)
         except Exception as e:
@@ -1491,9 +1491,23 @@ class PushNotifications:
                 await self._reload("file changed")
             else:
                 self.env = await self._env()
-                self.settings = self.store.load()
+                self.settings = self._own_camera(self.store.load())
         else:
             self.env = await self._env()
+
+    def _own_camera(self, s: Dict[str, Any]) -> Dict[str, Any]:
+        """No camera set: the printer's own (its profile's cameras(), e.g.
+        the Creality Hi's "Printer camera"), on a fresh install and
+        whenever it is empty. A camera found on a port is never chosen
+        for the user."""
+        if s and not s.get("camera"):
+            try:
+                own = list(self.printer.cameras())
+            except Exception:
+                own = []
+            if own:
+                s["camera"] = own[0]
+        return s
 
     async def _ep_config(self, web_request: Any) -> Dict[str, Any]:
         assert self.store is not None
@@ -1546,7 +1560,7 @@ class PushNotifications:
             # Either file failing leaves both as they were
             raise cfgmod.ConfigError(f"Could not write the settings: {e}. "
                                      "Nothing was saved.")
-        self.settings = s
+        self.settings = self._own_camera(s)
         self._apply_options(opts)
         await self._push_hooks()
         if cfgmod.push_configured(s) and s["provider"] == "gotify":
@@ -1680,6 +1694,18 @@ class PushNotifications:
                     if k not in cfgmod.SECRET_FIELDS
                     + ("secret_for", "email_password_for", "meta")
                     and not k.startswith("has_")}
+            # Cameras this printer doesn't have (the backup is from another
+            # one): the camera chosen here stays, default and per row
+            cams = set(self.env.cameras)
+            if data.get("camera") and data["camera"] not in cams:
+                data["camera"] = self.settings.get("camera", "")
+            here_tpl = self.settings.get("templates") or {}
+            for key, tpl in (data.get("templates") or {}).items():
+                if isinstance(tpl, dict) and tpl.get("camera") \
+                        and tpl["camera"] not in cams:
+                    mine = here_tpl.get(key) if isinstance(
+                        here_tpl.get(key), dict) else {}
+                    tpl["camera"] = mine.get("camera", "")
             # Tokens and passwords the file has: as if typed into the page
             secrets = cfgmod.backup_secrets(backup)
             data.update(secrets)
@@ -3591,7 +3617,8 @@ class PushNotifications:
             if not quiet:
                 logging.warning("[pushraker] no snapshot from %s: %s", url,
                                 why)
-            return SnapshotProblem(self._problem_picture(why) or "", why)
+            # No stand-in picture: the notification says why in its text
+            return SnapshotProblem("", why)
         tmpdir = tempfile.mkdtemp(prefix="pushraker_")
         path = os.path.join(tmpdir, "snapshot.jpg")
         try:
@@ -3714,7 +3741,7 @@ class PushNotifications:
         while True:
             last = time.monotonic() + PL_CAMERA_POLL >= deadline
             path = await self._fetch_snapshot(quiet=not last, key=key)
-            if path is not None or last:
+            if (path and not getattr(path, "why", "")) or last:
                 return path
             await asyncio.sleep(PL_CAMERA_POLL)
 
@@ -3850,9 +3877,13 @@ class PushNotifications:
                 path = await self._image(image, filename, snapshot,
                                          snapshot_ready, key)
             # A camera picture that was asked for and failed: sent all the
-            # same, the text saying why
+            # same, with the print's render if it has one, the text saying
+            # why
             body = with_camera_error(body, path)
-            named = self._named_copy(path or None, title, filename)
+            attach = path or None
+            if getattr(path, "why", "") and filename:
+                attach = self._thumbnail(filename)
+            named = self._named_copy(attach, title, filename)
             report: List[Dict[str, Any]] = []
             try:
                 results = self._outcomes(rid, dests, await asyncio.gather(*(
@@ -3861,7 +3892,9 @@ class PushNotifications:
                 self._mark_sent(rid, event["_at"], all(results))
                 self._console_report(report)
             finally:
-                if named is not None and named != path:
+                # Only the copy's own folder: never the original's (a
+                # Moonraker thumbnail, the render cache)
+                if named is not None and named not in (path, attach):
                     shutil.rmtree(os.path.dirname(named), ignore_errors=True)
                 if path and image == "snapshot":
                     shutil.rmtree(os.path.dirname(path), ignore_errors=True)

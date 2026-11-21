@@ -126,17 +126,25 @@ open(a[-1], "wb").write(b"\\xff\\xd8\\xff" + src[-3:])
     check("idle: a captured frame, the file it made removed",
           data == b"\xff\xd8\xffNEW" and not os.path.exists(tl), why)
     check("...`capture 0`, once", open(calls).read() == "capture 0\n")
-    # Idle, just after a print: Creality is making the video
+    # Just after a print (Creality is making the video): its last frame,
+    # read only
+    os.remove(calls)
+    with open(tl, "wb") as f:
+        f.write(frame(b"F01") + frame(b"END"))
     data, why = c.snapshot("camera", {"state": "complete",
                                       "since_end": 120.})
-    check("within 10 minutes of a print's end: no capture",
-          data is None and "timelapse video" in why, why)
-    with open(tl, "wb") as f:
-        f.write(frame(b"END"))
+    check("within 10 minutes of a print's end: the last frame, read only",
+          data == b"\xff\xd8\xffEND" and not os.path.exists(calls),
+          (data, why))
     data, why = c.snapshot("camera", {"state": "standby", "since_end": None})
     check("...also when Moonraker restarted meanwhile (the file is new)",
-          data is None and "timelapse video" in why, why)
+          data == b"\xff\xd8\xffEND" and not os.path.exists(calls), why)
     os.remove(tl)
+    data, why = c.snapshot("camera", {"state": "complete",
+                                      "since_end": 120.})
+    check("...no file (no video pending): a capture, the file removed again",
+          data == b"\xff\xd8\xffNEW" and not os.path.exists(tl)
+          and open(calls).read() == "capture 0\n", (data, why))
     # Creality's own capture running
     os.makedirs(os.path.join(proc, "42"))
     with open(os.path.join(proc, "42", "cmdline"), "wb") as f:
