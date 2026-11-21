@@ -2383,6 +2383,33 @@ async def test_camera_error_line():
             WebRequest("POST", {"how": "restore", "backup": own}))
         check("...a camera this printer has is used",
               res["view"]["camera"] == "Printer camera")
+        # Printer URL: another model's backup leaves it out, the same
+        # model's restores it
+        await server.endpoints["/server/pushraker/config"](
+            WebRequest("POST", {"printer_url": "http://192.168.0.220"}))
+        u1 = json.loads(json.dumps(bk["backup"]))
+        u1["from"]["printer"] = "Snapmaker U1"
+        u1["settings"]["printer_url"] = "http://snapmaker-u1"
+        res = await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "restore", "backup": u1}))
+        check("restore: another model's Printer URL is left out, this "
+              "printer's stays",
+              res["view"]["printer_url"] == "http://192.168.0.220",
+              res["view"]["printer_url"])
+        old_u1 = json.loads(json.dumps(u1))
+        del old_u1["from"]
+        res = await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "restore", "backup": old_u1}))
+        check("...also from a backup older than \"from\" (only U1s made "
+              "those)", res["view"]["printer_url"] == "http://192.168.0.220",
+              res["view"]["printer_url"])
+        same = json.loads(json.dumps(bk["backup"]))
+        same["settings"]["printer_url"] = "http://creality-hi.lan"
+        res = await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "restore", "backup": same}))
+        check("...the same model's Printer URL is restored",
+              res["view"]["printer_url"] == "http://creality-hi.lan",
+              (res["view"]["printer_url"], same.get("from")))
         for t in list(c3._tasks):
             t.cancel()
     finally:
@@ -3553,6 +3580,74 @@ async def test_preprint():
     check("none chosen: no line and no notification",
           len(log) == 1 and "Pre-print" not in log[0]["body"],
           [(e["title"], e["body"]) for e in log])
+
+
+async def test_preprint_generic():
+    print("Pre-print calibrations on a plain Klipper printer (stock "
+          "messages), the U1's own detection untouched")
+    reset_world()
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    server, c = make({}, {"started": [("ntfy", ntfy, False)],
+                          "preprint_done": [("ntfy", ntfy, False)]})
+    # A plain Klipper printer (no U1 objects) with a mesh and Z tilt
+    STATE.pop("print_task_config", None)
+    STATE["bed_mesh"] = {"profile_name": "default"}
+    STATE["z_tilt"] = {"applied": False}
+    await server.handlers["server:klippy_ready"]()
+    check("a printer with bed_mesh/z_tilt gets the generic watch, and the "
+          "row", c.printer.name == "generic" and c.printer.generic_preprint
+          and "preprint_done" not in c.printer.rows_unavailable,
+          (c.printer.name, getattr(c.printer, "generic_preprint", None)))
+    check("...the U1 doesn't (its own detection stays)",
+          not pn.printers.SnapmakerU1(["bed_mesh", "z_tilt"])
+          .generic_preprint)
+    await start_job(server)
+    await asyncio.sleep(0.3)
+    check("started lists nothing: what runs isn't known in advance",
+          len(log) == 1 and "Pre-print" not in log[0]["body"],
+          [e["body"] for e in log])
+    log.clear()
+    await c._on_status_update({"bed_mesh": {"profile_name": ""}}, 0)
+    c._on_gcode_response("// probe at 10.000,10.000 is z=0.12")
+    c._on_gcode_response("// Mesh Bed Leveling Complete")
+    c._on_gcode_response("// Making the following Z adjustments:")
+    c._on_gcode_response("// Retries: 1/5 Probed points range: 0.0010 "
+                         "tolerance: 0.0075")
+    await asyncio.sleep(0.2)
+    check("nothing before the first layer", log == [],
+          [e["title"] for e in log])
+    STATE["print_stats"]["info"] = {"current_layer": 1}
+    await c._on_status_update(
+        {"print_stats": {"info": {"current_layer": 1}}}, 0)
+    await asyncio.sleep(0.3)
+    titles = [e["title"] for e in log]
+    body = log[0]["body"] if log else ""
+    check("at the first layer: complete, with what ran and how long",
+          "📐 U1 pre-print calibrations complete" in titles
+          and "Bed mesh (0 s), Z tilt (0 s) done. Starting the print job."
+          in body, (titles, body))
+    log.clear()
+    await c._on_status_update(
+        {"print_stats": {"info": {"current_layer": 2}}}, 0)
+    await asyncio.sleep(0.2)
+    check("sent once", "📐 U1 pre-print calibrations complete"
+          not in [e["title"] for e in log], [e["title"] for e in log])
+    # Nothing ran: no notification
+    STATE["print_stats"] = ps("complete")
+    await server.handlers["job_state:state_changed"](
+        JobEvent.COMPLETE, {}, STATE["print_stats"])
+    await asyncio.sleep(0.2)
+    await start_job(server)
+    await asyncio.sleep(0.3)
+    log.clear()
+    STATE["print_stats"]["info"] = {"current_layer": 1}
+    await c._on_status_update(
+        {"print_stats": {"info": {"current_layer": 1}}}, 0)
+    await asyncio.sleep(0.3)
+    check("nothing ran: no notification",
+          "📐 U1 pre-print calibrations complete"
+          not in [e["title"] for e in log], [e["title"] for e in log])
 
 
 async def test_old_names():
@@ -4963,7 +5058,7 @@ async def run_component_tests():
               test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_render_thread, test_job_moments, test_current_extruder, test_macro_topic, test_template_limits, test_now_values, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
               test_driver_hot, test_bed_cooled, test_pushraker_values,
               test_print_by_object,
-              test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint,
+              test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint, test_preprint_generic,
               test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_custom_events, test_camera_pictures, test_codemirror,
               test_data, test_old_moonraker, test_page_current_moonraker,
               test_creality_layers, test_missing_hardware_rows,
@@ -5013,6 +5108,7 @@ def main():
     test_settings.run_settings_tests()
     test_settings.run_hidden_rows_tests()
     test_settings.run_installer_tests()
+    test_settings.run_backup_model_tests()
     test_settings.run_restore_notes_tests()
     _passes += test_settings._passes
     _failures += test_settings._failures

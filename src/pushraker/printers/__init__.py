@@ -19,6 +19,8 @@ file per printer), listed in PRINTERS below, not in the component.
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+from .. import preprint
+
 
 class Printer:
     """A plain Moonraker printer."""
@@ -102,6 +104,20 @@ class Printer:
         # Whether print_stats.info comes from the slicer (SET_PRINT_STATS_
         # INFO; Klipper only sets current_layer together with total_layer)
         self._slicer_layers = False
+        # Pre-print calibrations from stock Klipper (pushraker.preprint),
+        # for a profile without detection of its own: bed mesh, Z tilt,
+        # gantry level, as far as the printer has them
+        self.generic_preprint = not self.preprint_calibrations and \
+            preprint.available(self.objects)
+        if self.generic_preprint:
+            fields = dict(self.status_fields)
+            for obj, f in preprint.STATUS_FIELDS.items():
+                if obj in self.objects:
+                    fields[obj] = list(dict.fromkeys(
+                        list(fields.get(obj, [])) + f))
+            self.status_fields = fields
+            self.rows_unavailable = tuple(
+                r for r in self.rows_unavailable if r != "preprint_done")
 
     def has(self, obj: str) -> bool:
         return obj in self.objects

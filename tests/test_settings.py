@@ -629,6 +629,23 @@ def run_installer_tests():
     return _failures
 
 
+def run_backup_model_tests():
+    print("Which printer model a backup is from")
+    check("from: the model it names",
+          st.backup_model({"from": {"printer": "Creality Hi"}})
+          == "Creality Hi")
+    check("no from: a U1's (only U1s made those)",
+          st.backup_model({"settings": {}}) == "Snapmaker U1")
+    check("from without a printer: unknown", st.backup_model(
+        {"from": {"pushraker": "0.4"}}) == "")
+    check("another model", st.other_model(
+        {"from": {"printer": "Snapmaker U1"}}, "Creality Hi"))
+    check("same model, any case", not st.other_model(
+        {"from": {"printer": "creality hi"}}, "Creality Hi"))
+    check("unknown: not another model", not st.other_model(
+        {"from": {}}, "Creality Hi") and not st.other_model("x", "Hi"))
+
+
 def run_restore_notes_tests():
     """What the Restore dialog says before restoring (settings.RESTORE_NOTES)."""
     print("Restore notes")
@@ -697,6 +714,7 @@ def run_secret_guard_tests():
 
 
 if __name__ == "__main__":
+    run_backup_model_tests()
     run_restore_notes_tests()
     run_secret_guard_tests()
     run_settings_tests()

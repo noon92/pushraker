@@ -70,6 +70,16 @@ SETTLE_MAX = 3.
 # captures and restores), and one taken this recently is reused
 _LOCK = threading.Lock()
 REUSE = 5.
+# Creality's master-server runs `capture 0` itself at every layer change
+# (its log: 0.1-0.8 s after the change; the frame lands up to ~1.2 s after
+# that), the same moment pushraker's layer notifications fire. Read too
+# early, the newest frame is the previous layer's (the Hi, 2026-11-21: the
+# "Layer complete" picture was the start of layer 1, 75 s old). So within
+# FRAME_EXPECT seconds of a layer change, wait for that frame to start
+# landing, then for any capture to end and the file to settle; FRAME_WAIT
+# bounds the whole wait.
+FRAME_EXPECT = 2.5
+FRAME_WAIT = 4.
 CAMERA_NAME = "Printer camera"
 
 
@@ -187,6 +197,8 @@ class Creality(Printer):
         # being recorded, or made from it now), its newest frame is read,
         # read only: Creality's own last picture
         if (printing and self.timelapse_on()) or just_ended:
+            if printing:
+                self._await_creality_frame()
             frame = self._last_timelapse_frame()
             if frame is not None:
                 return self.decode(frame)
@@ -199,6 +211,53 @@ class Creality(Printer):
         if self.capturing():
             return None, "the printer is taking a timelapse frame"
         return self.capture_frame()
+
+    def adjust_status(self, data: Dict[str, Any],
+                      status: Dict[str, Dict[str, Any]]) -> None:
+        """The generic layer fill, and when virtual_sdcard.layer last
+        changed (Creality takes a timelapse frame then)."""
+        super().adjust_status(data, status)
+        layer = (data.get("virtual_sdcard") or {}).get("layer")
+        if layer is not None and layer != getattr(self, "_layer", None):
+            self._layer = layer
+            if layer:
+                self._layer_changed = time.monotonic()
+
+    def _await_creality_frame(self) -> None:
+        """Creality's frame for a layer that just started: wait (at most
+        FRAME_WAIT) for it to start landing, for its `capture` to end and
+        the file to settle, so the newest frame is this layer's."""
+        def size() -> int:
+            try:
+                return os.path.getsize(self.timelapse)
+            except OSError:
+                return -1
+        start = time.monotonic()
+        deadline = start + FRAME_WAIT
+        changed = getattr(self, "_layer_changed", None)
+        size0, grew = size(), False
+        if changed is not None and start - changed < FRAME_EXPECT:
+            # A layer just changed: Creality's frame is due
+            until = min(changed + FRAME_EXPECT, deadline)
+            while time.monotonic() < until:
+                if size() != size0 or self.capturing():
+                    grew = True
+                    break
+                time.sleep(0.05)
+        if not grew and not self.capturing():
+            return              # nothing on its way: read now
+        while self.capturing() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        # `capture` may return before the frame lands: the size must hold
+        end = deadline
+        last, since = size(), time.monotonic()
+        while time.monotonic() < end:
+            time.sleep(0.05)
+            now = size()
+            if now != last:
+                last, since = now, time.monotonic()
+            elif time.monotonic() - since >= SETTLE_STEADY and now >= 0:
+                return
 
     def _last_timelapse_frame(self) -> Optional[bytes]:
         try:

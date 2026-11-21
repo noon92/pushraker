@@ -103,6 +103,7 @@ from . import compat
 from . import discover
 from . import thumbs
 from . import gmeta
+from . import preprint
 from .compat import JobEvent
 from . import settings as cfgmod
 from . import printers
@@ -1236,6 +1237,9 @@ class PushNotifications:
         self._pp_pending: set = set()
         self._pp_running: Optional[Tuple[str, Optional[int]]] = None
         self._pp_sent = True
+        # The generic pre-print watch (pushraker.preprint), during a job's
+        # start routine on printers without detection of their own
+        self._ppw: Optional[preprint.PreprintWatch] = None
         self._milestones_sent: Set[int] = set()
         # Print time (which stops while paused) the next status report is
         # due at; None until the job's first status update sets it
@@ -1706,6 +1710,11 @@ class PushNotifications:
                     mine = here_tpl.get(key) if isinstance(
                         here_tpl.get(key), dict) else {}
                     tpl["camera"] = mine.get("camera", "")
+            # Another printer model's backup: its Printer URL is that
+            # printer's address; the one here stays (same model: restored)
+            if cfgmod.other_model(backup,
+                                  self.printer.model(self._hostname)):
+                data["printer_url"] = self.settings.get("printer_url", "")
             # Tokens and passwords the file has: as if typed into the page
             secrets = cfgmod.backup_secrets(backup)
             data.update(secrets)
@@ -4982,6 +4991,8 @@ class PushNotifications:
         message everything in between. On printers without this component
         the line is only console output."""
         for line in str(response or "").splitlines():
+            if self._ppw is not None and not self._pp_sent:
+                self._ppw.console(line)
             if line in self._own_lines:
                 self._own_lines.remove(line)
             elif line.strip() and not line.startswith(
@@ -6034,6 +6045,8 @@ class PushNotifications:
             if obj in self._status and isinstance(values, dict):
                 self._status[obj].update(values)
         self.printer.adjust_status(data, self._status)
+        if self._ppw is not None and not self._pp_sent:
+            self._ppw.status(data)
         ps = self._status["print_stats"]
         if "print_task_config" in data and self._job_active:
             self._check_spool_switch()
@@ -6088,16 +6101,18 @@ class PushNotifications:
             self._by_object = False
             logging.info("[pushraker] no object markers in %s: "
                          "reported as one job", shown(filename))
+        if self._layer1_pd is None:
+            # Before anything sent at layer 1, so its text and its
+            # template's job.time see the same time left
+            layer = (ps.get("info") or {}).get("current_layer")
+            if layer is not None and int(layer) >= 1:
+                self._layer1_pd = float(ps.get("print_duration") or 0.)
         if not self._pp_sent:
             # Layer 1 began: the start routine is over, even if a chosen
             # calibration was skipped (a toolhead already calibrated)
             layer = (ps.get("info") or {}).get("current_layer")
             if layer is not None and int(layer) >= 1:
                 self._preprint_done(filename)
-        if self._layer1_pd is None:
-            layer = (ps.get("info") or {}).get("current_layer")
-            if layer is not None and int(layer) >= 1:
-                self._layer1_pd = float(ps.get("print_duration") or 0.)
         if "layer_started" in self.rows and not self._layer_started_sent:
             # Layer 1 begins once the start routine (homing, bed mesh,
             # flow calibration) is over: time to watch the first layer
@@ -6301,6 +6316,13 @@ class PushNotifications:
         (print_task_config), and so which runs to wait for."""
         self._pp_names, self._pp_pending = [], set()
         self._pp_running, self._pp_sent = None, True
+        self._ppw = None
+        if getattr(self.printer, "generic_preprint", False) and \
+                not recovered:
+            # What runs isn't known in advance: watched until layer 1
+            self._ppw = preprint.PreprintWatch(self.printer.objects)
+            self._pp_sent = False
+            return
         cal = self.printer.preprint_calibrations
         if not cal or recovered:
             return
@@ -6355,6 +6377,14 @@ class PushNotifications:
 
     def _preprint_done(self, filename: str) -> None:
         self._pp_sent = True
+        if self._ppw is not None:
+            # The generic watch: what ran, with how long; nothing ran,
+            # nothing to say
+            self._ppw.first_layer()
+            self._pp_names = self._ppw.ran()
+            self._ppw = None
+            if not self._pp_names:
+                return
         if cfgmod.PREPRINT_ROW not in self.rows:
             return
         done = ", ".join(self._pp_names)

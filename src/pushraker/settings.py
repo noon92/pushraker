@@ -1723,6 +1723,30 @@ def backup_targets(s: Dict[str, Any]) -> Dict[str, Any]:
             "email_to": (recipients(s) or [""])[0]}
 
 
+# Before backups said where they were made ("from"), pushraker ran only on
+# the Snapmaker U1: a backup without it is a U1's
+OLD_BACKUP_MODEL = "Snapmaker U1"
+
+
+def backup_model(data: Any) -> str:
+    """The printer model a backup file was made on ("" when it says
+    nothing about the printer)."""
+    if not isinstance(data, dict):
+        return ""
+    frm = data.get("from")
+    if not isinstance(frm, dict):
+        return OLD_BACKUP_MODEL
+    return str(frm.get("printer") or "").strip()
+
+
+def other_model(data: Any, model: str) -> bool:
+    """Whether a backup is from another printer model than `model`: its
+    Printer URL (that printer's address) is then left out, the one here
+    kept."""
+    theirs = backup_model(data)
+    return bool(theirs and model and theirs.lower() != model.lower())
+
+
 def backup_settings(data: Any) -> Dict[str, Any]:
     """A backup file's settings, checked enough for the page to load
     them (Save & Apply validates them as any other)."""

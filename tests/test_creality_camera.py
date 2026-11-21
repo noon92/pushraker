@@ -112,6 +112,51 @@ open(a[-1], "wb").write(b"\\xff\\xd8\\xff" + src[-3:])
     check("...read only: no capture, the file untouched",
           not os.path.exists(calls) and os.stat(tl).st_size == old.st_size
           and os.stat(tl).st_mtime == old.st_mtime)
+
+    # A layer just changed: Creality's frame for it is due, wait for it
+    st = {"print_stats": {"state": "printing", "info": {}},
+          "virtual_sdcard": {"layer": 3, "layer_count": 0}}
+    c.adjust_status({"virtual_sdcard": {"layer": 3}}, st)
+    c._layer_changed -= 100     # as if layer 3 started long ago
+    t0 = time.monotonic()
+    data, why = c.snapshot("camera", {"state": "printing"})
+    check("a layer changed long ago: the newest frame at once",
+          data == b"\xff\xd8\xffL03" and time.monotonic() - t0 < 0.5,
+          (data, why))
+    c.adjust_status({"virtual_sdcard": {"layer": 3}}, st)
+    check("...the same layer again doesn't count as a change",
+          time.monotonic() - c._layer_changed > 50)
+    st["virtual_sdcard"]["layer"] = 4
+    c.adjust_status({"virtual_sdcard": {"layer": 4}}, st)
+
+    def creality_captures():
+        time.sleep(0.6)
+        with open(tl, "ab") as f:
+            f.write(frame(b"L04")[:10])
+        time.sleep(0.2)
+        with open(tl, "ab") as f:
+            f.write(frame(b"L04")[10:])
+    th = threading.Thread(target=creality_captures)
+    th.start()
+    t0 = time.monotonic()
+    data, why = c.snapshot("camera", {"state": "printing"})
+    took = time.monotonic() - t0
+    th.join()
+    check("a layer just changed: Creality's frame for it, not the last "
+          "layer's", data == b"\xff\xd8\xffL04", (data, why))
+    check("...after it landed whole, within the bound",
+          0.8 <= took < creality.FRAME_WAIT + 0.5, took)
+    check("...still read only", not os.path.exists(calls))
+    st["virtual_sdcard"]["layer"] = 5
+    c.adjust_status({"virtual_sdcard": {"layer": 5}}, st)
+    t0 = time.monotonic()
+    data, why = c.snapshot("camera", {"state": "printing"})
+    took = time.monotonic() - t0
+    check("a layer changed but no frame comes: the newest one after "
+          "FRAME_EXPECT", data == b"\xff\xd8\xffL04"
+          and creality.FRAME_EXPECT - 0.2 <= took
+          < creality.FRAME_EXPECT + 0.5, (data, took))
+    c._layer_changed = None
     os.remove(tl)
     data, why = c.snapshot("camera", {"state": "printing"})
     check("...no frame yet (before the first layer): none, and why",
