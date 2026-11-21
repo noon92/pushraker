@@ -2097,6 +2097,193 @@ async def test_discovered_cameras():
         t.cancel()
 
 
+async def test_notification_files():
+    print("One notification in a file: export, inspect, import")
+    reset_world()
+    STATE.pop("print_task_config", None)       # a plain Klipper printer
+    STATE["bed_mesh"] = {"profile_name": "default"}
+    server = Server()
+    sent = []
+
+    class FakeAp:
+        def add(self, url):
+            return True
+
+        def __iter__(self):
+            return iter([FakeServer()])
+
+        async def async_notify(self, title, body, attach=None, **_kw):
+            with open(attach, encoding="utf-8") as f:
+                sent.append((title, os.path.basename(attach), json.load(f)))
+            return True
+    real = pn.apprise.Apprise
+    try:
+        c = pn.PushNotifications(Config(server, dict(name="Hi",
+                                                     settle_time="0.1")))
+        STATE["print_stats"] = ps("standby")
+        await server.handlers["server:klippy_ready"]()
+        await asyncio.sleep(0.2)
+        ep = server.endpoints["/server/pushraker/backup"]
+
+        async def call(how, **kw):
+            return await ep(WebRequest("POST", dict(how=how, **kw)))
+
+        def stock(rid, **n):
+            return {"pushraker_notification": 1, "kind": "stock", "id": rid,
+                    "notification": n}
+        # Every stock notification: its file imports back to the same
+        bad = []
+        for rid in pn.cfgmod.TEMPLATE:
+            row = c.settings["rows"][rid]
+            out = await call("notification", via="download",
+                             notification=stock(rid, **row))
+            back = await call("notification_import", file=out["file"])
+            if back["row"] != row or back["template"] is not None or \
+                    out["name"] != f"pushraker-{rid}.json":
+                bad.append(rid)
+        check("every stock notification: exported and imported back the "
+              "same", not bad, bad)
+        f = (await call("notification", via="download", notification=stock(
+            "complete", enabled=False, priority="high", email=True,
+            title="Done {{ job.file }}", topic="secret_topic",
+            complete_objects="once")))["file"]
+        check("a file: from, kind, id, the settings; never a topic",
+              f["from"]["printer"] == "generic" and f["kind"] == "stock"
+              and f["id"] == "complete" and f["notification"] == {
+                  "enabled": False, "priority": "high", "email": True,
+                  "title": "Done {{ job.file }}", "complete_objects": "once"},
+              f)
+        back = await call("notification_import", file=f)
+        check("...imported: row, template edits, the row's own options",
+              back["row"] == {"enabled": False, "priority": "high",
+                              "email": True}
+              and back["template"] == {"title": "Done {{ job.file }}"}
+              and back["options"] == {"complete_objects": "once"}, back)
+        # Replacing: what the file leaves out is the default again
+        c.settings["templates"]["complete"] = {"contents": "mine"}
+        back = await call("notification_import", file=stock("complete"))
+        check("a stock one is replaced: what the file leaves out is the "
+              "default", back["template"] is None
+              and back["row"]["enabled"] is True, back)
+        # Custom
+        custom = {"pushraker_notification": 1, "kind": "custom",
+                  "name": "Every5th", "notification": {
+                      "evaluate": "layer", "when": "job.layer % 5 == 0",
+                      "title": "Layer {{ job.layer }}", "image": "camera"}}
+        back = await call("notification_import", file=custom)
+        check("a custom one: checked, its defaults filled in",
+              back["kind"] == "custom" and back["custom"]["name"] == "Every5th"
+              and back["custom"]["evaluate"] == "layer"
+              and back["custom"]["repeat"] == "change", back)
+        out = await call("notification", via="download", notification=dict(
+            custom, notification=dict(back["custom"], topic="t1")))
+        check("...exported: its name, no topic, a file named after it",
+              out["name"] == "pushraker-Every5th.json"
+              and out["file"]["name"] == "Every5th"
+              and "topic" not in out["file"]["notification"]
+              and "name" not in out["file"]["notification"], out)
+        # The camera: only one this printer has
+        here = ((c.settings.get("templates") or {}).get("paused")
+                or {}).get("camera", "")
+        back = await call("notification_import", file=stock(
+            "paused", camera="case"))
+        check("a camera this printer doesn't have: the one here stays",
+              (back["template"] or {}).get("camera", "") == here,
+              (back, here))
+        # Refused, with why
+        for what, file, why in (
+                ("no kind", {"pushraker_notification": 1, "notification": {}},
+                 "kind"),
+                ("an unknown id", stock("nope"), "No stock notification"),
+                ("a bad template", stock("complete", title="{{ x "),
+                 "Print complete"),
+                ("a bad priority", stock("complete", priority="loud"),
+                 "priority"),
+                ("not one", {"pushraker_backup": 1}, "Not a pushraker"),
+                ("a newer format", dict(stock("complete"),
+                                        pushraker_notification=9), "newer")):
+            try:
+                await call("notification_import", file=file)
+                check(f"refused: {what}", False)
+            except Exception as e:
+                check(f"refused: {what}", why in str(e), e)
+        # Inspect: only the notices that apply
+        r = await call("notification_inspect", file=stock("complete"))
+        check("inspect: a plain file has no notices", r["notes"] == []
+              and r["label"] == "Print complete", r)
+        r = await call("notification_inspect", file=dict(stock(
+            "warning", title="{{ job.nonsense }} {{ extruders.colors }} "
+            "{{ printer.nothing.x }} {{ job.file }}", flavour=1),
+            **{"from": {"pushraker": "0.3.6", "printer": "Snapmaker U1"}}))
+        notes = r["notes"]
+        check("inspect: older, another model, not available here, values "
+              "this printer lacks and this version doesn't know, unused "
+              "keys", notes == [
+                  "From pushraker 0.3.6 (older).",
+                  "From a Snapmaker U1. Some settings may not apply here.",
+                  "Not available on this printer: Warning.",
+                  "Uses values this printer doesn't have: "
+                  "extruders.colors, printer.nothing.x.",
+                  "Uses values this version doesn't know: job.nonsense.",
+                  "Not used by this version: flavour."], notes)
+        r = await call("notification_inspect", file=dict(
+            stock("complete"), **{"from": {"pushraker": "9.0"}}))
+        check("...newer", r["notes"] == ["From pushraker 9.0 (newer)."],
+              r["notes"])
+        r = await call("notification_inspect", file=dict(custom, notification=dict(
+            custom["notification"], when="job.flux > 1")))
+        check("...a custom one's condition is read too", any(
+            "job.flux" in n for n in r["notes"]), r["notes"])
+        # The docs' files import as they are
+        doc = open(os.path.join(os.path.dirname(pn.__file__), "..", "..",
+                                "docs", "notification-files.md"),
+                   encoding="utf-8").read()
+        blocks = re.findall(r"```json\n(.*?)```", doc, re.S)
+        bad = []
+        for b in blocks:
+            try:
+                await call("notification_import", file=json.loads(b))
+                r = await call("notification_inspect", file=json.loads(b))
+                if any("doesn't know" in n or "Not used" in n
+                       for n in r["notes"]):
+                    bad.append((b[:60], r["notes"]))
+            except Exception as e:
+                bad.append((b[:60], str(e)))
+        check("docs/notification-files.md: every example imports, with no "
+              "unknown values or keys", len(blocks) >= 7 and not bad, bad)
+        # Sent by push / email, the backup's way
+        pn.apprise.Apprise = FakeAp
+        c.settings = dict(c.settings, server="https://ntfy.example.com",
+                          provider="ntfy", topic="t", email_enabled=False,
+                          email_host="smtp.example.com",
+                          email_from="a@example.com", email_to="b@example.com")
+        c.store.changed = lambda: False
+        res = await call("notification", via="push",
+                         notification=stock("complete"))
+        check("sent by push, as its file", res["sent"] == "ntfy" and sent
+              and sent[-1][1] == "pushraker-complete.json"
+              and sent[-1][2]["id"] == "complete", (res, sent))
+        res = await call("notification", via="email", to="x@example.com",
+                         notification=stock("complete"))
+        check("...by email to the address given", res["sent"] ==
+              "x@example.com", res)
+        try:
+            await call("notification", via="email", to="nope",
+                       notification=stock("complete"))
+            check("...a bad address refused", False)
+        except Exception as e:
+            check("...a bad address refused", "notification" in str(e), e)
+        del c.store.changed
+        m = c._machine()
+        check("machine.model: the profile's model (the backups' name)",
+              m["model"] == c.printer.model(c._hostname) == "generic", m)
+    finally:
+        pn.apprise.Apprise = real
+        STATE.pop("bed_mesh", None)
+    for t in list(c._tasks):
+        t.cancel()
+
+
 async def test_unusable_webcams():
     print("Moonraker webcams that can't give a picture: not offered unless "
           "chosen")
@@ -5299,7 +5486,7 @@ async def run_component_tests():
               test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_custom_events, test_camera_pictures, test_codemirror,
               test_data, test_old_moonraker, test_page_current_moonraker,
               test_creality_layers, test_missing_hardware_rows,
-              test_backup_from, test_discovered_cameras, test_web_pages, test_unusable_webcams,
+              test_backup_from, test_discovered_cameras, test_web_pages, test_unusable_webcams, test_notification_files,
               test_header_thumbnail, test_file_metadata,
               test_printer_camera_route, test_camera_error_line):
         try:

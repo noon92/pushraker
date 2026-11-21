@@ -823,6 +823,14 @@
             <button type="button" class="btn btn-secondary" id="pr-data-cancel">Cancel</button>
             <button type="button" class="btn btn-remove" id="pr-data-delete" style="display:none">Delete</button>
             <button type="button" class="btn btn-secondary" id="pr-data-reset">Reset</button>
+            <span class="nt-fill-wrap bk-send-wrap">
+                <button type="button" class="btn btn-secondary" id="nx-send" aria-haspopup="true" aria-expanded="false">Export ▴</button>
+                <div class="nt-fill-menu bk-menu" id="nx-menu" role="menu">
+                    <button type="button" role="menuitem" data-nx="download">Download</button>
+                    <button type="button" role="menuitem" data-nx="push" id="nx-push">Send by push</button>
+                    <button type="button" role="menuitem" data-nx="email" id="nx-email">Send by email</button>
+                </div>
+            </span>
         </div>
     </div>
 </div>
@@ -855,6 +863,39 @@
         </div>
     </div>
 </div>
+
+<div class="pr-modal bk-modal" id="nx-out" role="dialog" aria-labelledby="nx-out-title">
+    <div class="pr-modal-box">
+        <h3 id="nx-out-title">Export this notification</h3>
+        <div class="bk-file" id="nx-out-file"></div>
+        <p class="bk-note" id="nx-out-what"></p>
+        <div class="bk-to" id="nx-to-wrap">
+            <label for="nx-to">Send to</label>
+            <input class="nt-input" id="nx-to" type="email" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="pr-data-err" id="nx-err" style="display:none"></div>
+        <div class="pr-buttons">
+            <button type="button" class="btn btn-save" id="nx-go">Download</button>
+            <button type="button" class="btn btn-secondary" id="nx-cancel">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<div class="pr-modal bk-modal" id="nx-modal" role="alertdialog" aria-labelledby="nx-title">
+    <div class="pr-modal-box">
+        <h3 id="nx-title">Import this notification?</h3>
+        <div class="bk-file" id="nx-in-file"></div>
+        <ul class="bk-list" id="nx-in-list"></ul>
+        <ul class="bk-list bk-fit" id="nx-in-fit"></ul>
+        <p class="bk-red" id="nx-in-red"></p>
+        <p class="bk-note">Nothing is saved until you click Save &amp; Apply.</p>
+        <div class="pr-buttons">
+            <button type="button" class="btn btn-save" id="nx-yes">Import</button>
+            <button type="button" class="btn btn-secondary" id="nx-no">Cancel</button>
+        </div>
+    </div>
+</div>
+<input type="file" id="nx-file" accept=".json,application/json" style="display:none">
 
 <div class="pr-modal" id="pr-modal">
     <div class="pr-modal-box">
@@ -1047,13 +1088,15 @@
                 <td class="nt-c nt-col-email nt-x-cell"><button type="button" class="nt-x nt-x-m" data-cdel="${id}" aria-label="Delete">✕</button><input type="checkbox" data-cemail="${id}"${c.email ? ' checked' : ''}></td>
                 <td class="nt-data"><span class="nt-dim"><button type="button" class="btn btn-secondary nt-data-btn" data-ctpl="${id}">Edit</button></span><button type="button" class="nt-x" data-cdel="${id}" aria-label="Delete">✕</button></td>
             </tr>`;
-        }).join('') + (customs.length < max
-            ? '<tr class="nt-add"><td colspan="4"><button type="button" class="btn btn-secondary nt-data-btn" id="nt-add-custom">➕ Add custom notification</button></td></tr>' : '');
+        }).join('') + '<tr class="nt-add"><td colspan="4">' + (customs.length < max
+            ? '<button type="button" class="btn btn-secondary nt-data-btn" id="nt-add-custom">➕ Add custom notification</button> ' : '') +
+            '<button type="button" class="btn btn-secondary nt-data-btn" id="nt-import">Import…</button></td></tr>';
         const rows = el('nt-crows');
         rows.querySelectorAll('[data-cenabled]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cenabled)).enabled = b.checked; updateRowDimming(); }; });
         rows.querySelectorAll('[data-cemail]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cemail)).email = b.checked; updateRowDimming(); }; });
         rows.querySelectorAll('[data-ctpl]').forEach(b => { b.onclick = e => { e.preventDefault(); openEditor('custom:' + b.dataset.ctpl); }; });
         rows.querySelectorAll('[data-cdel]').forEach(b => { b.onclick = async e => { e.preventDefault(); await deleteCustom(customById(Number(b.dataset.cdel))); }; });
+        el('nt-import').onclick = e => { e.preventDefault(); nxImport(); };
         if (el('nt-add-custom')) el('nt-add-custom').onclick = e => {
             e.preventDefault();
             draft = Object.assign({ _id: ++customSeq, _saved: null, name: '' }, JSON.parse(JSON.stringify(state.meta.custom_default)));
@@ -3093,6 +3136,193 @@
         saved = keep; savedState = was;
         markDirty();
         bkSay('✓ Restored on this page: check it, then Save & Apply');
+    };
+    // ---- one notification in a file: Export (from its editor) and Import
+    // The file: {pushraker_notification, from, kind, id | name,
+    // notification}; checked by pushraker both ways, like a save
+    const nxMenu = el('nx-menu');
+    let nxHow = '', nxIn = null, nxPatch = null;
+    // The notification as it is in the editor now, as a file's contents
+    function nxNow() {
+        editorChanged();
+        const key = editing.key;
+        if (isCustom(key)) {
+            const c = pickCustom(editing), n = {};
+            Object.keys(c).forEach(k => { if (k !== 'name' && k !== 'topic') n[k] = c[k]; });
+            return { pushraker_notification: 1, kind: 'custom', name: editing.name, notification: n };
+        }
+        const t = {};
+        TPL_FIELDS.forEach(f => { t[f] = editing[f]; });
+        const n = diffFromDefault(key, t);
+        delete n.topic;
+        const box = q => document.querySelector(q);
+        const row = state.rows[key] || {};
+        n.enabled = box(`[data-enabled="${key}"]`) ? box(`[data-enabled="${key}"]`).checked : !!row.enabled;
+        n.email = box(`[data-email="${key}"]`) ? box(`[data-email="${key}"]`).checked : !!row.email;
+        n.priority = editing.priority || row.priority || 'default';
+        const page = collect(false);
+        ((state.meta.row_options || {})[key] || []).forEach(o => { n[o] = page[o]; });
+        return { pushraker_notification: 1, kind: 'stock', id: key, notification: n };
+    }
+    const nxFileName = f => 'pushraker-' + String(f.kind === 'custom' ? f.name : f.id).replace(/[^A-Za-z0-9_-]+/g, '-').slice(0, 60) + '.json';
+    el('nx-send').onclick = e => {
+        e.stopPropagation();
+        if (!editing) return;
+        const t = (state && state.meta.backup) || {};
+        const push = el('nx-push'), mail = el('nx-email');
+        push.textContent = 'Send by push' + (t.push_label ? ': ' + t.push_label : '');
+        push.classList.toggle('bk-off', !!t.push);
+        push.title = t.push || '';
+        mail.classList.toggle('bk-off', !!t.email);
+        mail.title = t.email || '';
+        el('nx-send').setAttribute('aria-expanded', String(nxMenu.classList.toggle('open')));
+    };
+    document.addEventListener('click', () => { nxMenu.classList.remove('open'); el('nx-send').setAttribute('aria-expanded', 'false'); });
+    nxMenu.onclick = e => {
+        const b = e.target.closest('[data-nx]');
+        if (!b) return;
+        if (b.classList.contains('bk-off')) { e.stopPropagation(); return; }
+        nxHow = b.dataset.nx;
+        const t = state.meta.backup || {}, f = nxNow();
+        el('nx-out-title').textContent = nxHow === 'download' ? 'Download this notification' :
+            nxHow === 'push' ? `Send this notification by push (${t.push_label})` : 'Send this notification by email';
+        el('nx-out-file').textContent = '📄 ' + nxFileName(f);
+        el('nx-out-what').textContent = NX_TEXT.what;
+        el('nx-go').textContent = nxHow === 'download' ? 'Download' : 'Send';
+        el('nx-go').disabled = false;
+        el('nx-to-wrap').style.display = nxHow === 'email' ? '' : 'none';
+        el('nx-to').value = t.email_to || '';
+        el('nx-err').style.display = 'none';
+        el('nx-out').classList.add('open');
+        if (nxHow === 'email') el('nx-to').focus();
+    };
+    el('nx-cancel').onclick = () => el('nx-out').classList.remove('open');
+    el('nx-go').onclick = async () => {
+        if (el('nx-go').disabled || !editing) return;
+        const go = el('nx-go'), label = go.textContent;
+        el('nx-err').style.display = 'none';
+        go.disabled = true;
+        go.textContent = nxHow === 'download' ? 'Downloading…' : 'Sending…';
+        try {
+            const data = await api('/server/pushraker/backup', 'POST', { how: 'notification', via: nxHow, notification: nxNow(), to: el('nx-to').value.trim() });
+            if (nxHow === 'download') {
+                const url = URL.createObjectURL(new Blob([JSON.stringify(data.file, null, 2)], { type: 'application/json' }));
+                const a = document.createElement('a');
+                a.href = url; a.download = data.name;
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 10000);
+            }
+            el('nx-out').classList.remove('open');
+        } catch (e) {
+            el('nx-err').textContent = '⚠️ ' + e.message;
+            el('nx-err').style.display = '';
+        } finally {
+            go.disabled = false;
+            go.textContent = label;
+        }
+    };
+    // Import…: pick a file, pushraker says what it is and what doesn't fit
+    // here (settings.IMPORT_NOTES), then it lands on this page like an
+    // edit; replacing one: Import works 5 seconds after the dialog opens
+    const NX_TEXT = {
+        what: 'This notification as it is in the editor, unsaved changes included. Not included: addresses, tokens, server settings, its topic.',
+        stock: 'Stock notification: ',
+        custom: 'Custom notification: ',
+        replaces: n => `Replaces "${n}".`,
+        full: n => `Up to ${n} custom notifications: delete one first.`,
+    };
+    function nxImport() {
+        if (!state) return;
+        el('nx-file').value = '';
+        el('nx-file').click();
+    }
+    let nxLeft = 0, nxTimer = null;
+    function nxTick() {
+        el('nx-yes').disabled = nxLeft > 0;
+        el('nx-yes').textContent = nxLeft > 0 ? `Import (${nxLeft})` : 'Import';
+        if (nxLeft > 0) nxTimer = setTimeout(() => { nxLeft--; nxTick(); }, 1000);
+    }
+    el('nx-file').onchange = async () => {
+        const f = el('nx-file').files[0];
+        if (!f) return;
+        let data;
+        try {
+            if (f.size > 200000) throw new Error('too big for a notification file');
+            data = JSON.parse(await f.text());
+            if (!data || typeof data !== 'object' || !('pushraker_notification' in data)) throw new Error('not a pushraker notification file');
+        } catch (e) {
+            bkSay('⚠️ Can\'t import ' + f.name + ': ' + e.message);
+            return;
+        }
+        let r;
+        try {
+            r = await api('/server/pushraker/backup', 'POST', { how: 'notification_inspect', file: data });
+        } catch (e) {
+            bkSay('⚠️ Can\'t import ' + f.name + ': ' + e.message);
+            return;
+        }
+        nxIn = data;
+        const custom = r.kind === 'custom';
+        const same = custom ? customs.find(c => c.name.toLowerCase() === String(r.id).toLowerCase()) : null;
+        if (custom && !same && customs.length >= (state.meta.custom_max || 20)) {
+            bkSay('⚠️ ' + NX_TEXT.full(state.meta.custom_max || 20));
+            nxIn = null;
+            return;
+        }
+        el('nx-in-file').textContent = '📄 ' + f.name;
+        el('nx-in-list').innerHTML = `<li>${esc(custom ? NX_TEXT.custom : NX_TEXT.stock)}<b>${esc(r.label)}</b></li>`;
+        el('nx-in-fit').innerHTML = (r.notes || []).map(n => `<li>${esc(n)}</li>`).join('');
+        const replaces = custom ? (same ? same.name : '') : r.label;
+        el('nx-in-red').textContent = replaces ? '⚠️ ' + NX_TEXT.replaces(replaces) : '';
+        el('nx-in-red').style.display = replaces ? '' : 'none';
+        clearTimeout(nxTimer);
+        nxLeft = replaces ? 5 : 0;
+        nxTick();
+        el('nx-modal').classList.add('open');
+    };
+    el('nx-no').onclick = () => { clearTimeout(nxTimer); el('nx-modal').classList.remove('open'); nxIn = null; };
+    el('nx-yes').onclick = async () => {
+        if (el('nx-yes').disabled || !nxIn) return;
+        el('nx-modal').classList.remove('open');
+        const data = nxIn, keep = saved, was = savedState;
+        nxIn = null;
+        let p;
+        try {
+            p = await api('/server/pushraker/backup', 'POST', { how: 'notification_import', file: data });
+        } catch (e) {
+            bkSay('⚠️ Can\'t import this notification: ' + e.message);
+            return;
+        }
+        if (p.kind === 'custom') {
+            const same = customs.find(c => c.name.toLowerCase() === p.custom.name.toLowerCase());
+            if (same) Object.assign(same, p.custom);
+            else customs.push(Object.assign({ _id: ++customSeq, _saved: null }, p.custom));
+            renderCustomRows();
+        } else {
+            // Everything else on this page stays as it is, unsaved changes
+            // too: the page as it stands, with this notification replaced
+            const page = collect(false), kept = customs;
+            const typed = { secret: page.secret, email_password: page.email_password, webhook_url: page.webhook_url };
+            const merged = Object.assign({}, state, page);
+            merged.rows = Object.assign(JSON.parse(JSON.stringify(state.rows)), page.rows);
+            merged.rows[p.id] = p.row;
+            merged.templates = JSON.parse(JSON.stringify(tplEdits));
+            if (p.template) merged.templates[p.id] = p.template; else delete merged.templates[p.id];
+            Object.assign(merged, p.options || {});
+            ['secret', 'email_password', 'webhook_url'].forEach(k => { delete merged[k]; });
+            merged.meta = state.meta;
+            render(merged);
+            customs = kept;
+            renderCustomRows();
+            const box = { ntfy: 'nt-secret', pushover: 'nt-po-token', gotify: 'nt-gt-token', telegram: 'nt-tg-token',
+                discord: 'nt-dc-hook', discord_dm: 'nt-dc-token' }[merged.provider];
+            if (typed.secret && box) el(box).value = typed.secret;
+            if (typed.email_password) el('nt-email-password').value = typed.email_password;
+            if (typed.webhook_url) el('nt-wh-url').value = typed.webhook_url;
+        }
+        saved = keep; savedState = was;
+        markDirty();
+        bkSay('✓ Imported on this page: check it, then Save & Apply');
     };
     // Discard changes: back to the last saved settings, on this page.
     // Only with unsaved changes (the button is greyed out otherwise)

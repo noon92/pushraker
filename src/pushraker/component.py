@@ -106,6 +106,7 @@ from . import gmeta
 from . import preprint
 from .compat import JobEvent
 from . import settings as cfgmod
+from . import values as pvalues
 from . import printers
 from . import templating as tp
 from . import engine as jj
@@ -123,6 +124,8 @@ REMOTE_METHOD = "pushraker"
 # Camera servers Moonraker doesn't know (the tests swap it)
 FIND_CAMERAS = discover.discover
 FIND_WEB_PAGES = discover.web_pages
+# The printer profiles' keys in values_map (values by printer)
+PROFILE_KEYS = {"Snapmaker U1": "snapmaker_u1", "creality": "creality"}
 PROBE_IMAGE = discover.probe
 # Moonraker webcam services that show a web page, not a picture
 NO_PICTURE_SERVICES = ("iframe",)
@@ -1717,13 +1720,86 @@ class PushNotifications:
             view["meta"]["sending"] = (await self._view())["meta"]["sending"]
             # keys: the page keeps what else was changed on it and unsaved
             return {"view": view, "forget": forget, "keys": keys}
+        if how in ("notification", "notification_inspect",
+                   "notification_import"):
+            return await self._ep_notification(how, args)
         if how not in ("push", "email"):
             raise self.server.error("Invalid request", 400)
+        return await self._send_file(
+            how, name, data, f"💾 {s['name']} settings backup",
+            "pushraker settings backup. Not included: tokens, passwords, "
+            "webhook URLs.", str(args.get("to") or "").strip(), "backup")
+
+    async def _ep_notification(self, how: str, args: Dict[str, Any]
+                               ) -> Dict[str, Any]:
+        """One notification in a file. notification: the editor's
+        notification as a file ({kind, id or name, notification}), checked
+        like a save and turned into the file, downloaded or sent (via:
+        download, push, email). notification_inspect: what the Import
+        dialog says about a file. notification_import: a file's
+        notification, checked, for the page to put in place (Save & Apply
+        saves it)."""
+        s = self.settings
+        model = self.printer.model(self._hostname)
+        file = args.get("file") if how != "notification" else \
+            args.get("notification")
+        try:
+            kind, ident, n, unused = cfgmod.notification_read(file)
+            values = cfgmod.notification_values(
+                s, kind, ident, n, self.env, set(self.env.cameras))
+        except cfgmod.ConfigError as e:
+            raise self.server.error(str(e), 400)
+        if how == "notification_import":
+            return dict(values, kind=kind, id=ident)
+        label = cfgmod.TEMPLATE[ident][2] if kind == "stock" else ident
+        if how == "notification_inspect":
+            notes = cfgmod.import_notes(file, __version__, model)
+            if kind == "stock" and ident in (
+                    set(self.printer.rows_unavailable)
+                    | self.printer.missing_rows()):
+                notes.append(cfgmod.IMPORT_NOTES["hidden"].format(
+                    name=label))
+            texts = [n.get("title", ""), n.get("contents", "")]
+            if kind == "custom" and n.get("when"):
+                texts.append("{{ " + str(n["when"]) + " }}")
+            missing, unknown = pvalues.check(
+                pvalues.referenced(str(t) for t in texts),
+                PROFILE_KEYS.get(self.printer.name, "generic"),
+                self.printer.objects)
+            if missing:
+                notes.append(cfgmod.IMPORT_NOTES["missing"].format(
+                    values=", ".join(missing)))
+            if unknown:
+                notes.append(cfgmod.IMPORT_NOTES["unknown"].format(
+                    values=", ".join(unknown)))
+            if unused:
+                notes.append(cfgmod.IMPORT_NOTES["unused"].format(
+                    keys=", ".join(unused)))
+            return {"kind": kind, "id": ident, "label": label,
+                    "notes": notes}
+        data = cfgmod.notification_export(values, kind, ident, __version__,
+                                          model)
+        name = cfgmod.notification_file_name(kind, ident)
+        via = str(args.get("via") or "download")
+        if via == "download":
+            return {"name": name, "file": data}
+        if via not in ("push", "email"):
+            raise self.server.error("Invalid request", 400)
+        return await self._send_file(
+            via, name, data, f"🔔 {s['name']} notification: {label}",
+            f"pushraker notification \"{label}\". Import it on the "
+            "settings page (Custom notifications: Import…).",
+            str(args.get("to") or "").strip(), "notification")
+
+    async def _send_file(self, how: str, name: str, data: Any, title: str,
+                         body: str, to: str, what_kind: str
+                         ) -> Dict[str, Any]:
+        """A JSON file sent by the push service or by email (to `to`), with
+        the saved settings, even with notifications off."""
+        s = self.settings
+        now = datetime.datetime.now(self.tz)
         targets = cfgmod.backup_targets(s)
         on = dict(s, enabled=True, push_enabled=True, email_enabled=True)
-        title = f"💾 {s['name']} settings backup"
-        body = ("pushraker settings backup. Not included: tokens, "
-                "passwords, webhook URLs.")
         if how == "push":
             if targets["push"]:
                 raise self.server.error(targets["push"], 400)
@@ -1732,10 +1808,9 @@ class PushNotifications:
         else:
             if targets["email"]:
                 raise self.server.error(targets["email"], 400)
-            to = str(args.get("to") or "").strip()
             if not cfgmod.RX_EMAIL.fullmatch(to):
                 raise self.server.error("Enter an email address to send "
-                                        "the backup to", 400)
+                                        f"the {what_kind} to", 400)
             url = cfgmod.email_url(dict(on, email_to=to), inline=False)
             what = to
             if email_html is not None:
@@ -1751,7 +1826,7 @@ class PushNotifications:
             srv.socket_read_timeout = max(
                 srv.socket_read_timeout, SEND_READ_TIMEOUT)
         channel = "email" if how == "email" else url.split(":", 1)[0]
-        tmp = tempfile.mkdtemp(prefix="pushraker-backup-")
+        tmp = tempfile.mkdtemp(prefix=f"pushraker-{what_kind}-")
         try:
             path = os.path.join(tmp, name)
             with open(path, "w", encoding="utf-8") as f:
@@ -2213,7 +2288,9 @@ class PushNotifications:
             moonraker = self.server.get_app_args().get("software_version")
         except Exception:
             moonraker = None
-        out = {"name": self.name, "model": self.printer.name,
+        out = {"name": self.name,
+               # The printer's model as backups record it ("Creality Hi")
+               "model": self.printer.model(self._hostname),
                "hostname": hostname or None, "ip": host or None,
                "pushraker_version": __version__,
                "moonraker_version": moonraker,

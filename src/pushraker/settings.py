@@ -1688,6 +1688,175 @@ def restore_notes(data: Any, version: str, model: str,
     return out
 
 
+# ---- one notification in a file (Export / Import) ----------------------
+
+NOTIFICATION_FORMAT = 1
+# A stock notification's own settings beyond on/off, priority and email:
+# the settings under its row on the page
+ROW_OPTIONS: Dict[str, Tuple[str, ...]] = {
+    "first_layer": ("layers_complete", "first_layer_objects"),
+    "complete": ("complete_objects",),
+    "progress": ("progress_marks",),
+    "status_report": ("report_interval",),
+    "bed_cooled": ("bed_cool_temp",),
+    "driver_hot": ("driver_temp",),
+    "filament_low": ("filament_low_percent", "filament_low_grams"),
+    "filament_short": ("filament_unknown",),
+    "filament_change": ("filament_change_events",),
+}
+ROW_KEYS = ("enabled", "priority", "email")
+# A notification's own topic is an address (on a public ntfy server,
+# whoever knows it reads it): never in a file, never taken from one
+FILE_TEMPLATE_FIELDS = tuple(f for f in TEMPLATE_FIELDS if f != "topic")
+FILE_CUSTOM_FIELDS = tuple(k for k in CUSTOM_DEFAULT if k != "topic")
+# What the Import dialog says, only the lines that apply (noon checks this
+# wording; it lives here alone)
+IMPORT_NOTES = {
+    "older": "From pushraker {version} (older).",
+    "newer": "From pushraker {version} (newer).",
+    "model": "From {article} {model}. Some settings may not apply here.",
+    "hidden": "Not available on this printer: {name}.",
+    "missing": "Uses values this printer doesn't have: {values}.",
+    "unknown": "Uses values this version doesn't know: {values}.",
+    "unused": "Not used by this version: {keys}.",
+    "replaces": 'Replaces "{name}".',
+}
+
+
+def notification_slug(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]+", "-", text).strip("-")[:60] or \
+        "notification"
+
+
+def notification_file_name(kind: str, ident: str) -> str:
+    return f"pushraker-{notification_slug(ident)}.json"
+
+
+def notification_read(data: Any) -> Tuple[str, str, Dict[str, Any],
+                                           List[str]]:
+    """A notification file's (kind, id or name, its settings, the keys in
+    them this version doesn't use). A file that isn't one, or names no
+    notification this version has, is refused with why."""
+    if not isinstance(data, dict) or "pushraker_notification" not in data:
+        raise ConfigError("Not a pushraker notification file")
+    try:
+        fmt = int(data["pushraker_notification"])
+    except (TypeError, ValueError):
+        raise ConfigError("Not a pushraker notification file")
+    if fmt > NOTIFICATION_FORMAT:
+        raise ConfigError("The file is from a newer pushraker; update this "
+                          "one first")
+    kind = data.get("kind")
+    n = data.get("notification")
+    if not isinstance(n, dict):
+        raise ConfigError("The file has no notification settings")
+    if kind == "stock":
+        ident = str(data.get("id") or "")
+        if ident not in TEMPLATE:
+            raise ConfigError(f'No stock notification "{ident}" in this '
+                              "version")
+        allowed = set(ROW_KEYS) | set(FILE_TEMPLATE_FIELDS) | set(
+            ROW_OPTIONS.get(ident, ())) | {"topic"}
+    elif kind == "custom":
+        ident = str(data.get("name") or n.get("name") or "").strip()
+        if not RX_CUSTOM_NAME.fullmatch(ident):
+            raise ConfigError(
+                f'Custom notification "{ident}": the name is up to 32 '
+                "letters, digits and _, starting with a letter")
+        allowed = set(CUSTOM_DEFAULT) | {"name"}
+    else:
+        raise ConfigError('"kind" is "stock" or "custom"')
+    unused = sorted(k for k in n if k not in allowed)
+    return kind, ident, {k: v for k, v in n.items() if k in allowed
+                         and k != "topic"}, unused
+
+
+def notification_values(s: Dict[str, Any], kind: str, ident: str,
+                        n: Dict[str, Any], env: Optional[Env] = None,
+                        cams: Optional[Set[str]] = None
+                        ) -> Dict[str, Any]:
+    """A notification's settings from a file, checked like a save, as
+    they replace that notification here: what the file leaves out is the
+    default. A camera this printer doesn't have: the one set here stays.
+    {"row", "template" (the edits over the default, None for none),
+    "options"} for a stock one; {"custom"} for a custom one."""
+    cams = set(cams or ())
+    if kind == "custom":
+        here = next((c for c in s.get("custom") or []
+                     if c["name"].lower() == ident.lower()), None)
+        entry = dict(n, name=ident)
+        if entry.get("camera") and entry["camera"] not in cams:
+            entry["camera"] = (here or {}).get("camera", "")
+        entry["topic"] = (here or {}).get("topic", "")
+        return {"custom": clean_custom([entry], strict=True)[0]}
+    rid = ident
+    fresh = _defaults(s.get("name") or "Printer")
+    row = dict(fresh["rows"][rid])
+    for k in ROW_KEYS:
+        if k in n:
+            row[k] = n[k]
+    if not isinstance(row["enabled"], bool) or \
+            not isinstance(row["email"], bool):
+        raise ConfigError(f"{TEMPLATE[rid][2]}: enabled and email are "
+                          "true or false")
+    if row["priority"] not in PRIORITIES:
+        raise ConfigError(f"{TEMPLATE[rid][2]}: no such priority")
+    here_tpl = (s.get("templates") or {}).get(rid) or {}
+    tpl = {f: n[f] for f in FILE_TEMPLATE_FIELDS if f in n}
+    if tpl.get("camera") and tpl["camera"] not in cams:
+        tpl["camera"] = here_tpl.get("camera", "")
+    if here_tpl.get("topic"):
+        tpl["topic"] = here_tpl["topic"]
+    data: Dict[str, Any] = {"rows": {rid: row}, "templates": {rid: tpl}}
+    for opt in ROW_OPTIONS.get(rid, ()):
+        data[opt] = n.get(opt, fresh[opt])
+    base = json.loads(json.dumps(s))
+    base.setdefault("templates", {}).pop(rid, None)
+    checked = validate(data, base, env)
+    return {"row": checked["rows"][rid],
+            "template": (checked.get("templates") or {}).get(rid) or None,
+            "options": {o: checked[o] for o in ROW_OPTIONS.get(rid, ())}}
+
+
+def notification_export(values: Dict[str, Any], kind: str, ident: str,
+                        version: str, model: str) -> Dict[str, Any]:
+    """The file for one notification, from notification_values' result:
+    no addresses, tokens or server settings (and no topic)."""
+    if kind == "custom":
+        c = values["custom"]
+        n = {k: c[k] for k in FILE_CUSTOM_FIELDS if k in c}
+        head: Dict[str, Any] = {"kind": "custom", "name": c["name"]}
+    else:
+        n = dict(values["row"])
+        n.update({k: v for k, v in (values["template"] or {}).items()
+                  if k in FILE_TEMPLATE_FIELDS})
+        n.update(values["options"])
+        head = {"kind": "stock", "id": ident}
+    return dict({"pushraker_notification": NOTIFICATION_FORMAT,
+                 "from": {"pushraker": version, "printer": model}},
+                **head, notification=n)
+
+
+def import_notes(data: Any, version: str, model: str) -> List[str]:
+    """The Import dialog's lines about where a file is from (only when it
+    says, and it differs from here)."""
+    out: List[str] = []
+    frm = data.get("from") if isinstance(data, dict) else None
+    if not isinstance(frm, dict):
+        return out
+    theirs = str(frm.get("pushraker") or "")
+    a, b = _version_key(theirs), _version_key(version)
+    if theirs and a != b:
+        out.append(IMPORT_NOTES["older" if a < b else "newer"]
+                   .format(version=theirs.split("+")[0]))
+    other = str(frm.get("printer") or "").strip()
+    if other and model and other.lower() != model.lower():
+        out.append(IMPORT_NOTES["model"].format(
+            model=other, article="an" if other[:1].lower() in "aeiou"
+            else "a"))
+    return out
+
+
 def backup_name(s: Dict[str, Any], day: str) -> str:
     """The same name with or without tokens and passwords in it: a name
     that says so marks the file worth taking."""
@@ -2069,6 +2238,8 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
     out.pop("email_password_for", None)
     out["meta"] = {
         "version": version,
+        # A stock notification's own settings, for its file (Export)
+        "row_options": {k: list(v) for k, v in ROW_OPTIONS.items()},
         "rows": [{"id": r[0], "label": r[1], "icon": r[2],
                   "image": r[5], "group": r[6],
                   "available": r[0] not in env.rows_unavailable

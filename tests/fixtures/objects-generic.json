@@ -1,0 +1,21 @@
+[
+"print_stats",
+"virtual_sdcard",
+"webhooks",
+"toolhead",
+"idle_timeout",
+"pause_resume",
+"exclude_object",
+"bed_mesh",
+"extruder",
+"heater_bed",
+"fan",
+"heater_fan hotend_fan",
+"temperature_sensor mcu_temp",
+"motion_report",
+"gcode_move",
+"system_stats",
+"filament_switch_sensor runout",
+"z_tilt",
+"probe"
+]
