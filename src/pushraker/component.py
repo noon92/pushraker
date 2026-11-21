@@ -123,6 +123,9 @@ REMOTE_METHOD = "pushraker"
 # Camera servers Moonraker doesn't know (the tests swap it)
 FIND_CAMERAS = discover.discover
 FIND_WEB_PAGES = discover.web_pages
+PROBE_IMAGE = discover.probe
+# Moonraker webcam services that show a web page, not a picture
+NO_PICTURE_SERVICES = ("iframe",)
 # The settings page, served by Moonraker (compat.register_page)
 PAGE_ENDPOINT = "/server/pushraker/page"
 # The 0.1 name, still answered (a Klipper macro file from 0.1 calls it)
@@ -1266,6 +1269,8 @@ class PushNotifications:
         self._gmeta_cache: Dict[Tuple[str, int, int], Dict[str, Any]] = {}
         # Camera servers Moonraker doesn't know, found at Klippy ready
         self._found_cams: Dict[str, Dict[str, str]] = {}
+        # Moonraker webcams whose snapshot gave no picture at Klippy ready
+        self._bad_webcams: Set[str] = set()
         # The printer's web pages (pushraker.discover.web_pages), for the
         # page's Printer URL "Fill in"; found at Klippy ready
         self._web_pages: List[Dict[str, Any]] = []
@@ -1391,20 +1396,35 @@ class PushNotifications:
                 found = wc.get_webcams()
                 if inspect.isawaitable(found):    # sync in Moonraker 0.9+
                     found = await found
+                chosen = self._chosen_cameras()
                 for name, cam in dict(found).items():
                     if not getattr(cam, "enabled", True):
+                        continue
+                    # A webcam that can't give a picture (an embedded web
+                    # page, or a snapshot address that gave none at Klippy
+                    # ready): not offered, unless already chosen (its
+                    # notifications then say why there's no picture)
+                    if str(name) not in chosen and (
+                            str(getattr(cam, "service", "") or "").lower()
+                            in NO_PICTURE_SERVICES
+                            or str(name) in getattr(self, "_bad_webcams",
+                                                    ())):
                         continue
                     snap = str(getattr(cam, "snapshot_url", "") or "")
                     stream = str(getattr(cam, "stream_url", "") or "")
                     if snap:
                         # Moonraker roots a partial URL on its own default
-                        # host and turns a local address into 127.0.0.1
+                        # host; a local address becomes 127.0.0.1 here
+                        # (Moonraker's convert_local runs `ss`, which some
+                        # printers lack: the Creality Hi)
                         try:
                             snap = await cam.get_snapshot_url(
-                                convert_local=True)
+                                convert_local=False)
                         except Exception:
                             if "://" not in snap:
                                 snap = "http://127.0.0.1/" + snap.lstrip("/")
+                        snap = await self.eventloop.run_in_thread(
+                            discover.local_url, snap)
                     if not snap and stream:
                         # No snapshot address: a frame from the stream (an
                         # MJPEG stream; RTSP, HLS and WebRTC say they can't)
@@ -6078,11 +6098,55 @@ class PushNotifications:
                 self.printer.power_loss_env_paths and self._booted_recently():
             self._spawn(self._check_power_loss())
 
+    def _chosen_cameras(self) -> Set[str]:
+        """The cameras the settings use (the default and per notification):
+        always offered, whatever they give."""
+        s = getattr(self, "settings", None) or {}
+        out = {str(s.get("camera") or "")}
+        for tpl in (s.get("templates") or {}).values():
+            if isinstance(tpl, dict) and tpl.get("camera"):
+                out.add(str(tpl["camera"]))
+        out.discard("")
+        return out
+
+    async def _check_webcams(self) -> None:
+        """Moonraker's webcams whose snapshot address gives no JPEG or PNG
+        (the same probe as discovery), once per Klippy ready: not offered
+        (_env). Only an explicit snapshot address is asked; one made from a
+        stream (an MJPEG stream's first frame) is left alone."""
+        bad: Set[str] = set()
+        try:
+            wc = self.server.lookup_component("webcam", None)
+            found = wc.get_webcams() if wc is not None else {}
+            if inspect.isawaitable(found):
+                found = await found
+            for name, cam in dict(found).items():
+                snap = str(getattr(cam, "snapshot_url", "") or "")
+                if not snap or not getattr(cam, "enabled", True):
+                    continue
+                try:
+                    url = await cam.get_snapshot_url(convert_local=False)
+                except Exception:
+                    url = snap if "://" in snap else \
+                        "http://127.0.0.1/" + snap.lstrip("/")
+                url = await self.eventloop.run_in_thread(
+                    discover.local_url, url)
+                if not await self.eventloop.run_in_thread(PROBE_IMAGE, url):
+                    bad.add(str(name))
+        except Exception as e:
+            logging.warning("[pushraker] webcam check: %s", e)
+            return
+        self._bad_webcams = bad
+        if bad:
+            logging.info("[pushraker] webcams with no snapshot picture, not "
+                         "offered unless chosen: %s", ", ".join(sorted(bad)))
+
     async def _discover_cameras(self) -> None:
         """Camera servers Moonraker doesn't know (pushraker.discover), once
         per Klippy ready: they appear in the camera choices; none is ever
         chosen for the user."""
         self._found_cams = {}
+        await self._check_webcams()
         try:
             known = [c.get("snapshot", "") for c in
                      (await self._env()).cameras.values()]

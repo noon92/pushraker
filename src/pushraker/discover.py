@@ -108,6 +108,50 @@ def discover(known: Iterable[str] = (),
     return found
 
 
+def is_local_ip(ip: str) -> bool:
+    """Whether the address is one of this machine's: binding a socket to it
+    succeeds only then (nothing is sent)."""
+    try:
+        fam = socket.AF_INET6 if ":" in ip else socket.AF_INET
+        with socket.socket(fam, socket.SOCK_DGRAM) as s:
+            s.bind((ip, 0))
+        return True
+    except OSError:
+        return False
+
+
+_LOCAL: Dict[str, bool] = {}
+
+
+def local_url(url: str) -> str:
+    """A camera address on this machine, by its loopback address (as
+    Moonraker's own convert_local does, without the `ss` command it needs,
+    missing on the Creality Hi): http://192.168.0.220/x -> http://127.0.0.1/x.
+    Any other address as it is."""
+    try:
+        p = urllib.parse.urlsplit(url)
+        host = p.hostname or ""
+    except ValueError:
+        return url
+    if p.scheme not in ("http", "https") or not host:
+        return url
+    if host not in _LOCAL:
+        try:
+            ips = {a[4][0] for a in socket.getaddrinfo(host, None)}
+        except OSError:
+            ips = set()
+        if len(_LOCAL) > 64:
+            _LOCAL.clear()
+        _LOCAL[host] = bool(ips) and all(is_local_ip(ip) for ip in ips)
+    if not _LOCAL[host] or host in ("127.0.0.1", "::1", "localhost"):
+        return url
+    netloc = "127.0.0.1" + (f":{p.port}" if p.port else "")
+    if p.username:
+        netloc = p.netloc.rsplit("@", 1)[0] + "@" + netloc
+    return urllib.parse.urlunsplit((p.scheme, netloc, p.path, p.query,
+                                    p.fragment))
+
+
 # The printer's web pages, for the page's Printer URL "Fill in" when the
 # page is served by Moonraker itself (its port is the API's, wrong for the
 # Web UI button): the ports web UIs usually listen on (Fluidd and Mainsail
@@ -199,4 +243,5 @@ def web_pages(skip: Iterable[int] = (), ports: Sequence[int] = WEB_PORTS,
     return found
 
 
-__all__: List[str] = ["discover", "probe", "CANDIDATES", "web_pages"]
+__all__: List[str] = ["discover", "probe", "CANDIDATES", "web_pages",
+                       "local_url"]

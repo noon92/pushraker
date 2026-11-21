@@ -92,6 +92,9 @@ DISCOVERED = {}
 pn.FIND_CAMERAS = lambda known=(), *a, **k: {
     n: c for n, c in DISCOVERED.items()
     if not any(pn.discover.same_url(c["snapshot"], x) for x in known)}
+# Moonraker webcams' snapshots: a picture unless a test says not
+BAD_SNAPSHOTS = set()
+pn.PROBE_IMAGE = lambda url, *a, **k: url not in BAD_SNAPSHOTS
 # The same for the web pages (test_web_pages drives it)
 WEB_PAGES = []
 WEB_SKIPS = []
@@ -223,9 +226,10 @@ class WebRequest:
 
 
 class Webcam:
-    def __init__(self, name, snapshot, stream, enabled=True):
+    def __init__(self, name, snapshot, stream, enabled=True, service="mjpegstreamer-adaptive"):
         self.name, self.snapshot_url, self.stream_url = name, snapshot, stream
         self.enabled = enabled
+        self.service = service
 
     async def get_snapshot_url(self, convert_local=False):
         # As Moonraker does: a partial URL on its default host
@@ -2089,6 +2093,49 @@ async def test_discovered_cameras():
               "Camera (port 8080)" in c.env.cameras)
     finally:
         DISCOVERED.clear()
+    for t in list(c._tasks):
+        t.cancel()
+
+
+async def test_unusable_webcams():
+    print("Moonraker webcams that can't give a picture: not offered unless "
+          "chosen")
+    reset_world()
+    STATE.pop("print_task_config", None)
+    BAD_SNAPSHOTS.clear()
+    BAD_SNAPSHOTS.add("http://127.0.0.1/webcam/?action=snapshot")
+    server = Server()
+    server.extra_components = {"webcam": Webcams([
+        # The Hi, after noon added one in Fluidd: the live page as an iframe
+        Webcam("Camera", "/webcam/?action=snapshot", "http://192.168.0.220:8000",
+               service="iframe"),
+        Webcam("Broken", "/webcam/?action=snapshot", "/webcam/?action=stream"),
+        Webcam("Good", "http://127.0.0.1:8081/snap.jpg", "/s")])}
+    try:
+        c = pn.PushNotifications(Config(server, dict(name="Hi",
+                                                     settle_time="0.1")))
+        STATE["print_stats"] = ps("standby")
+        await server.handlers["server:klippy_ready"]()
+        await asyncio.sleep(0.2)
+        view = await server.endpoints["/server/pushraker/config"](
+            WebRequest("GET"))
+        cams = view["meta"]["cameras"]
+        check("an iframe webcam and one whose snapshot gives no picture are "
+              "not offered; a working one is", "Camera" not in cams
+              and "Broken" not in cams and "Good" in cams, sorted(cams))
+        check("...the bad snapshot found at Klippy ready",
+              c._bad_webcams == {"Camera", "Broken"}, c._bad_webcams)
+        await server.endpoints["/server/pushraker/config"](
+            WebRequest("POST", {"camera": "Good",
+                                "templates": {"paused": {"camera": "Good"}}}))
+        c.settings["camera"] = "Camera"
+        c.settings.setdefault("templates", {})["paused"] = {"camera": "Broken"}
+        env = await c._env()
+        check("...but kept when already chosen (default or per notification)",
+              "Camera" in env.cameras and "Broken" in env.cameras,
+              sorted(env.cameras))
+    finally:
+        BAD_SNAPSHOTS.clear()
     for t in list(c._tasks):
         t.cancel()
 
@@ -5209,7 +5256,7 @@ async def run_component_tests():
               test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_custom_events, test_camera_pictures, test_codemirror,
               test_data, test_old_moonraker, test_page_current_moonraker,
               test_creality_layers, test_missing_hardware_rows,
-              test_backup_from, test_discovered_cameras, test_web_pages,
+              test_backup_from, test_discovered_cameras, test_web_pages, test_unusable_webcams,
               test_header_thumbnail, test_file_metadata,
               test_printer_camera_route, test_camera_error_line):
         try:

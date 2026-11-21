@@ -141,6 +141,29 @@ def run_discover_tests():
           st.camera_live_url(s2, env)
           == "https://printer.example.com:8080/?action=stream")
     run_web_page_tests()
+    check("local_url: this machine's address by its loopback one, port kept",
+          d.local_url("http://127.0.0.1:8080/x?a=1")
+          == "http://127.0.0.1:8080/x?a=1"
+          and d.local_url("http://localhost/snap")
+          == "http://localhost/snap")
+    check("...another machine's left alone",
+          d.local_url("http://192.0.2.7/webcam/?action=snapshot")
+          == "http://192.0.2.7/webcam/?action=snapshot")
+    own = None
+    try:
+        probe_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe_sock.connect(("192.0.2.1", 9))      # no packet sent
+        own = probe_sock.getsockname()[0]
+        probe_sock.close()
+    except OSError:
+        pass
+    if own and not own.startswith("127."):
+        check("...this machine's LAN address becomes 127.0.0.1",
+              d.local_url(f"http://{own}:4408/webcam/?action=snapshot")
+              == "http://127.0.0.1:4408/webcam/?action=snapshot",
+              d.local_url(f"http://{own}:4408/webcam/?action=snapshot"))
+    check("is_local_ip", d.is_local_ip("127.0.0.1")
+          and not d.is_local_ip("192.0.2.7"))
     return _failures
 
 
