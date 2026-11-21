@@ -171,7 +171,7 @@ TEMPLATE_FIELDS = ("title", "contents", "image", "camera", "remaining",
 # a topic of the chat, by ID, in groups with topics on); "": the default.
 # Other services have none.
 TOPIC_PROVIDERS = ("ntfy", "telegram")
-RX_NTFY_URL = re.compile(r"(ntfys?://[^/?]+/)[^?]*(\?.*)?")
+RX_NTFY_URL = re.compile(r"(p?ntfys?://[^/?]+/)[^?]*(\?.*)?")
 RX_TGRAM_URL = re.compile(r"(tgram://[^/?]+/[^?:]+)(?::\d+)?(\?.*)?")
 
 

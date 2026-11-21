@@ -330,6 +330,10 @@ def run_settings_tests():
                       ENV)
     check("...also as saved before (the service with its server)",
           old["secret"] == "tk_secret123" and old["secret_for"] == "ntfy")
+    check("a notification's own topic also on pushraker's ntfy sender "
+          "(pntfy://, old Apprise)", st.with_topic(
+              "pntfy://ntfy.example.com/main?priority=high", "other")
+          == "pntfy://ntfy.example.com/other?priority=high")
     same = st.validate(dict(topic="u2"), back, ENV)
     check("the same service keeps it", same["secret"] == "tk_secret123")
     mail = dict(enabled=True, provider="ntfy", auth="none",
