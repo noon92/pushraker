@@ -16,8 +16,7 @@ Moonraker + Klipper installation.
 
 Paths default to a standard printer_data layout under the running user's
 home (~/moonraker, ~/printer_data); the Snapmaker U1 extended firmware's
-harness passes its own, and install.py (the one-line install over SSH)
-passes what it found in the running Moonraker.
+harness passes its own.
 """
 
 from __future__ import annotations
@@ -56,12 +55,7 @@ def parse(argv: List[str]) -> argparse.Namespace:
                                 description=__doc__.split("\n\n")[0])
     p.add_argument("command", choices=["install", "uninstall", "status"])
     p.add_argument("--moonraker-dir", default=home("moonraker"),
-                   help="Moonraker's source directory: holds "
-                        "moonraker/components (packaged layout) or "
-                        "components (older, flat layout)")
-    p.add_argument("--components-dir", default=None,
-                   help="Moonraker's components folder itself (default: "
-                        "found under --moonraker-dir)")
+                   help="Moonraker's source directory (holds moonraker/components)")
     p.add_argument("--data-dir", default=home("printer_data"),
                    help="printer_data (config/, the secrets file lives here)")
     p.add_argument("--moonraker-conf", default=None,
@@ -90,13 +84,6 @@ def parse(argv: List[str]) -> argparse.Namespace:
     p.add_argument("--import-secrets", nargs=2, metavar=("FILE", "SECTION"),
                    help="the secrets that go with --import-ini (e.g. "
                         "moonraker.secrets notifications)")
-    p.add_argument("--no-klipper", action="store_true",
-                   help="install: leave Klipper's config alone (no macro "
-                        "file, no include in printer.cfg)")
-    p.add_argument("--backup", default="", metavar="SUFFIX",
-                   help="copy moonraker.conf and printer.cfg to "
-                        "<file><SUFFIX> before their first change (an "
-                        "existing copy is kept)")
     p.add_argument("--purge", action="store_true",
                    help="uninstall: also remove pushraker.conf and the secrets")
     p.add_argument("--owner", default="",
@@ -141,14 +128,6 @@ def chown(path: str, owner: str, like: str) -> None:
         os.chown(path, uid, gid)
     except (KeyError, OSError, ImportError):
         pass
-
-
-def backup(path: str, suffix: str) -> None:
-    """A copy of a file about to change, once: an earlier copy is the
-    original, never overwritten."""
-    if suffix and os.path.isfile(path) and not os.path.exists(path + suffix):
-        shutil.copy2(path, path + suffix)
-        print(f"Backed up {path} to {path + suffix}")
 
 
 def remove(path: str) -> bool:
@@ -228,25 +207,13 @@ def macro_file() -> str:
     return os.path.join(os.path.dirname(__file__), "klipper", KLIPPER_INCLUDE)
 
 
-def components_dir(a: argparse.Namespace) -> str:
-    """moonraker/components (the packaged layout, 2023 on), else a flat
-    Moonraker's components (moonraker.py beside it, as on the Creality
-    Hi), unless given."""
-    if a.components_dir:
-        return a.components_dir
-    packaged = os.path.join(a.moonraker_dir, "moonraker", "components")
-    flat = os.path.join(a.moonraker_dir, "components")
-    if not os.path.isdir(packaged) and os.path.isdir(flat):
-        return flat
-    return packaged
-
-
 def places(a: argparse.Namespace) -> dict:
     config_dir = os.path.join(a.data_dir, "config")
-    comps = components_dir(a)
     return dict(
-        shim=os.path.join(comps, SHIM_NAME),
-        old_shim=os.path.join(comps, OLD_SHIM_NAME),
+        shim=os.path.join(a.moonraker_dir, "moonraker", "components",
+                          SHIM_NAME),
+        old_shim=os.path.join(a.moonraker_dir, "moonraker", "components",
+                              OLD_SHIM_NAME),
         moonraker_conf=a.moonraker_conf
         or os.path.join(config_dir, "moonraker.conf"),
         moonraker_include=os.path.join(a.moonraker_include_dir,
@@ -279,8 +246,7 @@ def cmd_install(a: argparse.Namespace) -> int:
         return 1
     if not os.path.isdir(os.path.dirname(p["shim"])):
         print(f"ERROR: no Moonraker components directory at "
-              f"{os.path.dirname(p['shim'])} (--moonraker-dir, "
-              f"--components-dir)")
+              f"{os.path.dirname(p['shim'])} (--moonraker-dir)")
         return 1
     if write(p["shim"], SHIM.format(paths=list(a.site_packages)),
              owner=a.owner):
@@ -289,35 +255,23 @@ def cmd_install(a: argparse.Namespace) -> int:
     # second time
     if remove(p["old_shim"]):
         changed.append(f"removed {p['old_shim']}")
-    # The old section may live in moonraker.conf even when the new section
-    # is installed through an include directory. Leaving it behind asks
-    # Moonraker to load the shim we just removed.
-    lines = read_lines(p["moonraker_conf"])
-    if any(is_header(ln, OLD_SECTION) for ln in lines) or (
-            not p["moonraker_include"]
-            and not any(is_header(ln, SECTION) for ln in lines)):
-        backup(p["moonraker_conf"], a.backup)
-    if drop_section(p["moonraker_conf"], OLD_SECTION, a.owner):
-        changed.append(f"[{OLD_SECTION}] removed from {p['moonraker_conf']}")
     if p["moonraker_include"]:
         if write(p["moonraker_include"], section_text(a), owner=a.owner):
             changed.append(p["moonraker_include"])
     else:
+        if drop_section(p["moonraker_conf"], OLD_SECTION, a.owner):
+            changed.append(f"[{OLD_SECTION}] removed from {p['moonraker_conf']}")
         if ensure_section(p["moonraker_conf"], SECTION, section_text(a),
                           a.owner):
             changed.append(p["moonraker_conf"])
-    if not a.no_klipper:
-        with open(macro_file()) as f:
-            macros = f.read()
-        if write(p["klipper_include"], macros, owner=a.owner):
-            changed.append(p["klipper_include"])
-        if not a.klipper_include_dir:
-            if not any(is_header(ln, f"include {KLIPPER_INCLUDE}")
-                       for ln in read_lines(p["printer_cfg"])):
-                backup(p["printer_cfg"], a.backup)
-            if ensure_section(p["printer_cfg"], f"include {KLIPPER_INCLUDE}",
-                              f"[include {KLIPPER_INCLUDE}]\n", a.owner):
-                changed.append(p["printer_cfg"])
+    with open(macro_file()) as f:
+        macros = f.read()
+    if write(p["klipper_include"], macros, owner=a.owner):
+        changed.append(p["klipper_include"])
+    if not a.klipper_include_dir:
+        if ensure_section(p["printer_cfg"], f"include {KLIPPER_INCLUDE}",
+                          f"[include {KLIPPER_INCLUDE}]\n", a.owner):
+            changed.append(p["printer_cfg"])
     store = p["store"]
     if not store.exists():
         s = None
@@ -343,11 +297,8 @@ def cmd_install(a: argparse.Namespace) -> int:
         print(f"Updated: {path}")
     if not changed:
         print("Already installed; nothing changed.")
-    # install.py restarts Moonraker itself and says what to open
-    if not os.environ.get("PUSHRAKER_INSTALLER"):
-        print(f"pushraker {__version__} is set up. Restart Moonraker"
-              + ("" if a.no_klipper else " and Klipper")
-              + " to load it, then open the notifications page.")
+    print(f"pushraker {__version__} is set up. Restart Moonraker and "
+          "Klipper to load it, then open the notifications page.")
     return 0
 
 
@@ -360,9 +311,6 @@ def cmd_uninstall(a: argparse.Namespace) -> int:
             removed.append(path)
     if not p["moonraker_include"]:
         for section in (SECTION, OLD_SECTION):
-            if any(is_header(ln, section)
-                   for ln in read_lines(p["moonraker_conf"])):
-                backup(p["moonraker_conf"], a.backup)
             if drop_section(p["moonraker_conf"], section, a.owner):
                 removed.append(f"[{section}] in {p['moonraker_conf']}")
     if not a.klipper_include_dir and drop_section(
@@ -376,8 +324,7 @@ def cmd_uninstall(a: argparse.Namespace) -> int:
         print(f"Removed {path}")
     if not removed:
         print("Nothing to remove.")
-    if not os.environ.get("PUSHRAKER_INSTALLER"):
-        print("Restart Moonraker and Klipper to unload pushraker.")
+    print("Restart Moonraker and Klipper to unload pushraker.")
     return 0
 
 

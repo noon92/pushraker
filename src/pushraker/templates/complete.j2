@@ -9,12 +9,6 @@ Object {{ event.object.number }} of {{ event.object.count }}: {{ event.object.na
 Print time: {{ job.time.elapsed|default("0m") }}
 {# Moonraker's job queue: what is still waiting #}
 {% if job.queue.remaining %}
-{{ job.queue.remaining|plural("1 print", "prints") }} remaining in queue{% if job.queue.remaining > 1 and (job.queue.time or job.queue.materials or job.queue.grams) %} ({% if job.queue.time %}Estimated print time: {{ job.queue.time }}{% endif %}{% if job.queue.materials %}{% if job.queue.time %}, {% endif %}Materials: {{ job.queue.materials|join("/") }}{% endif %}{% if job.queue.grams %}{% if job.queue.time or job.queue.materials %}, {% endif %}Filament: {{ job.queue.grams|round|int }} g{% endif %}){% endif %}
-Next job: {{ job.queue.next.name }}
-{% endif %}
-{# Bed cooled: when it will be sent (push or email), say so #}
-{% if (pushraker.push.enabled and pushraker.bed_cooled.push) or (pushraker.email.enabled and pushraker.bed_cooled.email) %}
-
-Notification will be sent via {% if pushraker.push.enabled and pushraker.bed_cooled.push and pushraker.email.enabled and pushraker.bed_cooled.email %}push & email{% elif pushraker.push.enabled and pushraker.bed_cooled.push %}push{% else %}email{% endif %} when bed has cooled
+{{ job.queue.remaining|plural("1 print", "prints") }} remaining in queue{% if job.queue.time %} (total {{ job.queue.time }}){% endif %}
 {% endif %}
 {% endif %}

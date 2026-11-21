@@ -86,28 +86,6 @@
     .nt-enable { display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--item); border-radius: 6px; margin-bottom: 16px; cursor: pointer; color: #fff; font-weight: 500; }
     .nt-enable.nt-sec { font-weight: 600; margin-bottom: 12px; }
     .nt input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; flex: none; }
-    .bk-wrap { margin-top: 16px; }
-    .bk-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .bk-send-wrap { position: relative; }
-    .nt-fill-menu.bk-menu { right: auto; min-width: 260px; top: auto; bottom: calc(100% + 4px); z-index: 20; }
-    .bk-status { font-size: 13px; color: #8bc34a; }
-    .bk-file { font-family: monospace; font-size: 13px; color: #ccc; margin: 4px 0 8px; word-break: break-all; }
-    .bk-list { margin: 0 0 10px 18px; padding: 0; font-size: 14px; line-height: 1.6; }
-    .bk-fit { color: #c9c9c9; }
-    .bk-fit:empty { display: none; }
-    .bk-note { color: var(--muted); font-size: 13px; }
-    .nt-fill-menu.bk-menu button.bk-off { opacity: 0.45; cursor: not-allowed; }
-    .nt-fill-menu.bk-menu button.bk-off:hover { background: none; }
-    .bk-red { color: #ff6b6b; font-weight: 600; }
-    .rs-list { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 12px; }
-    .rs-list label { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 14px; }
-    .rs-list input { margin-top: 3px; flex: none; }
-    .rs-list small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
-    .rs-list .rs-all { border-top: 1px solid #444; padding-top: 10px; }
-    .rs-list label.rs-off { opacity: 0.45; cursor: default; }
-    .bk-secrets { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; font-size: 14px; cursor: pointer; }
-    .bk-to { margin: 4px 0 8px; }
-    .bk-to label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
     .nt-section { font-size: 16px; color: #fff; font-weight: 600; margin: 8px 0 10px; }
     .nt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; margin-bottom: 20px; }
     .nt-field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
@@ -166,9 +144,7 @@
     .nt-port { display: grid; grid-template-columns: 90px 1fr; gap: 6px; }
     .nt-hint a { color: var(--accent); }
     .nt-table tr.nt-nopush .nt-dim-push { opacity: 0.4; }
-    .nt-no-push .nt-col-push { display: none; }
-    /* Email off: the column stays, greyed, as a reminder it's there */
-    .nt-no-email .nt-col-email input { opacity: .35; cursor: not-allowed; }
+    .nt-no-push .nt-col-push, .nt-no-email .nt-col-email { display: none; }
     /* Time-left method: one row of radio buttons, each with an (i) that
        opens the method's explanation (hover on a computer, tap on a phone) */
     .nt-eta { background: var(--item); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; position: relative; }
@@ -179,11 +155,6 @@
     .nt-eta-opts .nt-eta-def { color: var(--muted); font-size: 12px; }
     .nt-i { display: inline-flex; width: 16px; height: 16px; border: 1px solid #777; border-radius: 50%; color: #aaa; font-size: 11px; font-weight: 700; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; align-items: center; justify-content: center; cursor: help; line-height: 1; background: none; padding: 0; }
     .nt-i.on, .nt-i:hover { border-color: var(--accent); color: var(--accent); }
-    /* The ? is drawn, not typed: a font's ? sits off-centre in some fonts */
-    .nt-i { font-size: 0 !important; vertical-align: middle; position: relative; top: -0.25em; }
-    .nt-i::after { content: ''; width: 58%; height: 58%; background: currentColor;
-        -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M3 3.4a2 2 0 1 1 3 1.7c-.6.4-1 .8-1 1.5v.3' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round'/%3E%3Ccircle cx='5' cy='8.9' r='.9'/%3E%3C/svg%3E") center / contain no-repeat;
-        mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M3 3.4a2 2 0 1 1 3 1.7c-.6.4-1 .8-1 1.5v.3' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round'/%3E%3Ccircle cx='5' cy='8.9' r='.9'/%3E%3C/svg%3E") center / contain no-repeat; }
     .nt-tip { display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 6; background: #1e1e1e; border: 1px solid #555; border-radius: 8px; padding: 10px 12px; width: 340px; font-size: 12px; color: var(--text); line-height: 1.45; white-space: normal; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-weight: normal; cursor: auto; }
     .nt-tip.open { display: block; }
     .nt-tip b { color: #fff; }
@@ -203,60 +174,14 @@
     .nt-ast.blue { color: var(--accent); }
     /* On a phone the Data button is the row's last line instead of a column */
     .nt-data-inline { display: none; }
-    .nt-x-m { display: none; }
-    .pr-data .pr-modal-box { max-width: min(1600px, 96vw); border-radius: 12px; padding: 20px 24px; max-height: 94vh; overflow-y: auto; overscroll-behavior: contain; }
-    .pr-data, .pr-data .cm-scroller { overscroll-behavior: contain; }
-    body.pr-locked { overflow: hidden; }
+    .pr-data .pr-modal-box { max-width: min(1600px, 96vw); border-radius: 12px; padding: 20px 24px; max-height: 94vh; overflow-y: auto; }
     .pr-data-grid { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) !important; }
     .pr-prevwrap { margin-top: 12px; }
-    .pr-imgwrap { margin-top: 18px; }
-    .pr-topicwrap, .pr-priowrap { margin-top: 18px; max-width: 340px; }
-    .pr-priowrap.off select, .pr-topicwrap.off input, .pr-priowrap.off .pr-lbl > span, .pr-topicwrap.off .pr-lbl > span { opacity: .45; }
-    .pr-priowrap.off select { cursor: not-allowed; }
-    .nt-greyed .nt-field > *:not(label), .nt-greyed label { opacity: .5; }
-    .nt-greyed label .nt-i { opacity: 1; }
-    .pr-topicwrap.off input { cursor: not-allowed; }
-    /* Objects: no taller than the contents box starts out */
+    .pr-imgwrap { margin-top: 12px; }
+    /* Values: no taller than the contents box starts out */
     .pr-data .pr-pick { max-height: 260px; }
     #pr-t-title { height: auto; min-height: 0; resize: none; overflow: hidden; line-height: 1.4; margin-bottom: 10px; }
     .pr-rec { font-size: 12px; color: var(--muted); }
-    .pr-custom { margin-bottom: 4px; }
-    .pr-custom input.pr-code { margin-bottom: 8px; }
-    #pr-when { height: auto; min-height: 0; resize: vertical; font-family: monospace; font-size: 13px; margin-bottom: 4px; }
-    .pr-whenlbl { display: flex; align-items: center; gap: 0; }
-    .pr-whenlbl select { background: #2a2a2a; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 1px 4px; font-size: 12px; margin: 0 1px; }
-    .pr-whenlbl .pr-info { margin-left: 6px; }
-    .pr-now { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
-    .pr-now b { font-weight: 600; }
-    .pr-now b.yes { color: var(--success); } .pr-now b.no { color: var(--muted); }
-    /* The name with its fixed pushraker. in front, in one box */
-    .pr-prefixed { display: flex; align-items: center; background: var(--item); border: 1px solid #555; border-radius: 6px; margin-bottom: 4px; cursor: text; }
-    .pr-prefixed:focus-within { border-color: var(--accent); }
-    .pr-prefixed .pr-prefix { padding: 9px 0 9px 10px; color: var(--muted); font-family: monospace; font-size: 13px; user-select: none; }
-    .pr-prefixed input { flex: 1; min-width: 0; border: none; background: transparent; padding: 9px 10px 9px 0; color: var(--text); font-size: 13px; font-family: monospace; }
-    .pr-prefixed input:focus { outline: none; }
-    .pr-prefixed.pr-fixed { opacity: 0.6; cursor: default; }
-    .pr-prefixed.pr-fixed input { cursor: default; }
-    #pr-cm-when .cm-editor { border: 1px solid #555; border-radius: 6px; font-size: 13px; margin-bottom: 4px; max-height: 160px; }
-    #pr-cm-when .cm-scroller { overflow: auto; font-family: monospace; }
-    .cm-placeholder { color: var(--muted) !important; font-style: italic; }
-    /* A field Done can't take: outlined; the reason next to Done */
-    .pr-bad, .pr-bad .cm-editor, .pr-prefixed.pr-bad { outline: 2px solid var(--error); outline-offset: -1px; }
-    .pr-buttons { position: relative; }
-    .pr-block-pop { position: absolute; left: 0; bottom: calc(100% + 8px); max-width: min(460px, 100%); background: var(--item); border: 1px solid var(--error); border-radius: 6px; padding: 8px 10px; font-size: 13px; color: var(--text); box-shadow: 0 4px 16px rgba(0,0,0,.4); z-index: 5; }
-    .pr-now code { font-size: 11px; }
-    .pr-repeat { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: #ddd; margin-bottom: 10px; }
-    .pr-repeat select, .pr-repeat input { background: #2a2a2a; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 3px 6px; font-size: 13px; }
-    .pr-repeat input { width: 64px; }
-    .nt-x { background: none; border: 1px solid #555; color: #e57373; border-radius: 5px; width: 26px; height: 26px; margin-left: 6px; cursor: pointer; font-size: 13px; vertical-align: middle; }
-    .nt-x:hover { border-color: var(--error); background: rgba(229,115,115,.12); }
-    .nt-crow code { font-size: 11px; }
-    .nt-add td { padding-top: 10px; }
-    tr.nt-topic-bad, tr.nt-bad { outline: 2px solid var(--error); outline-offset: -2px; }
-    input.nt-bad, select.nt-bad, input.nt-live-bad { outline: 2px solid var(--error); }
-    .nt-live-msg { color: var(--error); font-size: 12px; margin-left: 8px; }
-    .nt-field > .nt-live-msg { display: block; margin: 4px 0 0; }
-    #nt-stored-error { border-color: var(--error); }
     .pr-cm .pr-console { height: auto; min-height: 0; max-height: 200px; margin: 12px 0 0; display: none; }
     .pr-cm .pr-console.on { display: block; }
     .pr-data h3 { font-size: 18px; margin-bottom: 10px; }
@@ -345,7 +270,7 @@
     @media (max-width: 600px) {
         .pr-data-grid { grid-template-columns: minmax(0, 1fr) !important; }
         .pr-col-l, .pr-col-r { display: contents; }
-        .pr-side { order: 1; } .pr-ed { order: 2; } .pr-imgwrap { order: 3; } .pr-priowrap, .pr-topicwrap { order: 3; max-width: none; } .pr-prevwrap { order: 4; }
+        .pr-side { order: 1; } .pr-ed { order: 2; } .pr-imgwrap { order: 3; } .pr-prevwrap { order: 4; }
         .pr-pick { max-height: 260px; }
         .pr-data .pr-modal-box { padding: 12px 10px; max-width: 100%; }
         .pr-modal { padding: 6px; }
@@ -353,10 +278,6 @@
         .card { padding: 10px; }
         .nt-table th.nt-data, .nt-table td.nt-data { display: none; }
         .nt-data-inline { display: block; margin-top: 6px; }
-        /* In the row's last cell a phone shows: a cell can hold it in
-           every browser, a table row can't in older Safari */
-        .nt-table td.nt-x-cell { position: relative; }
-        .nt-x-m { display: block; position: absolute; top: 8px; right: 8px; margin: 0; }
     }
     @media (max-width: 600px) {
         .nt-grid { grid-template-columns: 1fr; }
@@ -381,7 +302,7 @@
 <div class="pr-loading" id="pr-loading">Loading settings…</div>
 <div class="nt pr-hidden" id="nt-root">
     <label class="nt-enable"><input type="checkbox" id="nt-enabled"> Enable notifications</label>
-
+    <div class="nt-public" id="nt-stored-error" style="display:none; margin: -8px 0 16px"></div>
 
     <div class="nt-body">
         <div class="nt-section">Push notifications</div>
@@ -399,7 +320,6 @@
                     <option value="telegram">Telegram</option>
                 </select>
                 <div class="nt-hint" id="nt-provider-hint"></div>
-                <div class="nt-warn" id="nt-topic-warn" style="display:none"></div>
             </div>
         </div>
         <div class="nt-grid" id="nt-gotify">
@@ -487,7 +407,7 @@
                     <input class="nt-input" id="nt-server" placeholder="https://ntfy.example.com" autocomplete="off" spellcheck="false">
                     <button type="button" class="btn btn-secondary" id="nt-use-public">Use public server</button>
                 </div>
-                <div class="nt-hint">Your own ntfy server (hostname or IP, optional port), or the public ntfy.sh</div>
+                <div class="nt-hint">Your own ntfy server (hostname or IP, optional port), or the public ntfy.sh.</div>
                 <div class="nt-public" id="nt-public-warn" style="display:none">
                     Public server: anyone who knows or guesses your topic can read your notifications, including
                     camera images, model previews and file names. Fine for testing; for everyday use, set up your own
@@ -495,11 +415,12 @@
                 </div>
             </div>
             <div class="nt-field">
-                <label for="nt-topic">Topic (default)</label>
+                <label for="nt-topic">Topic</label>
                 <div class="nt-inline">
                     <input class="nt-input" id="nt-topic" placeholder="printer" maxlength="64" autocomplete="off" spellcheck="false">
                     <button type="button" class="btn btn-secondary" id="nt-topic-random" title="Generate a long random topic">Random</button>
                 </div>
+                <div class="nt-hint">Subscribe to the same topic in the ntfy app.</div>
             </div>
             <div class="nt-field">
                 <label for="nt-auth">Authentication</label>
@@ -519,6 +440,7 @@
                     <input class="nt-input" id="nt-secret" type="password" autocomplete="new-password" spellcheck="false">
                     <button type="button" class="btn btn-secondary" data-toggle="nt-secret">Show</button>
                 </div>
+                <div class="nt-hint">Tip: Use a write-only account for the printer.</div>
             </div>
         </div>
         </div>
@@ -589,8 +511,9 @@
         <div class="nt-section">Notification content</div>
         <div class="nt-grid">
             <div class="nt-field">
-                <label for="nt-name">Printer name <button type="button" class="nt-i pr-info" id="nt-name-info" data-info="" aria-label="About">?</button></label>
+                <label for="nt-name">Printer name</label>
                 <input class="nt-input" id="nt-name" autocomplete="off">
+                <div class="nt-hint" id="nt-name-hint">Shown in every title, e.g. "✅ U1 complete".</div>
             </div>
             <div class="nt-field">
                 <label for="nt-camera">Default camera</label>
@@ -598,8 +521,9 @@
                 <div class="nt-warn" id="nt-camera-warn"></div>
             </div>
             <div class="nt-field">
-                <label for="nt-tz">Time zone <button type="button" class="nt-i pr-info" data-info="By default, the time zone of the last browser to save this page. A template can set its own: {% set timezone = &quot;Europe/Warsaw&quot; %}." aria-label="About">?</button></label>
+                <label for="nt-tz">Time zone</label>
                 <select class="nt-input" id="nt-tz"></select>
+                <div class="nt-hint">For ETAs. Browser: the one this page was last saved from.</div>
             </div>
             <div class="nt-field" style="grid-column: 1 / -1">
                 <label for="nt-printer-url">Printer URL for buttons (optional)</label>
@@ -622,15 +546,15 @@
         <div class="nt-table-wrap">
             <table class="nt-table" id="nt-table">
                 <thead>
-                    <tr><th>Notification</th><th class="nt-c nt-col-push">Push</th><th class="nt-c nt-col-email" id="nt-th-email">Email <button type="button" class="nt-i pr-info" id="nt-email-info" data-info="Email notifications are off. Turn on &quot;Send email notifications&quot; below to use this column." aria-label="About">?</button></th><th class="nt-data"></th></tr>
+                    <tr><th>Notification</th><th class="nt-c nt-col-push">Push</th><th class="nt-col-push nt-ch">Priority</th><th class="nt-c nt-col-email">Email</th><th class="nt-data"></th></tr>
                 </thead>
                 <tbody id="nt-rows"></tbody>
-                <tbody id="nt-crows"></tbody>
             </table>
         </div>
+        <div class="nt-foot">* Needs <b>Exclude objects</b> enabled in the slicer.</div>
         <div class="nt-grid" id="nt-filament">
             <div class="nt-field">
-                <label for="nt-fl-percent">🧵 Spool running low: alert when a spool is down to <button type="button" class="nt-i pr-info" id="nt-fl-info" data-info="Needs Spoolman to know how much filament each spool has left." data-guide="https://snapmakeru1-extended-firmware.pages.dev/spoolman" aria-label="About">?</button></label>
+                <label for="nt-fl-percent">🧵 Spool running low: alert when a spool is down to</label>
                 <div class="nt-inline nt-unit">
                     <input class="nt-input" id="nt-fl-percent" type="number" min="0" max="90" inputmode="numeric">
                     <span>% of a full spool</span>
@@ -646,32 +570,17 @@
                 <div class="nt-hint">0 turns this off.</div>
             </div>
             <div class="nt-field" style="grid-column:1 / -1">
-                <label><input type="checkbox" id="nt-fl-unknown"> At print start, warn about a loaded spool that Spoolman shows at 0 g. Turn off if you don't track spool weights in Spoolman</label>
+                <label><input type="checkbox" id="nt-fl-unknown"> At print start, warn about a loaded spool that Spoolman shows at 0 g (amount of filament left unknown)</label>
+                <div class="nt-hint">Turn off if you don't track spool weights in Spoolman.</div>
             </div>
         </div>
-
-    </div>
-    <div class="bk-wrap">
-    <div class="nt-section">Backup</div>
-    <div class="bk-row">
-        <span class="nt-fill-wrap bk-send-wrap">
-            <button type="button" class="btn btn-secondary" id="bk-send" aria-haspopup="true" aria-expanded="false">Backup ▴</button>
-            <div class="nt-fill-menu bk-menu" id="bk-menu" role="menu">
-                <button type="button" role="menuitem" data-bk="download">Download</button>
-                <button type="button" role="menuitem" data-bk="push" id="bk-push">Send by push</button>
-                <button type="button" role="menuitem" data-bk="email" id="bk-email">Send by email</button>
-            </div>
-        </span>
-        <button type="button" class="btn btn-secondary" id="bk-restore">Restore…</button>
-        <button type="button" class="btn btn-secondary" id="rs-open">Reset…</button>
-        <input type="file" id="bk-file" accept=".json,application/json" style="display:none">
-        <span class="bk-status" id="bk-status"></span>
-    </div>
+        <div class="nt-hint" id="nt-filament-off" style="margin:-8px 0 16px;font-size:12px;color:var(--muted)">
+            🧵 <b>Spoolman</b> notifications (not enough filament, running low) need Moonraker's <code>[spoolman]</code> integration.
+        </div>
     </div>
 </div>
 
 <div class="pr-error" id="pr-error" style="display:none"></div>
-<div class="nt-public" id="nt-stored-error" style="display:none; margin: 0 0 12px"></div>
 <div class="pr-actions">
     <span class="pr-save-wrap">
         <button type="button" class="btn btn-save" id="pr-save">Save &amp; Apply</button>
@@ -695,68 +604,11 @@
 
 <div class="pr-modal pr-discard" id="pr-discard" role="alertdialog" aria-labelledby="pr-discard-title">
     <div class="pr-modal-box">
-        <h3 id="pr-discard-title">⚠️ Discard changes?</h3>
+        <h3 id="pr-discard-title">Discard changes?</h3>
         <p>The settings go back to the last saved ones. The changes you made on this page will not be kept.</p>
         <div class="pr-buttons">
             <button type="button" class="btn btn-discard" id="pr-discard-yes" disabled>Discard changes</button>
             <button type="button" class="btn btn-keep" id="pr-discard-no">Keep editing</button>
-        </div>
-    </div>
-</div>
-
-<div class="pr-modal bk-modal" id="bk-out" role="dialog" aria-labelledby="bk-out-title">
-    <div class="pr-modal-box">
-        <h3 id="bk-out-title">Back up settings</h3>
-        <div class="bk-file" id="bk-out-file"></div>
-        <ul class="bk-list" id="bk-out-list"></ul>
-        <label class="bk-secrets" id="bk-secrets-wrap"><input type="checkbox" id="bk-secrets"> Include tokens, passwords and the webhook URL</label>
-        <p class="bk-red" id="bk-out-red"></p>
-        <p class="bk-note" id="bk-out-never"></p>
-        <p class="bk-note">The last saved settings: Save &amp; Apply first to include changes on this page.</p>
-        <div class="bk-to" id="bk-to-wrap">
-            <label for="bk-to">Send to</label>
-            <input class="nt-input" id="bk-to" type="email" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="pr-data-err" id="bk-err" style="display:none"></div>
-        <div class="pr-buttons">
-            <button type="button" class="btn btn-save" id="bk-go">Download</button>
-            <button type="button" class="btn btn-secondary" id="bk-cancel">Cancel</button>
-        </div>
-    </div>
-</div>
-
-<div class="pr-modal bk-modal" id="rs-modal" role="alertdialog" aria-labelledby="rs-title">
-    <div class="pr-modal-box">
-        <h3 id="rs-title">⚠️ Reset settings</h3>
-        <p class="bk-note">Choose what goes back to how pushraker came:</p>
-        <div class="rs-list">
-            <label><input type="checkbox" data-rs="push"> <span><b>Push service settings</b><small>Service, server and topic, login, password, token</small></span></label>
-            <label><input type="checkbox" data-rs="email"> <span><b>Email settings</b><small>Server, sender and addresses, login and password</small></span></label>
-            <label><input type="checkbox" data-rs="webhook"> <span><b>Webhook</b><small>Status, URL</small></span></label>
-            <label><input type="checkbox" data-rs="stock"> <span><b>Stock notifications</b><small>Status, priority, title, content, settings</small></span></label>
-            <label id="rs-custom-wrap"><input type="checkbox" data-rs="custom"> <span><b>Custom notifications</b><small id="rs-custom-sub">All of them are deleted</small></span></label>
-            <label class="rs-all"><input type="checkbox" id="rs-all"> <span><b>All settings</b><small>Everything above and all other settings</small></span></label>
-        </div>
-        <p class="bk-red" id="rs-red" style="display:none"></p>
-        <p class="bk-note">Nothing is saved until you click Save &amp; Apply.</p>
-        <div class="pr-buttons">
-            <button type="button" class="btn btn-discard" id="rs-yes" disabled>Reset</button>
-            <button type="button" class="btn btn-secondary" id="rs-no">Cancel</button>
-        </div>
-    </div>
-</div>
-
-<div class="pr-modal bk-modal" id="bk-modal" role="alertdialog" aria-labelledby="bk-title">
-    <div class="pr-modal-box">
-        <h3 id="bk-title">Restore this backup?</h3>
-        <div class="bk-file" id="bk-in-file"></div>
-        <ul class="bk-list" id="bk-in-list"></ul>
-        <ul class="bk-list bk-fit" id="bk-in-fit"></ul>
-        <p class="bk-red" id="bk-in-red"></p>
-        <p class="bk-note" id="bk-in-note"></p>
-        <div class="pr-buttons">
-            <button type="button" class="btn btn-save" id="bk-yes">Restore</button>
-            <button type="button" class="btn btn-secondary" id="bk-no">Cancel</button>
         </div>
     </div>
 </div>
@@ -767,15 +619,6 @@
         <div class="pr-data-grid">
             <div class="pr-col-l">
             <div class="pr-ed">
-                <div class="pr-lbl">Name <button type="button" class="nt-i pr-info" id="pr-name-i" data-info="" data-guide="pushraker-values" aria-label="About">?</button></div>
-                <label class="pr-prefixed" id="pr-cname-wrap"><span class="pr-prefix">pushraker.</span><input id="pr-cname" spellcheck="false" autocomplete="off" maxlength="32" placeholder="benchy_detected" aria-label="Name"></label>
-                <div class="pr-custom" id="pr-custom" style="display:none">
-                    <div class="pr-lbl pr-whenlbl">When (evaluate&nbsp;<select id="pr-check"><option value="poll">every 5 seconds</option><option value="layer">on each layer change</option><option value="tool">on each tool change</option><option value="object">on each object change</option><option value="excluded">when an object is excluded</option><option value="progress">on each 1% of progress</option><option value="console">on each console message</option></select>) <button type="button" class="nt-i pr-info" id="pr-when-i" data-info="A condition, evaluated every 5 seconds: sent when it turns true. Empty: sent only from G-code." data-guide="custom-notifications" aria-label="About">?</button></div>
-                    <textarea class="nt-input" id="pr-when" rows="2" spellcheck="false" autocomplete="off"></textarea>
-                    <div id="pr-cm-when"></div>
-                    <div class="pr-now" id="pr-now"></div>
-                    <div class="pr-repeat"><span>Send</span><select id="pr-repeat"><option value="change">each time it turns true (at most 1/min)</option><option value="job">once per print job</option><option value="job_pause">once per print job, resets after a pause</option><option value="minutes">at most every # minutes</option></select><span id="pr-rmin-wrap"># = <input type="number" id="pr-rmin" min="1" max="1440" inputmode="numeric"></span></div>
-                </div>
                 <div class="pr-lbl">Title</div>
                 <textarea class="nt-input pr-code" id="pr-t-title" rows="1" spellcheck="false" autocomplete="off"></textarea>
                 <div class="pr-lblrow"><div class="pr-lbl">Contents</div><span><span class="pr-rec" id="pr-cm-rec">Recommended: </span><button type="button" class="pr-link" id="pr-cm-link">Install CodeMirror</button></span></div>
@@ -792,13 +635,13 @@
             <div class="pr-side">
                 <div class="pr-lbl">Jinja <a href="https://github.com/noon92/pushraker/blob/main/docs/guide.md#templates" target="_blank">Guide</a></div>
                 <div class="pr-jj" id="pr-jj">
-                    <span id="pr-blocks"><button type="button" class="pr-j" data-j="if">if</button><button type="button" class="pr-j" data-j="elif">elif</button><button type="button" class="pr-j" data-j="else">else</button><button type="button" class="pr-j" data-j="for">for each</button><button type="button" class="pr-j" data-j="set">set</button><button type="button" class="pr-j" data-j="comment">{# comment #}</button></span>
+                    <button type="button" class="pr-j" data-j="if">if</button><button type="button" class="pr-j" data-j="elif">elif</button><button type="button" class="pr-j" data-j="else">else</button><button type="button" class="pr-j" data-j="for">for each</button><button type="button" class="pr-j" data-j="set">set</button><button type="button" class="pr-j" data-j="comment">{# comment #}</button>
                     <div class="pr-ops" id="pr-ops" style="display:none">
                         <div class="pr-lbl">Compare</div>
                         <button type="button" class="pr-j" data-op=" == ">==</button><button type="button" class="pr-j" data-op=" != ">!=</button><button type="button" class="pr-j" data-op=" > ">&gt;</button><button type="button" class="pr-j" data-op=" < ">&lt;</button><button type="button" class="pr-j" data-op=" >= ">&gt;=</button><button type="button" class="pr-j" data-op=" <= ">&lt;=</button><button type="button" class="pr-j" data-op="not ">not</button><button type="button" class="pr-j" data-op=" and ">and</button><button type="button" class="pr-j" data-op=" or ">or</button><button type="button" class="pr-j" data-op=" in ">in</button><button type="button" class="pr-j" data-op=" is defined">is defined</button><button type="button" class="pr-j" data-op='""'>"string"</button>
                     </div>
                 </div>
-                <div class="pr-lbl">Objects</div>
+                <div class="pr-lbl">Values</div>
                 <div class="pr-pick" id="pr-pick"><div class="pr-any">Loading the printer's objects…</div></div>
             </div>
             <div class="pr-imgwrap">
@@ -806,31 +649,13 @@
                 <div class="pr-imgs" id="pr-imgs"></div>
                 <div class="pr-imgopts" id="pr-imgopts"></div>
             </div>
-            <div class="pr-priowrap" id="pr-priowrap">
-                <div class="pr-lbl"><span>Priority</span> <button type="button" class="nt-i pr-info" id="pr-prio-info" data-info="" aria-label="About">?</button></div>
-                <select class="nt-input" id="pr-prio"></select>
-            </div>
-            <div class="pr-topicwrap" id="pr-topicwrap">
-                <div class="pr-lbl"><span id="pr-topic-lbl">Topic</span> <button type="button" class="nt-i pr-info" id="pr-topic-info" data-info="" aria-label="About">?</button></div>
-                <input class="nt-input pr-code" id="pr-topic" maxlength="64" spellcheck="false" autocomplete="off">
-            </div>
             </div>
         </div>
         <div class="pr-buttons">
-            <div class="pr-block-pop" id="pr-block-pop" role="alert" style="display:none"></div>
-            <button type="button" class="btn btn-save" id="pr-data-ok">Save</button>
+            <button type="button" class="btn btn-save" id="pr-data-ok">Done</button>
             <span class="pr-gap"></span>
             <button type="button" class="btn btn-secondary" id="pr-data-cancel">Cancel</button>
-            <button type="button" class="btn btn-remove" id="pr-data-delete" style="display:none">Delete</button>
             <button type="button" class="btn btn-secondary" id="pr-data-reset">Reset</button>
-            <span class="nt-fill-wrap bk-send-wrap">
-                <button type="button" class="btn btn-secondary" id="nx-send" aria-haspopup="true" aria-expanded="false">Export ▴</button>
-                <div class="nt-fill-menu bk-menu" id="nx-menu" role="menu">
-                    <button type="button" role="menuitem" data-nx="download">Download</button>
-                    <button type="button" role="menuitem" data-nx="push" id="nx-push">Send by push</button>
-                    <button type="button" role="menuitem" data-nx="email" id="nx-email">Send by email</button>
-                </div>
-            </span>
         </div>
     </div>
 </div>
@@ -855,48 +680,14 @@
 
 <div class="pr-modal pr-discard" id="pr-reset" role="alertdialog" aria-labelledby="pr-reset-title">
     <div class="pr-modal-box">
-        <h3 id="pr-reset-title">⚠️ Reset this notification?</h3>
-        <p id="pr-reset-text" style="white-space:pre-line"></p>
+        <h3 id="pr-reset-title">Reset this notification?</h3>
+        <p id="pr-reset-text"></p>
         <div class="pr-buttons">
             <button type="button" class="btn btn-discard" id="pr-reset-yes" disabled>Reset</button>
             <button type="button" class="btn btn-keep" id="pr-reset-no">Keep editing</button>
         </div>
     </div>
 </div>
-
-<div class="pr-modal bk-modal" id="nx-out" role="dialog" aria-labelledby="nx-out-title">
-    <div class="pr-modal-box">
-        <h3 id="nx-out-title">Export this notification</h3>
-        <div class="bk-file" id="nx-out-file"></div>
-        <p class="bk-red" id="nx-out-red"></p>
-        <p class="bk-note" id="nx-out-what"></p>
-        <div class="bk-to" id="nx-to-wrap">
-            <label for="nx-to">Send to</label>
-            <input class="nt-input" id="nx-to" type="email" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="pr-data-err" id="nx-err" style="display:none"></div>
-        <div class="pr-buttons">
-            <button type="button" class="btn btn-save" id="nx-go">Download</button>
-            <button type="button" class="btn btn-secondary" id="nx-cancel">Cancel</button>
-        </div>
-    </div>
-</div>
-
-<div class="pr-modal bk-modal" id="nx-modal" role="alertdialog" aria-labelledby="nx-title">
-    <div class="pr-modal-box">
-        <h3 id="nx-title">Import this notification?</h3>
-        <div class="bk-file" id="nx-in-file"></div>
-        <ul class="bk-list" id="nx-in-list"></ul>
-        <ul class="bk-list bk-fit" id="nx-in-fit"></ul>
-        <p class="bk-red" id="nx-in-red"></p>
-        <p class="bk-note">Nothing is saved until you click Save &amp; Apply.</p>
-        <div class="pr-buttons">
-            <button type="button" class="btn btn-save" id="nx-yes">Import</button>
-            <button type="button" class="btn btn-secondary" id="nx-no">Cancel</button>
-        </div>
-    </div>
-</div>
-<input type="file" id="nx-file" accept=".json,application/json" style="display:none">
 
 <div class="pr-modal" id="pr-modal">
     <div class="pr-modal-box">
@@ -915,10 +706,8 @@
 (function () {
     'use strict';
     const PRIORITY_LABELS = { min: 'Min', low: 'Low', default: 'Default', high: 'High', max: 'Max' };
-    const GROUP_LABELS = { chamber: 'Chamber temperature', fault: 'Faults', filaments: 'Filaments' };
+    const GROUP_LABELS = { chamber: 'Chamber temperature', fault: 'Faults', spools: 'Spools' };
     const el = id => document.getElementById(id);
-    // The spool settings, moved under the filaments' rows on each render
-    const flBox = el('nt-filament');
     const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
     let state = null;
     let saved = '';             // the payload as last loaded or saved
@@ -983,7 +772,6 @@
     // ---- rows -----------------------------------------------------------
     function renderRows() {
         let group = null;
-        if (flBox.parentNode) flBox.remove();    // kept across re-renders
         el('nt-rows').innerHTML = state.meta.rows.map(meta => {
             const row = state.rows[meta.id];
             let html = '';
@@ -992,13 +780,15 @@
             // A row left off isn't sent on save, so it keeps its setting.
             if (meta.hidden || (meta.group === 'spoolman' && !state.meta.spoolman)) return html;
             // Spoolman's and the backup spools' rows: one group, Spools
-            const g = ['spoolman', 'refill', 'filament'].includes(meta.group) ? 'filaments' : meta.group;
+            const g = meta.group === 'spoolman' || meta.group === 'refill' ? 'spools' : meta.group;
             if (g !== group) {
                 group = g;
                 if (GROUP_LABELS[group]) {
-                    html += `<tr class="nt-group"><td colspan="4">${GROUP_LABELS[group]}</td></tr>`;
+                    html += `<tr class="nt-group"><td colspan="5">${GROUP_LABELS[group]}</td></tr>`;
                 }
             }
+            const prio = state.meta.priorities.map(p =>
+                `<option value="${p}"${p === row.priority ? ' selected' : ''}>${PRIORITY_LABELS[p] || p}</option>`).join('');
             const layer = meta.id === 'first_layer'
                 ? `<select class="nt-input nt-layer" id="nt-layers">${[1, 2, 3].map(n =>
                     `<option value="${n}"${n === state.layers_complete ? ' selected' : ''}>${['1st', '2nd', '3rd'][n - 1]}</option>`).join('')}</select>`
@@ -1008,21 +798,18 @@
             const byObject = { first_layer: ['nt-layer-objects', state.first_layer_objects],
                                complete: ['nt-complete-objects', state.complete_objects] }[meta.id];
             const objects = byObject
-                ? `<span class="nt-sub">Print-by-object mode: <select class="nt-input nt-layer" id="${byObject[0]}">${[['each', 'once per object'], ['once', 'once per print job']].map(([v, t]) =>
-                    `<option value="${v}"${v === byObject[1] ? ' selected' : ''}>${t}</option>`).join('')}</select><span class="nt-needs" data-needs="${byObject[0]}"${byObject[1] === 'each' ? '' : ' style="display:none"'}>. Needs <b>Exclude objects</b> enabled in the slicer</span></span>`
+                ? `<span class="nt-sub">Print-by-object mode: <select class="nt-input nt-layer" id="${byObject[0]}">${[['each', 'once per object *'], ['once', 'once per print job']].map(([v, t]) =>
+                    `<option value="${v}"${v === byObject[1] ? ' selected' : ''}>${t}</option>`).join('')}</select></span>`
                 : '';
             const driver = meta.id === 'driver_hot'
-                ? `<span class="nt-sub">X or Y driver over <input class="nt-input nt-layer nt-deg" id="nt-driver-hot" type="number" min="40" max="150" inputmode="numeric" value="${esc(state.driver_temp)}"> °C</span>`
-                : '';
-            const bed = meta.id === 'bed_cooled'
-                ? `<span class="nt-sub">After a print ends, bed below <input class="nt-input nt-layer nt-deg" id="nt-bed-cool" type="number" min="20" max="100" inputmode="numeric" value="${esc(state.bed_cool_temp)}"> °C</span>`
+                ? `<span class="nt-sub">X or Y driver over <input class="nt-input nt-layer nt-deg" id="nt-driver-hot" type="number" min="40" max="150" inputmode="numeric" value="${state.driver_temp}"> °C</span>`
                 : '';
             const marks = meta.id === 'progress'
                 ? `<span class="nt-sub">${(state.meta.progress_marks || [25, 50, 75]).map(m =>
                     `<label style="margin-right:12px; white-space:nowrap"><input type="checkbox" id="nt-pm-${m}"${progressMarks().includes(m) ? ' checked' : ''}> ${m}%</label>`).join('')}</span>`
                 : '';
             const report = meta.id === 'status_report'
-                ? `<span class="nt-sub">Every <input class="nt-input nt-layer nt-deg" id="nt-report-interval" type="number" min="5" max="720" inputmode="numeric" value="${esc(state.report_interval)}"> minutes of print time (a pause stops the clock)</span>`
+                ? `<span class="nt-sub">Every <input class="nt-input nt-layer nt-deg" id="nt-report-interval" type="number" min="5" max="720" inputmode="numeric" value="${state.report_interval}"> minutes of print time (a pause stops the clock)</span>`
                 : '';
             const calib = meta.id === 'calibration'
                 ? '<span class="nt-sub">Notifies when complete, failed or requires user intervention</span>'
@@ -1044,8 +831,9 @@
                     ? '<span class="nt-sub"><code>RESPOND PREFIX=notify MSG="Title || Message || priority"</code> (priority optional)</span>'
                     : '';
             return html + `<tr data-row="${meta.id}">
-                <td><span class="nt-icon">${meta.icon}</span>${layer ? `${layer} <span class="nt-name">layer complete</span>` : `<span class="nt-name">${esc(meta.label)}</span>`}${objects}${marks}${driver}${bed}${report}${calib}<span class="nt-sub nt-data-inline"><span class="nt-dim">${editButton(meta.id)}</span></span></td>
+                <td><span class="nt-icon">${meta.icon}</span>${layer ? `${layer} <span class="nt-name">layer complete</span>` : `<span class="nt-name">${esc(meta.label)}</span>`}${objects}${marks}${driver}${report}${calib}<span class="nt-sub nt-data-inline"><span class="nt-dim">${editButton(meta.id)}</span></span></td>
                 <td class="nt-c nt-col-push"><input type="checkbox" data-enabled="${meta.id}"${row.enabled ? ' checked' : ''}></td>
+                <td class="nt-col-push"><select class="nt-input nt-dim-push" data-priority="${meta.id}">${prio}</select></td>
                 <td class="nt-c nt-col-email"><input type="checkbox" data-email="${meta.id}"${row.email ? ' checked' : ''}></td>
                 <td class="nt-data"><span class="nt-dim">${editButton(meta.id)}</span></td>
             </tr>`;
@@ -1053,56 +841,7 @@
         el('nt-rows').querySelectorAll('[data-enabled], [data-email]').forEach(cb => {
             cb.onchange = updateRowDimming;
         });
-        // "once per object": what it needs, next to it
-        el('nt-rows').querySelectorAll('[data-needs]').forEach(n => {
-            const sel = el(n.dataset.needs);
-            sel.addEventListener('change', () => { n.style.display = sel.value === 'each' ? '' : 'none'; });
-        });
-        // The spool settings: under the filaments' rows
-        const filRows = state.meta.rows.filter(m => ['spoolman', 'refill', 'filament'].includes(m.group))
-            .map(m => el('nt-rows').querySelector(`tr[data-row="${m.id}"]`)).filter(Boolean);
-        const flRow = document.createElement('tr');
-        flRow.className = 'nt-fl-row';
-        flRow.innerHTML = '<td colspan="4"></td>';
-        flRow.firstChild.appendChild(flBox);
-        if (filRows.length) filRows[filRows.length - 1].after(flRow);
-        else el('nt-rows').appendChild(flRow);
         wireEditButtons();
-        updateRowDimming();
-    }
-
-    // A custom notification evaluated at an event, in its row
-    const EVALUATE_ROW = { layer: 'At each layer change', tool: 'At each tool change', object: 'At each object',
-        excluded: 'When an object is excluded', progress: 'At each 1%', console: 'At each console line' };
-    // Custom notifications' rows, and ➕ Add
-    function renderCustomRows() {
-        const max = state.meta.custom_max || 20;
-        el('nt-crows').innerHTML = `<tr class="nt-group"><td colspan="4">Custom</td></tr>` + customs.map(c => {
-            const id = c._id;
-            const at = EVALUATE_ROW[c.evaluate] || '';
-            const when = c.when.trim()
-                ? `<span class="nt-sub">${at ? at + ', when' : 'When'} <code>${esc(c.when.length > 70 ? c.when.slice(0, 70) + '…' : c.when)}</code></span>`
-                : `<span class="nt-sub">${at || 'Sent only from G-code'}</span>`;
-            return `<tr class="nt-crow" data-crow="${id}">
-                <td><span class="nt-icon">🔔</span><span class="nt-name">${esc(c.name)}</span>${when}<span class="nt-sub nt-data-inline"><span class="nt-dim"><button type="button" class="btn btn-secondary nt-data-btn" data-ctpl="${id}">Edit</button></span></span></td>
-                <td class="nt-c nt-col-push"><input type="checkbox" data-cenabled="${id}"${c.enabled ? ' checked' : ''}></td>
-                <td class="nt-c nt-col-email nt-x-cell"><button type="button" class="nt-x nt-x-m" data-cdel="${id}" aria-label="Delete">✕</button><input type="checkbox" data-cemail="${id}"${c.email ? ' checked' : ''}></td>
-                <td class="nt-data"><span class="nt-dim"><button type="button" class="btn btn-secondary nt-data-btn" data-ctpl="${id}">Edit</button></span><button type="button" class="nt-x" data-cdel="${id}" aria-label="Delete">✕</button></td>
-            </tr>`;
-        }).join('') + '<tr class="nt-add"><td colspan="4">' + (customs.length < max
-            ? '<button type="button" class="btn btn-secondary nt-data-btn" id="nt-add-custom">➕ Add custom notification</button> ' : '') +
-            '<button type="button" class="btn btn-secondary nt-data-btn" id="nt-import">Import…</button></td></tr>';
-        const rows = el('nt-crows');
-        rows.querySelectorAll('[data-cenabled]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cenabled)).enabled = b.checked; updateRowDimming(); }; });
-        rows.querySelectorAll('[data-cemail]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cemail)).email = b.checked; updateRowDimming(); }; });
-        rows.querySelectorAll('[data-ctpl]').forEach(b => { b.onclick = e => { e.preventDefault(); openEditor('custom:' + b.dataset.ctpl); }; });
-        rows.querySelectorAll('[data-cdel]').forEach(b => { b.onclick = async e => { e.preventDefault(); await deleteCustom(customById(Number(b.dataset.cdel))); }; });
-        el('nt-import').onclick = e => { e.preventDefault(); nxImport(); };
-        if (el('nt-add-custom')) el('nt-add-custom').onclick = e => {
-            e.preventDefault();
-            draft = Object.assign({ _id: ++customSeq, _saved: null, name: '' }, JSON.parse(JSON.stringify(state.meta.custom_default)));
-            openEditor('custom:' + draft._id);
-        };
         updateRowDimming();
     }
 
@@ -1139,28 +878,9 @@
     const progressMarks = () => String(state.progress_marks || '').split(',').map(Number).filter(Boolean);
     let tplEdits = {};
     let savedTpl = '{}';
-    const TPL_FIELDS = ['title', 'contents', 'image', 'camera', 'remaining', 'topic'];
-    // Custom notifications: the page's copy (_id: this page's, _saved: the
-    // name as saved, null for a new one)
-    let customs = [];
-    let savedCustoms = '{}';
-    let customSeq = 0;
-    let draft = null;       // a new one, until Done
-    const CUSTOM_FIELDS = ['name', 'enabled', 'priority', 'email', 'evaluate', 'when', 'title', 'contents', 'image', 'camera', 'topic', 'repeat', 'repeat_minutes'];
-    const RX_CUSTOM_NAME = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
-    const isCustom = key => String(key).startsWith('custom:');
-    const customById = id => customs.find(c => c._id === id) || (draft && draft._id === id ? draft : null);
-    const pickCustom = c => { const o = {}; CUSTOM_FIELDS.forEach(f => { o[f] = c[f]; }); return o; };
-    function tplMeta(key) {
-        if (isCustom(key)) {
-            const c = customById(Number(key.slice(7)));
-            if (!c) return null;
-            return { key, row: null, label: c.name || 'New custom notification', images: ['none', 'render', 'camera'], default: state.meta.custom_default };
-        }
-        return (state.meta.templates || []).find(t => t.key === key);
-    }
+    const TPL_FIELDS = ['title', 'contents', 'image', 'camera', 'remaining'];
+    const tplMeta = key => (state.meta.templates || []).find(t => t.key === key);
     function effective(key) {
-        if (isCustom(key)) return pickCustom(customById(Number(key.slice(7))));
         return Object.assign({}, tplMeta(key).default, tplEdits[key] || {});
     }
     function diffFromDefault(key, t) {
@@ -1168,7 +888,7 @@
         TPL_FIELDS.forEach(f => { if (t[f] !== d[f]) out[f] = t[f]; });
         return out;
     }
-    const isEdited = key => !isCustom(key) && !!tplEdits[key] && Object.keys(tplEdits[key]).length > 0;
+    const isEdited = key => !!tplEdits[key] && Object.keys(tplEdits[key]).length > 0;
     // Edit, with a red * when the notification is edited
     function editButton(key, mini, label) {
         if (!tplMeta(key)) return '';
@@ -1264,8 +984,7 @@
         // What the tree says each item has (event.* lists)
         let found = null;
         const walk = n => { if (n.expr === list && n.item) found = n.item; (n.children || []).forEach(walk); };
-        const ck = editing ? catKey(editing.key) : '';
-        (catalogues[ck] || []).forEach(c => (c.children || []).forEach(walk));
+        (catalogues[editing && editing.key] || []).forEach(c => (c.children || []).forEach(walk));
         if (found) return found;
         if (LOOP_FIELDS[list]) return LOOP_FIELDS[list];
         const k = Object.keys(LOOP_FIELDS).find(k => k.startsWith('.') && list.endsWith(k));
@@ -1326,8 +1045,7 @@
         tipBox.textContent = btn.dataset.info;
         if (btn.dataset.guide) {
             const a = document.createElement('a');
-            // An anchor in pushraker's guide, or a page elsewhere
-            a.href = /^https?:/.test(btn.dataset.guide) ? btn.dataset.guide : `${GUIDE}#${btn.dataset.guide}`;
+            a.href = `${GUIDE}#${btn.dataset.guide}`;
             a.target = '_blank';
             a.textContent = 'Guide';
             tipBox.append(a);
@@ -1361,52 +1079,11 @@
         });
     }
     wireTips(document.querySelector('.pr-imgwrap'));
-    wireTips(el('pr-custom'));
-    wireTips(document.querySelector('.nt-body'));
 
     // -- the two text fields: the title (a line) and the contents (a text
     // box, or CodeMirror when installed); values go to the one last used
     let activeField = 'contents';
-    let cmView = null, whenView = null;
-    let filling = false;        // fillEditor setting the fields: no change events
-    // A new custom notification's examples, shown while its fields are empty
-    const PH_WHEN = '"benchy" or "Benchy" in job.file';
-    const PH_CONTENTS = '🚢 Benchy McBenchface{% if job.objects.count >= 2 %}s{% endif %}, coming through! ⛵';
-    const phSpan = { when: document.createElement('span'), contents: document.createElement('span') };
-    // When a custom notification's When is evaluated: what the editor says
-    // for each (tooltip, the first Send option, the example)
-    const EVALUATES = {
-        poll: { info: 'A condition, evaluated every 5 seconds: sent when it turns true. Empty: sent only from G-code.',
-                send: 'each time it turns true (at most 1/min)', ph: PH_WHEN },
-        layer: { info: 'Evaluated at each layer change while printing: sent when true. Empty: every layer.', ph: 'job.layer % 5 == 0' },
-        tool: { info: 'Evaluated at each tool change while printing (not before the first layer): sent when true. Empty: every tool change.', ph: 'extruders.current.filament.material == "TPU"' },
-        object: { info: 'Evaluated each time the printer starts the next object, when printing by object: sent when true. Empty: every object.', ph: 'event.object.number == event.object.count' },
-        excluded: { info: 'Evaluated when an object is excluded, from the screen, Mainsail, Fluidd or G-code: sent when true. Empty: every excluded object.', ph: '"Benchy" in event.object.name' },
-        progress: { info: 'Evaluated at each 1% of progress while printing: sent when true. Empty: every 1%.', ph: 'event.progress % 10 == 0' },
-        console: { info: 'Evaluated at each line Klipper writes to the console: sent when true. Empty: every line.', ph: '"Probe" in event.message' }
-    };
-    function showEvaluate() {
-        const v = el('pr-check').value, c = EVALUATES[v] || EVALUATES.poll, poll = v === 'poll';
-        el('pr-when-i').dataset.info = c.info;
-        el('pr-repeat').options[0].textContent = poll ? c.send : 'each time (at most 1/10 s)';
-        phSpan.when.textContent = c.ph;
-        el('pr-when').placeholder = c.ph;
-        if (whenView) whenView.dispatch({});
-    }
-    // The values tree and samples for a custom notification depend on
-    // when its When is evaluated (event.layer at a layer change...)
-    function catKey(key) {
-        if (!isCustom(key)) return key;
-        const ev = editing && editing.evaluate && editing.evaluate !== 'poll' ? '@' + editing.evaluate : '';
-        return 'custom' + ev;
-    }
-    function setPlaceholders(custom) {
-        phSpan.when.textContent = PH_WHEN;
-        phSpan.contents.textContent = custom ? PH_CONTENTS : '';
-        el('pr-when').placeholder = PH_WHEN;
-        if (custom) showEvaluate();
-        el('pr-data-text').placeholder = custom ? PH_CONTENTS : '';
-    }
+    let cmView = null;
     function textareaField(t, isContents) {
         return {
             isContents,
@@ -1421,9 +1098,9 @@
             focus: () => t.focus()
         };
     }
-    function cmField(view, isContents) {
+    function cmField(view) {
         return {
-            isContents: isContents !== false,
+            isContents: true,
             get: () => view.state.doc.toString(),
             set: v => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: v } }),
             sel: () => [view.state.selection.main.from, view.state.selection.main.to],
@@ -1437,7 +1114,6 @@
     function field(which) {
         which = which || activeField;
         if (which === 'title') return textareaField(el('pr-t-title'), false);
-        if (which === 'when') return whenView ? cmField(whenView, false) : textareaField(el('pr-when'), false);
         return cmView ? cmField(cmView) : textareaField(el('pr-data-text'), true);
     }
     // Where the cursor is: in {{ }}, in {% %}, or in plain text
@@ -1453,7 +1129,7 @@
         const f = field();
         const v = f.get();
         let [a, z] = f.sel();
-        const tag = activeField === 'when' ? null : tagAt(v, a);
+        const tag = tagAt(v, a);
         // Never inside a {{ value }}: after its }} (just after typing a
         // filament number, say)
         if (tag && tag.kind === 'expr' && a === z) {
@@ -1471,8 +1147,7 @@
     function insertValue(expr, filter, placeholder) {
         const f = field();
         const tag = tagAt(f.get(), f.sel()[0]);
-        // A condition (When, an if) takes the value bare
-        const text = activeField === 'when' || (tag && tag.kind === 'stmt') ? `${expr}${filter || ''}` : `{{ ${expr}${filter || ''} }}`;
+        const text = tag && tag.kind === 'stmt' ? `${expr}${filter || ''}` : `{{ ${expr}${filter || ''} }}`;
         const at = placeholder ? text.indexOf('#') : -1;
         if (at >= 0) insertText(text, at, 1); else insertText(text);
     }
@@ -1504,11 +1179,8 @@
         const f = field();
         const v = f.get(), a = f.sel()[0];
         const tag = tagAt(v, a);
-        const when = activeField === 'when';
-        const inCond = when || (!!tag && tag.kind === 'stmt' && /^\{%-?\s*(if|elif)\b/.test(v.slice(tag.at)));
+        const inCond = !!tag && tag.kind === 'stmt' && /^\{%-?\s*(if|elif)\b/.test(v.slice(tag.at));
         el('pr-ops').style.display = inCond ? '' : 'none';
-        // When is one condition: no blocks in it
-        el('pr-blocks').style.display = when ? 'none' : '';
         renderLoop();
     }
     el('pr-jj').querySelectorAll('[data-j]').forEach(b => { b.onmousedown = e => e.preventDefault(); b.onclick = () => jinjaButton(b.dataset.j); });
@@ -1521,91 +1193,35 @@
     let editing = null;      // { key, title, contents, image, camera, remaining }
     let previewTimer = null, previewSeq = 0, previewError = null;
     const imgCache = {};
-    const imgWhy = {};          // why a picture is missing, by the same id
-    const camWhy = t => imgWhy['camera:' + (t.camera || el('nt-camera').value)];
     function growTitle() {
         const t = el('pr-t-title');
         t.style.height = 'auto';
         t.style.height = (t.scrollHeight + 2) + 'px';
     }
     function editorChanged() {
-        if (!editing || filling) return;
-        const before = FIELDS.map(f => editing[f]);
-        el('pr-block-pop').style.display = 'none';
+        if (!editing) return;
         growTitle();
-        if (isCustom(editing.key)) {
-            // pushraker. is in front of the box already: a pasted one goes
-            const nm = el('pr-cname');
-            if (/^pushraker\./i.test(nm.value)) nm.value = nm.value.replace(/^pushraker\./i, '');
-            editing.name = nm.value.trim();
-            editing.when = field('when').get();
-            editing.evaluate = el('pr-check').value;
-            editing.repeat = el('pr-repeat').value;
-            editing.repeat_minutes = Math.max(1, Math.min(1440, parseInt(el('pr-rmin').value, 10) || 10));
-            el('pr-rmin-wrap').style.display = editing.repeat === 'minutes' ? '' : 'none';
-            el('pr-data-title').textContent = editing.name || 'New custom notification';
-        }
         editing.title = el('pr-t-title').value;
         editing.contents = field('contents').get();
-        FIELDS.forEach((f, i) => { if (editing[f] !== before[i]) touched.add(f); });
         updateJinjaPane();
         clearTimeout(previewTimer);
         previewTimer = setTimeout(preview, 400);
     }
-    // The box each field is typed in (to outline when Done can't take it)
-    function fieldBox(f) {
-        return f === 'name' ? el('pr-cname-wrap') : f === 'when' ? (whenView ? el('pr-cm-when') : el('pr-when'))
-            : f === 'title' ? el('pr-t-title') : f === 'topic' ? el('pr-topic')
-            : (cmView ? el('pr-cm-host') : el('pr-data-text'));
-    }
-    let previewMsgs = [];
-    // Fields typed in (or all, once Save was pressed): a blank one isn't
-    // marked wrong before then
-    let touched = new Set();
-    const FIELDS = ['name', 'when', 'title', 'contents', 'topic'];
     function showErrors(r) {
         const err = el('pr-data-err');
-        const msgs = [], bad = new Set();
-        const msgField = [];
-        const add = (f, m, first) => { if (first) { msgs.unshift(m); msgField.unshift(f); } else { msgs.push(m); msgField.push(f); } bad.add(f); };
-        if (r && r.placeholders && r.placeholders.length) {
-            add(editing && editing.title.includes(r.placeholders[0]) ? 'title' : 'contents',
-                `Replace # in <code>${esc(r.placeholders[0])}</code> with a number.`);
-        }
-        if (r && r.error) {
-            const f = r.error.field === 'title' ? 'title' : r.error.field === 'when' ? 'when' : 'contents';
-            add(f, `${f === 'title' ? 'Title' : f === 'when' ? 'When' : 'Contents'}, ${esc(r.error.message)}`);
-        }
-        if (editing && editing.topic && !/^[A-Za-z0-9_-]{1,64}$/.test(editing.topic)) add('topic', 'Topic: up to 64 letters, digits, - and _.');
-        else if (editing && editing.topic && el('nt-provider').value === 'telegram' && !/^\d+$/.test(editing.topic)) add('topic', 'Topic ID: a number (the topic\'s ID).');
-        if (editing && isCustom(editing.key)) {
-            const c = customById(Number(editing.key.slice(7)));
-            const nameBad = !RX_CUSTOM_NAME.test(editing.name) ? 'Name: up to 32 letters, digits and _, starting with a letter.'
-                : customs.some(o => o !== c && o.name.toLowerCase() === editing.name.toLowerCase()) ? 'Name: another custom notification has it.' : '';
-            if (nameBad) add('name', nameBad, true);
-            // State: what the condition is now (empty: never true)
-            const st = !editing.when.trim() ? false : r && typeof r.when_now === 'boolean' ? r.when_now : null;
-            el('pr-now').innerHTML = st === null ? '' : `State: <b class="${st ? 'yes' : 'no'}">${st ? 'True' : 'False'}</b>`;
-        }
+        const msgs = [];
+        if (r && r.placeholders && r.placeholders.length) msgs.push(`Replace # in <code>${esc(r.placeholders[0])}</code> with a number.`);
+        if (r && r.error) msgs.push(`${r.error.field === 'title' ? 'Title' : 'Contents'}, ${esc(r.error.message)}`);
         previewError = msgs.length ? msgs.join(' ') : null;
-        previewMsgs = msgs;
-        // Shown: a field with something in it, or typed in, or after Save
-        const shownField = f => touched.has(f) || !!(editing && String(editing[f] || '').trim());
-        const visible = msgs.filter((m, i) => shownField(msgField[i]));
-        FIELDS.forEach(f => fieldBox(f).classList.toggle('pr-bad', bad.has(f) && shownField(f)));
-        err.innerHTML = visible.join('<br>');
-        err.style.display = visible.length ? '' : 'none';
+        err.innerHTML = msgs.join('<br>');
+        err.style.display = msgs.length ? '' : 'none';
     }
     async function preview() {
         if (!editing) return;
         const seq = ++previewSeq;
         let r = null;
         try {
-            const custom = isCustom(editing.key);
-            r = await api('/server/pushraker/preview', 'POST', {
-                key: custom ? 'custom_' + (editing.name || 'my_notification') + catKey(editing.key).slice(6) : editing.key,
-                title: editing.title, contents: editing.contents, when: custom ? editing.when : ''
-            });
+            r = await api('/server/pushraker/preview', 'POST', { key: editing.key, title: editing.title, contents: editing.contents });
         } catch (e) {
             if (seq === previewSeq) el('pr-prev').textContent = 'Preview unavailable: ' + e.message;
             return;
@@ -1614,8 +1230,7 @@
         showErrors(r);
         const img = await imageFor(editing);
         if (seq !== previewSeq || !editing) return;
-        const why = !img && editing.image === 'camera' && camWhy(editing) ? `<div class="pr-now">📷 No camera picture: ${esc(camWhy(editing))}</div>` : '';
-        el('pr-prev').innerHTML = `<div class="pr-pt">${esc(r.title || '')}</div>${esc(r.text || '')}${img ? `<img src="${img}" alt="">` : why}`;
+        el('pr-prev').innerHTML = `<div class="pr-pt">${esc(r.title || '')}</div>${esc(r.text || '')}${img ? `<img src="${img}" alt="">` : ''}`;
     }
     // The image a choice would send: the sample render, a snapshot, the
     // sample spool picture
@@ -1629,12 +1244,7 @@
         if (!(id in imgCache)) {
             imgCache[id] = api('/server/pushraker/preview_image', 'POST',
                 { key: t.key, image: kind, camera: cam || '', remaining: t.remaining ? 'true' : 'false' })
-                .then(r => {
-                    if (r && r.image) return r.image;
-                    imgWhy[id] = (r && r.error) || 'no picture';
-                    delete imgCache[id];        // try again next time
-                    return null;
-                }).catch(e => { imgWhy[id] = e.message; delete imgCache[id]; return null; });
+                .then(r => (r && r.image) || null).catch(() => null);
         }
         return imgCache[id];
     }
@@ -1660,100 +1270,13 @@
             const src = await imageFor(t, k);
             const th = box.querySelector(`[data-img="${k}"] .pr-th`);
             if (th && src) th.style.backgroundImage = `url(${src})`;
-            else if (th) {
-                th.innerHTML = k === 'camera' && !(t.camera || el('nt-camera').value) ? '<small>No camera</small>' : k === 'camera' ? '<small>No picture</small>' : '—';
-                if (k === 'camera' && camWhy(t)) th.title = camWhy(t);
-            }
+            else if (th) th.innerHTML = k === 'camera' && !(t.camera || el('nt-camera').value) ? '<small>No camera</small>' : '—';
         }
     }
-    // The topic: ntfy and Telegram only, with push on; empty: the default
-    function renderTopic() {
-        const provider = el('nt-provider').value;
-        const on = el('nt-push-enabled').checked && (provider === 'ntfy' || provider === 'telegram');
-        const wrap = el('pr-topicwrap'), input = el('pr-topic'), info = el('pr-topic-info');
-        wrap.classList.toggle('off', !on);
-        input.disabled = !on;
-        input.value = editing.topic || '';
-        const set = ' A template can set it: {% set topic = "…" %}.';
-        if (!on) {
-            el('pr-topic-lbl').textContent = 'Topic';
-            input.placeholder = '';
-            info.dataset.info = 'Supported by ntfy and Telegram only (push notifications on).';
-        } else if (provider === 'ntfy') {
-            el('pr-topic-lbl').textContent = 'Topic';
-            input.placeholder = `${el('nt-topic').value || 'printer'} (default)`;
-            info.dataset.info = 'Sends this notification to another topic on the same ntfy server. Leave empty for default.' + set;
-        } else {
-            el('pr-topic-lbl').textContent = 'Topic ID';
-            input.placeholder = 'the chat (default)';
-            info.dataset.info = 'Sends this notification to a topic of the chat, by its ID (a number). Only in groups with topics turned on (forum-style groups). Leave empty for default (the chat itself).' + set;
-        }
-    }
-    el('pr-topic').oninput = () => {
-        if (!editing) return;
-        editing.topic = el('pr-topic').value.trim();
-        touched.add('topic');
-        clearTimeout(previewTimer);
-        previewTimer = setTimeout(preview, 400);
-    };
-    wireTips(el('pr-topicwrap'));
-
-    // The notification's priority (push only); a template can change it
-    // for one notification
-    function renderPriority() {
-        const on = el('nt-push-enabled').checked;
-        const wrap = el('pr-priowrap'), sel = el('pr-prio');
-        sel.innerHTML = state.meta.priorities.map(p =>
-            `<option value="${p}"${p === editing.priority ? ' selected' : ''}>${PRIORITY_LABELS[p] || p}</option>`).join('');
-        wrap.classList.toggle('off', !on);
-        sel.disabled = !on;
-        const provider = el('nt-provider').value;
-        const how = {
-            telegram: 'Telegram: Min and Low arrive silently; the others are the same.',
-            discord: 'Discord: Min and Low arrive silently; High and Max mention whoever is set in Mention.',
-            discord_dm: 'Discord: Min and Low arrive silently; the others are the same.',
-            pushover: 'Pushover: High and Max are both Pushover\'s high priority.'
-        }[provider] || '';
-        el('pr-prio-info').dataset.info = (on ? 'The priority this notification is sent at. ' + how : 'Not used: push notifications are off.') +
-            ' A template can change it for one notification: {% set priority = "high" %} (min, low, default, high, max).';
-    }
-    el('pr-prio').onchange = () => { if (editing) editing.priority = el('pr-prio').value; };
-    wireTips(el('pr-priowrap'));
-
     function fillEditor() {
-        renderPriority();
-        renderTopic();
-        const custom = isCustom(editing.key);
-        el('pr-custom').style.display = custom ? '' : 'none';
-        el('pr-data-reset').style.display = custom ? 'none' : '';
-        el('pr-data-delete').style.display = custom ? '' : 'none';
-        filling = true;
-        touched = new Set();
-        setPlaceholders(custom);
-        el('pr-block-pop').style.display = 'none';
-        // Name: a custom notification's to choose; a built-in one's fixed
-        // (its id: pushraker.complete, and in G-code for a custom one)
-        const meta = custom ? null : tplMeta(editing.key);
-        el('pr-cname').readOnly = !custom;
-        el('pr-cname-wrap').classList.toggle('pr-fixed', !custom);
-        el('pr-name-i').dataset.info = custom
-            ? 'Up to 32 letters, digits and _, starting with a letter. The same name in G-code (RESPOND PREFIX=notify_custom MSG="pushraker.<name>") and in templates (pushraker.<name>.fired, .count…).'
-            : `Its name in templates: pushraker.${meta ? meta.row : editing.key}.enabled, .fired, .count… Not editable.`;
-        if (!custom) el('pr-cname').value = meta ? meta.row : editing.key;
-        if (custom) {
-            el('pr-cname').value = editing.name;
-            el('pr-when').value = editing.when;
-            if (whenView) field('when').set(editing.when);
-            el('pr-check').value = editing.evaluate || 'poll';
-            showEvaluate();
-            el('pr-repeat').value = editing.repeat;
-            el('pr-rmin').value = editing.repeat_minutes;
-            el('pr-now').innerHTML = '';
-        }
         el('pr-t-title').value = editing.title;
         field('contents').set(editing.contents);
         if (!cmView) el('pr-data-text').value = editing.contents;
-        filling = false;
         renderImages();
         editorChanged();
     }
@@ -1761,41 +1284,21 @@
         const meta = tplMeta(key);
         if (!meta) return;
         editing = Object.assign({ key }, effective(key));
-        if (!isCustom(key)) editing.priority = (state.rows[key] || {}).priority || 'default';
         delete imgCache['camera:' + (editing.camera || '')];
         el('pr-data-title').textContent = meta.label;
         el('pr-prev').innerHTML = '';
         el('pr-data').classList.add('open');
-        document.body.classList.add('pr-locked');
         await mountEditor();
         fillEditor();
-        activeField = isCustom(key) && !editing.when ? 'when' : 'contents';
-        await renderPicker(await loadCatalogue(catKey(key)));
-        // From the top (a new one: on its name)
-        el('pr-data').querySelector('.pr-modal-box').scrollTop = 0;
-        if (isCustom(key) && !editing.name) el('pr-cname').focus({ preventScroll: true });
+        activeField = 'contents';
+        renderPicker(await loadCatalogue(key));
     }
-    async function closeEditor(keep) {
+    function closeEditor(keep) {
         if (keep && previewError) {
-            // Next to Save: why it can't close (the fields are outlined)
-            FIELDS.forEach(f => touched.add(f));
-            preview();
-            const pop = el('pr-block-pop');
-            pop.innerHTML = '⚠️ ' + previewMsgs.join('<br>⚠️ ');
-            pop.style.display = '';
-            return;
-        }
-        if (editing && isCustom(editing.key)) {
-            if (keep && !(await keepCustom())) return;
-            el('pr-data').classList.remove('open');
-            document.body.classList.remove('pr-locked');
-            clearTimeout(previewTimer);
-            editing = null;
-            draft = null;
+            el('pr-data-err').scrollIntoView({ block: 'nearest' });
             return;
         }
         el('pr-data').classList.remove('open');
-            document.body.classList.remove('pr-locked');
         clearTimeout(previewTimer);
         if (keep && editing) {
             editing.title = el('pr-t-title').value;
@@ -1805,79 +1308,21 @@
             const diff = diffFromDefault(editing.key, t);
             if (Object.keys(diff).length) tplEdits[editing.key] = diff;
             else delete tplEdits[editing.key];
-            if (state.rows[editing.key]) state.rows[editing.key].priority = editing.priority;
             refreshEditButtons();
             setTimeout(markDirty, 0);
         }
         editing = null;
     }
-    // A custom notification's Done: its name checked; a saved one renamed
-    // only after the warning (G-code that sends it by name stops working)
-    async function keepCustom() {
-        editorChanged();
-        const id = Number(editing.key.slice(7));
-        const c = customById(id);
-        if (!RX_CUSTOM_NAME.test(editing.name) || customs.some(o => o !== c && o.name.toLowerCase() === editing.name.toLowerCase())) {
-            preview();
-            return false;
-        }
-        if (c._saved && c._saved !== editing.name) {
-            const ok = await confirmReset(
-                `G-code and macros that send this notification by its name (RESPOND PREFIX=notify_custom MSG=pushraker.${c._saved}) stop working once you save: pushraker can't change them. Change them to MSG=pushraker.${editing.name}.`,
-                `⚠️ Rename ${c._saved} to ${editing.name}?`, 'Rename');
-            if (!ok) return false;
-        }
-        Object.assign(c, pickCustom(editing));
-        if (c === draft) customs.push(c);
-        renderCustomRows();
-        setTimeout(markDirty, 0);
-        return true;
-    }
-    // Delete a custom notification (from its row's ✕ or the editor),
-    // after the warning
-    async function deleteCustom(c) {
-        if (!c) return false;
-        if (c !== draft) {
-            const ok = await confirmReset(
-                `${c._saved ? 'G-code and macros that send it will stop working.\n\n' : ''}Deletion takes effect on Save & Apply.`,
-                `⚠️ Delete ${c.name || 'this custom notification'}?`, 'Delete');
-            if (!ok) return false;
-            customs = customs.filter(o => o !== c);
-            renderCustomRows();
-            setTimeout(markDirty, 0);
-        }
-        return true;
-    }
-    el('pr-data-delete').onclick = async () => {
-        if (!editing || !isCustom(editing.key)) return;
-        if (!(await deleteCustom(customById(Number(editing.key.slice(7)))))) return;
-        el('pr-data').classList.remove('open');
-            document.body.classList.remove('pr-locked');
-        editing = null;
-        draft = null;
-    };
-    el('pr-cname').oninput = el('pr-when').oninput = editorChanged;
-    el('pr-repeat').onchange = el('pr-rmin').oninput = editorChanged;
-    el('pr-check').onchange = async () => {
-        showEvaluate();
-        editorChanged();
-        if (editing) await renderPicker(await loadCatalogue(catKey(editing.key)));
-    };
-    el('pr-when').onfocus = () => { activeField = 'when'; updateJinjaPane(); };
-    ['pr-cname'].forEach(id => { el(id).onfocus = () => { el('pr-blocks').style.display = ''; }; });
-
     // Reset: back to the default, after a confirmation that only works
-    // after 3 seconds (also Delete and the rename warning)
-    function confirmReset(text, title, label) {
+    // after 5 seconds
+    function confirmReset(text) {
         return new Promise(resolve => {
             const box = el('pr-reset'), yes = el('pr-reset-yes'), no = el('pr-reset-no');
             el('pr-reset-text').textContent = text;
-            el('pr-reset-title').textContent = title || '⚠️ Reset this notification?';
-            label = label || 'Reset';
             let left = 3, timer = null;
             const tick = () => {
                 yes.disabled = left > 0;
-                yes.textContent = left > 0 ? `${label} (${left})` : label;
+                yes.textContent = left > 0 ? `Reset (${left})` : 'Reset';
                 if (left-- > 0) timer = setTimeout(tick, 1000);
             };
             const done = v => { clearTimeout(timer); box.classList.remove('open'); resolve(v); };
@@ -1897,6 +1342,7 @@
     };
     el('pr-data-ok').onclick = () => closeEditor(true);
     el('pr-data-cancel').onclick = () => closeEditor(false);
+    el('pr-data').onclick = e => { if (e.target === el('pr-data')) closeEditor(false); };
     const ta = el('pr-data-text'), ti = el('pr-t-title');
     ta.oninput = ti.oninput = editorChanged;
     ta.onfocus = () => { activeField = 'contents'; updateJinjaPane(); };
@@ -1933,46 +1379,22 @@
     function completionNames() {
         const out = new Set(['printer', 'job', 'extruders', 'event', 'machine', 'loop.index', 'loop.first', 'loop.last']);
         const walk = n => { if (n.expr) out.add(n.expr.replace(/#/g, '1')); (n.children || []).forEach(walk); };
-        const ck = editing ? catKey(editing.key) : '';
-        (catalogues[ck] || []).forEach(c => (c.children || []).forEach(walk));
+        (catalogues[editing && editing.key] || []).forEach(c => (c.children || []).forEach(walk));
         const loop = editing ? loopAt(field('contents').get(), field('contents').sel()[0]) : null;
         if (loop) loopFields(loop.list).forEach(k => out.add(loop.name + '.' + k));
         return [...out];
     }
     const KEYWORDS = ['if', 'elif', 'else', 'endif', 'for', 'in', 'endfor', 'not', 'and', 'or', 'is', 'defined', 'true', 'false', 'none', 'set'];
     const FILTERS = ['round', 'int', 'float', 'default', 'join', 'length', 'upper', 'lower', 'title', 'replace', 'list', 'map', 'first', 'last', 'sort', 'sum', 'max', 'min', 'abs', 'trim', 'string', 'duration', 'clock', 'toolhead', 'pct', 'plural', 'ordinal', 'lines'];
-    const SET_NAMES = [['priority', 'this notification\'s priority'], ['image', 'its image'], ['topic', 'its topic (ntfy, Telegram)'], ['timezone', 'times in this zone']];
-    const SET_VALUES = { priority: ['min', 'low', 'default', 'high', 'max'], image: ['none', 'render', 'camera', 'graphic'] };
     function completions(ctx) {
         const word = ctx.matchBefore(/[\w.]*$/);
         if (!word || (word.from === word.to && !ctx.explicit)) return null;
         const before = ctx.state.doc.sliceString(Math.max(0, word.from - 2), word.from);
         const v = ctx.state.doc.toString(), tag = tagAt(v, word.from);
         let options;
-        // {% set name = "value" %}: the names a template can set, then their values
-        const line = ctx.state.doc.lineAt(word.from), head = v.slice(line.from, word.from);
-        const setVal = /\bset\s+(priority|image)\s*=\s*["']$/.exec(head);
-        if (tag && tag.kind === 'stmt' && /\bset\s+$/.test(head)) {
-            options = SET_NAMES.map(([n, d], i) => ({ label: n, type: 'variable', detail: d, boost: -i }));
-            return { from: word.from, options, validFor: /^\w*$/ };
-        }
-        if (setVal) {
-            options = SET_VALUES[setVal[1]].map((x, i) => ({ label: x, type: 'constant', boost: -i }));
-            return { from: word.from, options, validFor: /^\w*$/ };
-        }
         if (/\|\s?$/.test(before)) options = FILTERS.map(f => ({ label: f, type: 'function' }));
         else if (tag) options = completionNames().map(n => ({ label: n, type: 'variable' })).concat(tag.kind === 'stmt' ? KEYWORDS.map(k => ({ label: k, type: 'keyword' })) : []);
         else return null;
-        return { from: word.from, options, validFor: /^[\w.]*$/ };
-    }
-    // When's completion: the whole field is an expression
-    function whenCompletions(ctx) {
-        const word = ctx.matchBefore(/[\w.]*$/);
-        if (!word || (word.from === word.to && !ctx.explicit)) return null;
-        const before = ctx.state.doc.sliceString(Math.max(0, word.from - 2), word.from);
-        const options = /\|\s?$/.test(before) ? FILTERS.map(f => ({ label: f, type: 'function' }))
-            : completionNames().map(n => ({ label: n, type: 'variable' }))
-                .concat(['and', 'or', 'not', 'in', 'is', 'defined', 'none', 'true', 'false'].map(k => ({ label: k, type: 'keyword' })));
         return { from: word.from, options, validFor: /^[\w.]*$/ };
     }
     async function mountEditor() {
@@ -1992,7 +1414,6 @@
                     C.keymap.of([...C.completionKeymap, ...C.defaultKeymap, ...C.historyKeymap]),
                     C.StreamLanguage.define(C.jinja2), C.oneDark, C.bracketMatching(),
                     C.autocompletion({ override: [completions] }),
-                    C.placeholder(() => phSpan.contents),
                     C.EditorView.updateListener.of(u => {
                         if (u.docChanged) editorChanged();
                         else if (u.selectionSet) updateJinjaPane();
@@ -2002,27 +1423,6 @@
             })
         });
         ta.style.display = 'none';
-        // When: an expression on its own (no {{ }}), with the same colours
-        // and completion
-        whenView = new C.EditorView({
-            parent: el('pr-cm-when'),
-            state: C.EditorState.create({
-                doc: el('pr-when').value,
-                extensions: [
-                    C.lineNumbers(), C.history(), C.drawSelection(), C.EditorView.lineWrapping,
-                    C.keymap.of([...C.completionKeymap, ...C.defaultKeymap, ...C.historyKeymap]),
-                    C.StreamLanguage.define(C.jinja2), C.oneDark, C.bracketMatching(),
-                    C.autocompletion({ override: [whenCompletions] }),
-                    C.placeholder(() => phSpan.when),
-                    C.EditorView.updateListener.of(u => {
-                        if (u.docChanged) editorChanged();
-                        else if (u.selectionSet) updateJinjaPane();
-                        if (u.focusChanged && u.view.hasFocus) { activeField = 'when'; updateJinjaPane(); el('pr-blocks').style.display = 'none'; }
-                    })
-                ]
-            })
-        });
-        el('pr-when').style.display = 'none';
     }
     function unmountEditor() {
         if (!cmView) return;
@@ -2030,12 +1430,6 @@
         cmView.destroy();
         cmView = null;
         ta.style.display = '';
-        if (whenView) {
-            el('pr-when').value = whenView.state.doc.toString();
-            whenView.destroy();
-            whenView = null;
-            el('pr-when').style.display = '';
-        }
     }
     function cmDialog() {
         const st = cmStatus || {};
@@ -2092,17 +1486,8 @@
             tr.classList.toggle('nt-nopush', !p);
             tr.classList.toggle('nt-off', !p && !e && !hook);
         });
-        el('nt-crows').querySelectorAll('tr[data-crow]').forEach(tr => {
-            const id = tr.dataset.crow;
-            const p = push && tr.querySelector(`[data-cenabled="${id}"]`).checked;
-            const e = email && tr.querySelector(`[data-cemail="${id}"]`).checked;
-            tr.classList.toggle('nt-nopush', !p);
-            tr.classList.toggle('nt-off', !p && !e && !hook);
-        });
         el('nt-table').classList.toggle('nt-no-push', !push);
         el('nt-table').classList.toggle('nt-no-email', !email);
-        el('nt-table').querySelectorAll('[data-email], [data-cemail]').forEach(cb => { cb.disabled = !email; });
-        el('nt-email-info').style.display = email ? 'none' : '';
     }
 
     // The user guide, and the section of it for each push service
@@ -2214,58 +1599,13 @@
     // and the IPv4 address of each network interface Moonraker reports
     // (/machine/system_info), by interface name; nothing is detected by
     // name. Then Clear.
-    // A page served by Moonraker itself (no web server in front: the
-    // Creality Hi) has Moonraker's API port in its address, wrong for the
-    // Web UI button: the printer's own web pages are offered instead
-    // (meta.web_pages, found by the server: "Fluidd (port 4408)"), or the
-    // address without a port when none was found.
-    // A printer profile that declares its web page (meta.web_page, a URL
-    // with {host}: the Creality Hi's Fluidd on 4408) comes first, with
-    // this browser's host, and is the field's placeholder; the web pages
-    // found on the machine only when the profile declares none.
     let fillChoices = null;
-    let webPages = [];
-    let profilePage = null;
-    const viaMoonraker = () => location.pathname.startsWith('/server/pushraker');
-    const hostname = () => location.hostname.includes(':') ? '[' + location.hostname + ']' : location.hostname;
-    function pageHost(port) {
-        return hostname() + (port && port !== 80 ? ':' + port : '');
-    }
-    function profileUrl(host) {
-        return profilePage ? profilePage.url.split('{host}').join(host) : '';
-    }
-    const shown = url => url.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    // The address the Web UI button should open, from this browser
-    function ownAddress() {
-        if (!/^https?:$/.test(location.protocol) || !location.hostname) return '';
-        if (profilePage) return profileUrl(hostname());
-        if (!viaMoonraker()) return location.protocol + '//' + location.host;
-        return 'http://' + pageHost(webPages.length ? webPages[0].port : 0);
-    }
     async function fillOptions() {
         if (fillChoices) return fillChoices;
         const out = [];
-        const port = !profilePage && viaMoonraker() && webPages.length ? webPages[0].port : 0;
         if (/^https?:$/.test(location.protocol) && location.hostname) {
-            if (profilePage) {
-                const url = profileUrl(hostname());
-                out.push({ url, html: `${esc(profilePage.name)}: <code>${esc(shown(url))}</code><small>This printer's web page</small>` });
-                const mine = location.protocol + '//' + location.host;
-                if (!viaMoonraker() && shown(mine) !== shown(url)) {
-                    out.push({ url: mine, html: `This browser's address: <code>${esc(location.host)}</code>` });
-                }
-            } else if (!viaMoonraker()) {
-                out.push({ url: location.protocol + '//' + location.host, html:
-                    `This browser's address: <code>${esc(location.host)}</code><small>Works wherever this address works for you</small>` });
-            } else if (webPages.length) {
-                for (const p of webPages) {
-                    out.push({ url: 'http://' + pageHost(p.port), html:
-                        `${esc(p.name)} (port ${p.port}): <code>${esc(pageHost(p.port))}</code>` });
-                }
-            } else {
-                out.push({ url: 'http://' + location.hostname, html:
-                    `This browser's address: <code>${esc(location.hostname)}</code>` });
-            }
+            out.push({ url: location.protocol + '//' + location.host, html:
+                `This browser's address: <code>${esc(location.host)}</code><small>Works wherever this address works for you</small>` });
         }
         try {
             const info = await api('/machine/system_info');
@@ -2274,20 +1614,12 @@
                 if (name === 'lo') continue;
                 for (const a of iface.ip_addresses || []) {
                     if (a.family !== 'ipv4' || a.is_link_local || !a.address || a.address.startsWith('127.')) continue;
-                    if (profilePage) {
-                        const url = profileUrl(a.address);
-                        out.push({ url, html: `${esc(name)}: <code>${esc(shown(url))}</code>` });
-                        continue;
-                    }
-                    const at = a.address + (port && port !== 80 ? ':' + port : '');
-                    out.push({ url: 'http://' + at, html: `${esc(name)}: <code>${esc(at)}</code>` });
+                    out.push({ url: 'http://' + a.address, html: `${esc(name)}: <code>${esc(a.address)}</code>` });
                 }
             }
         } catch (e) { /* the browser's address is still offered */ }
-        // An interface with the browser's own address: listed once
-        const seen = new Set();
-        fillChoices = out.filter(c => !seen.has(shown(c.url)) && seen.add(shown(c.url)));
-        return fillChoices;
+        fillChoices = out;
+        return out;
     }
     function closeFill() {
         el('nt-fill-menu').classList.remove('open');
@@ -2316,6 +1648,7 @@
         if (e.key !== 'Escape' || e.defaultPrevented) return;
         closeFill();
         if (el('pr-cm').classList.contains('open')) el('pr-cm').classList.remove('open');
+        else if (el('pr-data').classList.contains('open') && !el('pr-reset').classList.contains('open')) closeEditor(false);
     });
 
     function updatePublicWarning() {
@@ -2333,41 +1666,8 @@
         updatePublicWarning();
     }
 
-    // Telegram's topics are IDs: the notifications whose topic isn't one
-    function badTopicRows() {
-        if (el('nt-provider').value !== 'telegram') return { tpls: [], customs: [] };
-        return {
-            tpls: (state.meta.templates || []).filter(t => {
-                const v = (tplEdits[t.key] || {}).topic;
-                return v && !/^\d+$/.test(v);
-            }),
-            customs: customs.filter(c => c.topic && !/^\d+$/.test(c.topic))
-        };
-    }
-    function badTopics() {
-        const b = badTopicRows();
-        return b.tpls.map(t => t.label).concat(b.customs.map(c => c.name));
-    }
-    function renderTopicWarning() {
-        // The rows whose topic Telegram can't take: outlined in red
-        const rows = badTopicRows();
-        document.querySelectorAll('tr.nt-topic-bad').forEach(tr => tr.classList.remove('nt-topic-bad'));
-        rows.tpls.forEach(t => {
-            const tr = el('nt-rows').querySelector(`tr[data-row="${t.row}"]`);
-            if (tr) tr.classList.add('nt-topic-bad');
-        });
-        rows.customs.forEach(c => {
-            const tr = el('nt-crows').querySelector(`tr[data-crow="${c._id}"]`);
-            if (tr) tr.classList.add('nt-topic-bad');
-        });
-        const bad = badTopics();
-        el('nt-topic-warn').innerHTML = bad.length
-            ? `⚠️ Telegram topics are IDs (numbers). Change or clear the topic of: ${bad.map(esc).join(', ')}. Saving is blocked until then.` : '';
-        el('nt-topic-warn').style.display = bad.length ? '' : 'none';
-    }
     function updateProvider() {
         const provider = el('nt-provider').value;
-        renderTopicWarning();
         el('nt-ntfy').style.display = provider === 'ntfy' ? '' : 'none';
         const g = PROVIDER_GUIDE[provider];
         el('nt-provider-hint').innerHTML = (PROVIDER_HINTS[provider] || '') + (g ? guideLink(g[0], g[1]) : '');
@@ -2434,14 +1734,8 @@
     }
 
     // ---- load / collect ----------------------------------------------------
-    // What's saved (Discard changes goes back to it; a restore or reset
-    // puts something else on the page), and the stored secrets a reset
-    // drops on saving
-    let savedState = null, forget = [];
     function render(data) {
         state = data;
-        savedState = data;
-        forget = [];
         el('pr-version').textContent = data.meta.version ? `pushraker ${data.meta.version}` : '';
         el('nt-enabled').checked = data.enabled;
         el('nt-push-enabled').checked = data.push_enabled !== false;
@@ -2463,7 +1757,7 @@
         el('nt-username').value = data.username;
         el('nt-name').value = data.name;
         el('nt-name').placeholder = data.meta.default_name || 'Printer';
-        el('nt-name-info').dataset.info = `Shown by default in every title, e.g. "✅ ${data.name || data.meta.default_name || 'Printer'} complete".`;
+        el('nt-name-hint').textContent = `Shown in every title, e.g. "✅ ${data.name || data.meta.default_name || 'Printer'} complete".`;
         el('nt-printer-url').value = data.printer_url;
         el('nt-email-enabled').checked = data.email_enabled;
         el('nt-wh-enabled').checked = !!data.webhook_enabled;
@@ -2473,38 +1767,15 @@
         };
         el('nt-wh-enabled').onchange = () => { updateWebhook(); updateRowDimming(); };
         updateWebhook();
-        // pushraker.conf has a setting that can't be used: what is (not)
-        // being sent, which setting, what it must be; outlined in red
-        const pb = data.meta.stored_problem || { message: data.meta.stored_error || '' };
-        document.querySelectorAll('.nt-bad').forEach(n => n.classList.remove('nt-bad'));
-        if (pb.message) {
-            const sending = data.meta.sending === 'nothing'
-                ? '<b>Nothing is being sent</b> until this is fixed.'
-                : '<b>Notifications are sent with the settings from before this change</b> until it is fixed.';
-            const where = pb.field ? `pushraker.conf has <code>${esc(pb.field)}: ${esc(pb.value)}</code>.` : "pushraker.conf has a setting that can't be used.";
-            el('nt-stored-error').innerHTML = `⚠️ ${sending} ${where} ${esc(pb.message)}. Change it here (outlined in red) and Save &amp; Apply, or in the file.`;
-            // Outlined once the rows are drawn
-            setTimeout(() => {
-                liveCheckAll();
-                const FIELD_INPUT = { driver_temp: 'nt-driver-hot', bed_cool_temp: 'nt-bed-cool', report_interval: 'nt-report-interval', layers_complete: 'nt-layers', email_port: 'nt-email-port', filament_low_percent: 'nt-fl-percent' };
-                const input = el(FIELD_INPUT[pb.field] || '');
-                if (input) {
-                    input.classList.add('nt-bad');
-                    const tr = input.closest('tr');
-                    if (tr) tr.classList.add('nt-bad');
-                }
-            }, 0);
-        } else {
-            el('nt-stored-error').innerHTML = '';
-        }
-        el('nt-stored-error').style.display = pb.message ? '' : 'none';
-        setTimeout(liveCheckAll, 0);
+        el('nt-stored-error').textContent = data.meta.stored_error
+            ? `The saved settings need attention: ${data.meta.stored_error}. Notifications keep the last applied settings until this is saved again.`
+            : '';
+        el('nt-stored-error').style.display = data.meta.stored_error ? '' : 'none';
         el('nt-fl-percent').value = data.filament_low_percent;
         el('nt-fl-grams').value = data.filament_low_grams;
         el('nt-fl-unknown').checked = !!data.filament_unknown;
-        // Without Spoolman: shown, greyed out; its ? says what it needs
-        el('nt-filament').classList.toggle('nt-greyed', !data.meta.spoolman);
-        el('nt-filament').querySelectorAll('input').forEach(i => { i.disabled = !data.meta.spoolman; });
+        el('nt-filament').style.display = data.meta.spoolman ? '' : 'none';
+        el('nt-filament-off').style.display = data.meta.spoolman ? 'none' : '';
         el('nt-email-host').value = data.email_host;
         el('nt-email-port').value = data.email_port;
         el('nt-email-security').value = data.email_security;
@@ -2519,8 +1790,6 @@
             el('nt-email-security').value = p.security;
         }
         tplEdits = JSON.parse(JSON.stringify(data.templates || {}));
-        customs = (data.custom || []).map(c => Object.assign({ _id: ++customSeq, _saved: c.name }, c));
-        renderCustomRows();
         cmRefresh();
         renderTimeMethods();
         renderCameras();
@@ -2553,15 +1822,8 @@
         // First setup only: the address this page was opened with. Once
         // saved, an empty field means "no buttons" and is left alone.
         const firstSetup = !data.enabled && !data.server && !data.pushover_user && !data.has_secret;
-        webPages = (data.meta && data.meta.web_pages) || [];
-        profilePage = (data.meta && data.meta.web_page) || null;
-        fillChoices = null;
-        el('nt-printer-url').placeholder = profilePage && location.hostname ? profileUrl(hostname()) : 'http://u1.home';
-        // First setup, or a backup from another printer model restored
-        // with no Printer URL here: this printer's own web page
-        const otherModel = data.meta && data.meta.other_model;
-        if ((firstSetup || otherModel) && !data.printer_url && ownAddress()) {
-            el('nt-printer-url').value = ownAddress();
+        if (firstSetup && !data.printer_url && /^https?:$/.test(location.protocol) && location.hostname) {
+            el('nt-printer-url').value = location.protocol + '//' + location.host;
         }
         updatePrinterUrl();
         el('nt-server').oninput = updatePublicWarning;
@@ -2591,7 +1853,6 @@
         el('nt-root').classList.remove('pr-hidden');
         saved = JSON.stringify(collect(false));
         savedTpl = JSON.stringify(tplEdits);
-        savedCustoms = JSON.stringify(Object.fromEntries(customs.map(c => [c._id, pickCustom(c)])));
         // Just loaded or saved: nothing to discard, nothing changed
         el('pr-close').disabled = true;
         snapshotFields();
@@ -2621,13 +1882,6 @@
         (state.meta.templates || []).forEach(t => {
             if (JSON.stringify(tplEdits[t.key] || null) === JSON.stringify(was[t.key] || null)) return;
             const tr = el('nt-rows').querySelector(`tr[data-row="${t.row}"]`);
-            if (tr) tr.classList.add('nt-chg');
-        });
-        let wasC = {};
-        try { wasC = JSON.parse(savedCustoms || '{}'); } catch (e) { /* first render */ }
-        customs.forEach(c => {
-            if (JSON.stringify(pickCustom(c)) === JSON.stringify(wasC[c._id] || null)) return;
-            const tr = el('nt-crows').querySelector(`tr[data-crow="${c._id}"]`);
             if (tr) tr.classList.add('nt-chg');
         });
     }
@@ -2683,7 +1937,7 @@
             if (!document.querySelector(`[data-enabled="${meta.id}"]`)) return;
             rows[meta.id] = {
                 enabled: document.querySelector(`[data-enabled="${meta.id}"]`).checked,
-                priority: state.rows[meta.id].priority,
+                priority: document.querySelector(`[data-priority="${meta.id}"]`).value,
                 email: document.querySelector(`[data-email="${meta.id}"]`).checked
             };
         });
@@ -2705,23 +1959,17 @@
             name: el('nt-name').value.trim() || state.meta.default_name || 'Printer',
             camera: el('nt-camera').value,
             printer_url: el('nt-printer-url').value.trim(),
-            // A row this printer doesn't show has no inputs: its settings
-            // stay as they are (e.g. filament change on a printer without
-            // the U1's feeders)
-            layers_complete: el('nt-layers') ? parseInt(el('nt-layers').value, 10) || 2 : state.layers_complete,
-            first_layer_objects: el('nt-layer-objects') ? el('nt-layer-objects').value : state.first_layer_objects,
-            filament_change_events: el('nt-fc-loaded') ? ['loaded', 'unloaded'].filter(e => el('nt-fc-' + e).checked).join(',') : [].concat(state.filament_change_events || []).join(','),
-            driver_temp: el('nt-driver-hot') ? parseInt(el('nt-driver-hot').value, 10) || 105 : state.driver_temp,
-            bed_cool_temp: el('nt-bed-cool') ? parseInt(el('nt-bed-cool').value, 10) || 40 : state.bed_cool_temp,
-            report_interval: el('nt-report-interval') ? parseInt(el('nt-report-interval').value, 10) || 30 : state.report_interval,
-            complete_objects: el('nt-complete-objects') ? el('nt-complete-objects').value : state.complete_objects,
+            layers_complete: parseInt(el('nt-layers').value, 10) || 2,
+            first_layer_objects: el('nt-layer-objects').value,
+            filament_change_events: ['loaded', 'unloaded'].filter(e => el('nt-fc-' + e).checked).join(','),
+            driver_temp: parseInt(el('nt-driver-hot').value, 10) || 105,
+            report_interval: parseInt(el('nt-report-interval').value, 10) || 30,
+            complete_objects: el('nt-complete-objects').value,
             filament_low_percent: parseInt(el('nt-fl-percent').value, 10) || 0,
             filament_low_grams: parseInt(el('nt-fl-grams').value, 10) || 0,
             filament_unknown: el('nt-fl-unknown').checked,
             time_left: timeMethod(),
-            progress_marks: (state.meta.progress_marks || [25, 50, 75]).some(m => el('nt-pm-' + m))
-                ? (state.meta.progress_marks || [25, 50, 75]).filter(m => el('nt-pm-' + m) && el('nt-pm-' + m).checked).join(',')
-                : progressMarks().join(','),
+            progress_marks: (state.meta.progress_marks || [25, 50, 75]).filter(m => el('nt-pm-' + m) && el('nt-pm-' + m).checked).join(','),
             email_enabled: emailEnabled,
             email_host: el('nt-email-host').value.trim(),
             email_port: parseInt(el('nt-email-port').value, 10) || 0,
@@ -2733,13 +1981,11 @@
             // The printer's clock may be UTC: ETAs are shown in this browser's time zone
             timezone: el('nt-tz').value || 'browser',
             browser_timezone: BROWSER_TZ,
-            rows, templates,
-            custom: customs.map(pickCustom)
+            rows, templates
         };
         if (secret) payload.secret = secret;
         if (emailPassword) payload.email_password = emailPassword;
         if (webhookUrl) payload.webhook_url = webhookUrl;
-        if (forget.length) payload.forget = forget.slice();
         return payload;
     }
 
@@ -2785,63 +2031,17 @@
         if (what) el('pr-status').textContent = what;
     }
 
-    // Live checks, as you type: a number outside its range, a printer name
-    // with characters it can't have; outlined in red with what it must be
-    function liveCheck(input) {
-        let bad = '';
-        if (input.type === 'number' && input.min !== '' && input.max !== '') {
-            const v = Number(input.value), lo = Number(input.min), hi = Number(input.max);
-            if (input.value === '' || !Number.isInteger(v) || v < lo || v > hi) bad = `Must be ${lo} to ${hi}.`;
-        } else if (input.id === 'nt-name') {
-            if (input.value && !/^[\p{L}\p{N}_ .()\-]{1,32}$/u.test(input.value)) bad = 'Up to 32 letters, digits, spaces and . ( ) - _';
-        }
-        input.classList.toggle('nt-live-bad', !!bad);
-        let msg = input.parentElement.querySelector(':scope > .nt-live-msg');
-        if (bad && !msg) {
-            msg = document.createElement('span');
-            msg.className = 'nt-live-msg';
-            input.after(msg);
-        }
-        if (msg) { msg.textContent = bad ? '⚠️ ' + bad : ''; msg.style.display = bad ? '' : 'none'; }
-        return !bad;
-    }
-    const LIVE = 'input[type="number"][min][max], #nt-name';
-    document.addEventListener('input', e => {
-        if (e.target.matches && e.target.matches(LIVE) && !e.target.closest('.pr-modal')) liveCheck(e.target);
-    });
-    function liveCheckAll() {
-        return [...document.querySelectorAll(LIVE)].filter(i => !i.closest('.pr-modal') && i.offsetParent !== null && !i.disabled)
-            .map(liveCheck).every(Boolean);
-    }
-
     async function save() {
         showError('');
         let payload;
-        if (!liveCheckAll()) {
-            runStart('Save & Apply', 'Checking the settings…');
-            showConsole(['!! ⚠️ Not saved.', '!! A setting outlined in red can\'t be used: it says what it must be. Change it, then save again.']);
-            runEnd('Not saved', false);
-            return;
-        }
-        const bad = badTopics();
-        if (bad.length) {
-            runStart('Save & Apply', 'Checking the settings…');
-            showConsole([
-                '!! ⚠️ Not saved.',
-                `!! The push service is Telegram, but ${bad.length === 1 ? 'this notification has a topic' : 'these notifications have topics'} from before the switch that Telegram can't use: ${bad.join(', ')}.`,
-                "!! Telegram topics are IDs (numbers). Open each one's Edit and change its Topic ID to a number, or clear it (empty: the chat itself). Then save again."
-            ]);
-            runEnd('Not saved', false);
-            return;
-        }
         try { payload = collect(true); } catch (e) { showError(e.message); return; }
         busy(true, 'Saving…');
-        runStart('Save & Apply', 'Saving...');
+        runStart('Save & Apply', 'Saving and applying settings…');
         try {
             const data = await api('/server/pushraker/config', 'POST', payload);
             const notes = (data.notes || []).slice();
             render(data);
-            showConsole(['Settings saved and applied.'].concat(notes));
+            showConsole(['Settings saved and applied. Nothing restarts: they are in effect now, during a print job too.'].concat(notes));
             el('pr-status').textContent = 'Saved and applied';
             runEnd('Done', true);
         } catch (e) {
@@ -2898,462 +2098,11 @@
 
     el('pr-save').onclick = save;
     el('pr-test').onclick = test;
-
-    // Backup: the saved settings in a file (no tokens, passwords or webhook
-    // URL), downloaded or sent; Restore: a backup's settings onto this page
-    // (the secrets stay as they are), saved with Save & Apply
-    const bkMenu = el('bk-menu');
-    let bkHow = '', bkIn = null;
-    const bkSay = t => { el('bk-status').textContent = t; };
-    const bkContents = st => {
-        const custom = (st.custom || []).map(c => c.name);
-        return '<li>Servers, topics, email and webhook settings</li>' +
-            '<li>Every notification: on/off, push and email, priority, templates</li>' +
-            `<li>${custom.length ? `${custom.length} custom notification${custom.length > 1 ? 's' : ''}: ${esc(custom.join(', '))}` : 'No custom notifications'}</li>`;
-    };
-    function bkShowMenu() {
-        const t = (state && state.meta.backup) || {};
-        const push = el('bk-push'), mail = el('bk-email');
-        push.textContent = 'Send by push' + (t.push_label ? ': ' + t.push_label : '');
-        push.classList.toggle('bk-off', !!t.push);
-        push.title = t.push || '';
-        mail.classList.toggle('bk-off', !!t.email);
-        mail.title = t.email || '';
-    }
-    el('bk-send').onclick = e => {
-        e.stopPropagation();
-        if (!state) return;
-        bkShowMenu();
-        el('bk-send').setAttribute('aria-expanded', String(bkMenu.classList.toggle('open')));
-    };
-    document.addEventListener('click', () => { bkMenu.classList.remove('open'); el('bk-send').setAttribute('aria-expanded', 'false'); });
-    bkMenu.onclick = e => {
-        const b = e.target.closest('[data-bk]');
-        if (!b) return;
-        if (b.classList.contains('bk-off')) { e.stopPropagation(); bkSay('⚠️ ' + b.title); return; }
-        bkHow = b.dataset.bk;
-        const t = state.meta.backup || {};
-        el('bk-out-title').textContent = bkHow === 'download' ? 'Download a backup' :
-            bkHow === 'push' ? `Send a backup by push (${t.push_label})` : 'Send a backup by email';
-        el('bk-out-list').innerHTML = bkContents(state);
-        el('bk-secrets').checked = false;
-        el('bk-secrets-wrap').style.display = bkHow === 'download' ? '' : 'none';
-        bkCountStop();
-        bkSecrets();
-        el('bk-go').textContent = bkHow === 'download' ? 'Download' : 'Send';
-        el('bk-go').disabled = false;
-        el('bk-to-wrap').style.display = bkHow === 'email' ? '' : 'none';
-        el('bk-to').value = t.email_to || '';
-        el('bk-err').style.display = 'none';
-        el('bk-out').classList.add('open');
-        if (bkHow === 'email') el('bk-to').focus();
-    };
-    // Include tokens, passwords and the webhook URL: a download only
-    function bkSecrets() {
-        const on = bkHow === 'download' && el('bk-secrets').checked;
-        const day = new Date().toISOString().slice(0, 10);
-        el('bk-out-file').textContent = `📄 pushraker-backup-${(state.name || 'Printer').replace(/[^A-Za-z0-9._-]+/g, '-')}-${day}.json`;
-        el('bk-out-red').textContent = on
-            ? '⚠️ This file contains your tokens and passwords. Anyone who has it can send notifications as you and use your email account\'s SMTP login. Keep it somewhere safe.'
-            : '';
-        el('bk-out-red').style.display = on ? '' : 'none';
-        el('bk-out-never').style.display = bkHow === 'download' ? 'none' : '';
-        el('bk-out-never').textContent = `Tokens, passwords and the webhook URL cannot be sent via ${bkHow === 'email' ? 'email' : 'push'}.`;
-    }
-    // Ticking it: Download works 5 seconds later
-    let bkLeft = 0, bkTimer = null;
-    function bkCount() {
-        const go = el('bk-go');
-        go.disabled = bkLeft > 0;
-        go.textContent = bkHow === 'download' ? (bkLeft > 0 ? `Download (${bkLeft})` : 'Download') : 'Send';
-        if (bkLeft > 0) bkTimer = setTimeout(() => { bkLeft--; bkCount(); }, 1000);
-    }
-    function bkCountStop() { clearTimeout(bkTimer); bkLeft = 0; }
-    el('bk-secrets').onchange = () => {
-        bkSecrets();
-        bkCountStop();
-        if (el('bk-secrets').checked) bkLeft = 5;
-        bkCount();
-    };
-    el('bk-cancel').onclick = () => { bkCountStop(); el('bk-out').classList.remove('open'); };
-    el('bk-go').onclick = async () => {
-        if (el('bk-go').disabled || bkLeft > 0) return;
-        const go = el('bk-go'), label = go.textContent;
-        el('bk-err').style.display = 'none';
-        go.disabled = true;
-        go.textContent = bkHow === 'download' ? 'Downloading…' : 'Sending…';
-        try {
-            const data = await api('/server/pushraker/backup', 'POST',
-                bkHow === 'email' ? { how: 'email', to: el('bk-to').value.trim() }
-                    : bkHow === 'download' ? { how: bkHow, secrets: el('bk-secrets').checked } : { how: bkHow });
-            if (bkHow === 'download') {
-                const url = URL.createObjectURL(new Blob([JSON.stringify(data.backup, null, 2)], { type: 'application/json' }));
-                const a = document.createElement('a');
-                a.href = url; a.download = data.name;
-                document.body.appendChild(a); a.click(); a.remove();
-                setTimeout(() => URL.revokeObjectURL(url), 10000);
-                bkSay('✓ Downloaded ' + data.name);
-            } else {
-                bkSay('✓ Sent ' + data.name + ' to ' + data.sent);
-            }
-            el('bk-out').classList.remove('open');
-        } catch (e) {
-            el('bk-err').textContent = '⚠️ ' + e.message;
-            el('bk-err').style.display = '';
-        } finally {
-            go.disabled = false;
-            go.textContent = label;
-        }
-    };
-    // Reset…, by section (All settings ticks the rest): the chosen ones as
-    // a new install has them, on this page; Save & Apply saves it and
-    // drops their tokens and passwords
-    const rsBoxes = () => [...document.querySelectorAll('#rs-modal [data-rs]')].filter(b => !b.disabled);
-    const RS_WHAT = { push: 'push service settings', email: 'email settings', webhook: 'webhook',
-        stock: 'stock notifications', custom: 'custom notifications' };
-    // Reset works 5 seconds after the dialog opens, with something ticked
-    let rsLeft = 0, rsTimer = null;
-    function rsTick() {
-        rsShow();
-        if (rsLeft > 0) rsTimer = setTimeout(() => { rsLeft--; rsTick(); }, 1000);
-    }
-    function rsShow() {
-        const on = rsBoxes().filter(b => b.checked).map(b => b.dataset.rs), all = el('rs-all').checked;
-        el('rs-yes').disabled = rsLeft > 0 || (!on.length && !all);
-        el('rs-yes').textContent = rsLeft > 0 ? `Reset (${rsLeft})` : 'Reset';
-        el('rs-red').style.display = on.length || all ? '' : 'none';
-        el('rs-red').textContent = all ? '⚠️ All settings will be reset.'
-            : '⚠️ Will be reset: ' + on.map(k => RS_WHAT[k]).join(', ') + '.';
-    }
-    el('rs-open').onclick = () => {
-        if (!state) return;
-        const none = !customs.length, box = document.querySelector('#rs-modal [data-rs="custom"]');
-        box.disabled = none;
-        el('rs-custom-wrap').classList.toggle('rs-off', none);
-        el('rs-custom-sub').textContent = none ? 'None' : 'All of them are deleted';
-        document.querySelectorAll('#rs-modal input[type=checkbox]').forEach(b => { b.checked = false; });
-        clearTimeout(rsTimer);
-        rsLeft = 5;
-        rsTick();
-        el('rs-modal').classList.add('open');
-    };
-    el('rs-all').onchange = () => { rsBoxes().forEach(b => { b.checked = el('rs-all').checked; }); rsShow(); };
-    document.querySelector('#rs-modal .rs-list').addEventListener('change', e => {
-        if (e.target.dataset.rs) { el('rs-all').checked = false; rsShow(); }
-    });
-    el('rs-no').onclick = () => { clearTimeout(rsTimer); el('rs-modal').classList.remove('open'); };
-    el('rs-yes').onclick = async () => {
-        if (el('rs-yes').disabled) return;
-        const sections = el('rs-all').checked ? ['all'] : rsBoxes().filter(b => b.checked).map(b => b.dataset.rs);
-        el('rs-modal').classList.remove('open');
-        const keep = saved, was = savedState;
-        try {
-            const res = await api('/server/pushraker/backup', 'POST', { how: 'reset', sections });
-            // Only those sections: what else was changed on this page and
-            // not saved stays (a token typed in, too)
-            const page = collect(false), gone = [...new Set(forget.concat(res.forget || []))];
-            const typed = { secret: page.secret, email_password: page.email_password, webhook_url: page.webhook_url };
-            const merged = Object.assign({}, state, page);
-            (res.keys || []).forEach(k => { merged[k] = res.view[k]; });
-            ['secret', 'email_password', 'webhook_url'].forEach(k => {
-                delete merged[k];
-                if (gone.includes(k)) merged['has_' + k] = false;
-            });
-            merged.meta = state.meta;
-            render(merged);
-            forget = gone;
-            const box = { ntfy: 'nt-secret', pushover: 'nt-po-token', gotify: 'nt-gt-token', telegram: 'nt-tg-token',
-                discord: 'nt-dc-hook', discord_dm: 'nt-dc-token' }[merged.provider];
-            if (typed.secret && box && !(res.forget || []).includes('secret')) el(box).value = typed.secret;
-            if (typed.email_password && !(res.forget || []).includes('email_password')) el('nt-email-password').value = typed.email_password;
-            if (typed.webhook_url && !(res.forget || []).includes('webhook_url')) el('nt-wh-url').value = typed.webhook_url;
-        } catch (e) {
-            bkSay('⚠️ ' + e.message);
-            return;
-        }
-        saved = keep; savedState = was;
-        markDirty();
-        bkSay('✓ Reset on this page: check it, then Save & Apply');
-    };
-    el('bk-restore').onclick = () => { if (state) { el('bk-file').value = ''; el('bk-file').click(); } };
-    el('bk-file').onchange = async () => {
-        const f = el('bk-file').files[0];
-        if (!f) return;
-        let data;
-        try {
-            if (f.size > 2000000) throw new Error('too big for a backup');
-            data = JSON.parse(await f.text());
-            if (!data || typeof data !== 'object' || !('pushraker_backup' in data)) throw new Error('not a pushraker backup');
-            if (!data.settings || typeof data.settings !== 'object' || Array.isArray(data.settings)) throw new Error('the backup has no settings');
-            if (Number(data.pushraker_backup) > 1) throw new Error('the backup is from a newer pushraker; update this one first');
-        } catch (e) {
-            bkSay('⚠️ Can\'t restore ' + f.name + ': ' + e.message);
-            return;
-        }
-        bkIn = data;
-        let when = '';
-        try { when = new Date(data.created).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); } catch (e) { when = ''; }
-        el('bk-in-file').textContent = '📄 ' + f.name;
-        el('bk-in-list').innerHTML = `<li>From <b>${esc(data.printer || '?')}</b>${when ? ', ' + esc(when) : ''}${data.version ? ', pushraker ' + esc(data.version) : ''}</li>` + bkContents(data.settings);
-        const has = !!(data.secrets && typeof data.secrets === 'object');
-        el('bk-in-red').textContent = has
-            ? '⚠️ All settings will be replaced by the backup, including tokens, passwords and the webhook URL.'
-            : '⚠️ All settings will be replaced by the backup (excluding tokens, passwords, webhook URLs).';
-        el('bk-in-note').textContent = (has
-            ? 'This file contains tokens and passwords. '
-            : 'Tokens, passwords and webhook URLs stay as they are. ') + 'Nothing is saved until you click Save & Apply.';
-        // What doesn't fit this printer or this pushraker (pushraker's
-        // wording, settings.RESTORE_NOTES): only the lines that apply
-        el('bk-in-fit').innerHTML = '';
-        el('bk-modal').classList.add('open');
-        try {
-            const r = await api('/server/pushraker/backup', 'POST', { how: 'inspect', backup: data });
-            if (bkIn === data) el('bk-in-fit').innerHTML = (r.notes || []).map(n => `<li>${esc(n)}</li>`).join('');
-        } catch (e) { /* an older component: nothing to add */ }
-    };
-    el('bk-no').onclick = () => { el('bk-modal').classList.remove('open'); bkIn = null; };
-    el('bk-yes').onclick = async () => {
-        el('bk-modal').classList.remove('open');
-        if (!bkIn) return;
-        const data = bkIn, keep = saved, was = savedState;
-        bkIn = null;
-        try {
-            // Checked by pushraker like a save: nothing from a file gets
-            // onto the page as it came; the secrets stay the ones here
-            const res = await api('/server/pushraker/backup', 'POST', { how: 'restore', backup: data });
-            render(res.view);
-            // Tokens and passwords the file has: into their fields, as if
-            // typed (Save & Apply stores them)
-            const sec = res.secrets || {};
-            const box = { ntfy: 'nt-secret', pushover: 'nt-po-token', gotify: 'nt-gt-token', telegram: 'nt-tg-token',
-                discord: 'nt-dc-hook', discord_dm: 'nt-dc-token' }[res.view.provider];
-            if (sec.secret && box) el(box).value = sec.secret;
-            if (sec.email_password) el('nt-email-password').value = sec.email_password;
-            if (sec.webhook_url) el('nt-wh-url').value = sec.webhook_url;
-        } catch (e) {
-            bkSay('⚠️ ' + (/^Can't restore/.test(e.message) ? e.message : 'Can\'t restore this backup: ' + e.message));
-            return;
-        }
-        saved = keep; savedState = was;
-        markDirty();
-        bkSay('✓ Restored on this page: check it, then Save & Apply');
-    };
-    // ---- one notification in a file: Export (from its editor) and Import
-    // The file: {pushraker_notification, from, kind, id | name,
-    // notification}; checked by pushraker both ways, like a save
-    const nxMenu = el('nx-menu');
-    let nxHow = '', nxIn = null, nxPatch = null;
-    // The notification as it is in the editor now, as a file's contents
-    function nxNow() {
-        editorChanged();
-        const key = editing.key;
-        if (isCustom(key)) {
-            const c = pickCustom(editing), n = {};
-            Object.keys(c).forEach(k => { if (k !== 'name' && k !== 'topic') n[k] = c[k]; });
-            return { pushraker_notification: 1, kind: 'custom', name: editing.name, notification: n };
-        }
-        const t = {};
-        TPL_FIELDS.forEach(f => { t[f] = editing[f]; });
-        const n = diffFromDefault(key, t);
-        delete n.topic;
-        const box = q => document.querySelector(q);
-        const row = state.rows[key] || {};
-        n.enabled = box(`[data-enabled="${key}"]`) ? box(`[data-enabled="${key}"]`).checked : !!row.enabled;
-        n.email = box(`[data-email="${key}"]`) ? box(`[data-email="${key}"]`).checked : !!row.email;
-        n.priority = editing.priority || row.priority || 'default';
-        const page = collect(false);
-        ((state.meta.row_options || {})[key] || []).forEach(o => { n[o] = page[o]; });
-        return { pushraker_notification: 1, kind: 'stock', id: key, notification: n };
-    }
-    // Whether the editor's notification differs from what is saved
-    function nxUnsaved(f) {
-        const canon = o => JSON.stringify(Object.keys(o).sort().map(k => [k, o[k]]));
-        const was = JSON.parse(saved || '{}');
-        if (f.kind === 'custom') {
-            const c = customById(Number(editing.key.slice(7)));
-            const old = c && c._saved ? (was.custom || []).find(x => x.name === c._saved) : null;
-            if (!old || old.name !== f.name) return true;
-            const n = Object.assign({}, old);
-            delete n.name; delete n.topic;
-            return canon(n) !== canon(f.notification);
-        }
-        const key = f.id, row = (was.rows || {})[key] || state.rows[key] || {};
-        const t = (was.templates || {})[key];
-        const n = t ? diffFromDefault(key, t) : {};
-        delete n.topic;
-        n.enabled = !!row.enabled; n.email = !!row.email; n.priority = row.priority || 'default';
-        ((state.meta.row_options || {})[key] || []).forEach(o => { n[o] = was[o]; });
-        return canon(n) !== canon(f.notification);
-    }
-    const nxFileName = f => 'pushraker-' + String(f.kind === 'custom' ? f.name : f.id).replace(/[^A-Za-z0-9_-]+/g, '-').slice(0, 60) + '.json';
-    el('nx-send').onclick = e => {
-        e.stopPropagation();
-        if (!editing) return;
-        const t = (state && state.meta.backup) || {};
-        const push = el('nx-push'), mail = el('nx-email');
-        push.textContent = 'Send by push' + (t.push_label ? ': ' + t.push_label : '');
-        push.classList.toggle('bk-off', !!t.push);
-        push.title = t.push || '';
-        mail.classList.toggle('bk-off', !!t.email);
-        mail.title = t.email || '';
-        el('nx-send').setAttribute('aria-expanded', String(nxMenu.classList.toggle('open')));
-    };
-    document.addEventListener('click', () => { nxMenu.classList.remove('open'); el('nx-send').setAttribute('aria-expanded', 'false'); });
-    nxMenu.onclick = e => {
-        const b = e.target.closest('[data-nx]');
-        if (!b) return;
-        if (b.classList.contains('bk-off')) { e.stopPropagation(); return; }
-        nxHow = b.dataset.nx;
-        const t = state.meta.backup || {}, f = nxNow();
-        el('nx-out-title').textContent = nxHow === 'download' ? 'Download this notification' :
-            nxHow === 'push' ? `Send this notification by push (${t.push_label})` : 'Send this notification by email';
-        el('nx-out-file').textContent = '📄 ' + nxFileName(f);
-        el('nx-out-what').textContent = NX_TEXT.what;
-        const changed = nxUnsaved(f);
-        el('nx-out-red').textContent = changed ? NX_TEXT.unsaved : '';
-        el('nx-out-red').style.display = changed ? '' : 'none';
-        el('nx-go').textContent = nxHow === 'download' ? 'Download' : 'Send';
-        el('nx-go').disabled = false;
-        el('nx-to-wrap').style.display = nxHow === 'email' ? '' : 'none';
-        el('nx-to').value = t.email_to || '';
-        el('nx-err').style.display = 'none';
-        el('nx-out').classList.add('open');
-        if (nxHow === 'email') el('nx-to').focus();
-    };
-    el('nx-cancel').onclick = () => el('nx-out').classList.remove('open');
-    el('nx-go').onclick = async () => {
-        if (el('nx-go').disabled || !editing) return;
-        const go = el('nx-go'), label = go.textContent;
-        el('nx-err').style.display = 'none';
-        go.disabled = true;
-        go.textContent = nxHow === 'download' ? 'Downloading…' : 'Sending…';
-        try {
-            const data = await api('/server/pushraker/backup', 'POST', { how: 'notification', via: nxHow, notification: nxNow(), to: el('nx-to').value.trim() });
-            if (nxHow === 'download') {
-                const url = URL.createObjectURL(new Blob([JSON.stringify(data.file, null, 2)], { type: 'application/json' }));
-                const a = document.createElement('a');
-                a.href = url; a.download = data.name;
-                document.body.appendChild(a); a.click(); a.remove();
-                setTimeout(() => URL.revokeObjectURL(url), 10000);
-            }
-            el('nx-out').classList.remove('open');
-        } catch (e) {
-            el('nx-err').textContent = '⚠️ ' + e.message;
-            el('nx-err').style.display = '';
-        } finally {
-            go.disabled = false;
-            go.textContent = label;
-        }
-    };
-    // Import…: pick a file, pushraker says what it is and what doesn't fit
-    // here (settings.IMPORT_NOTES), then it lands on this page like an
-    // edit; replacing one: Import works 5 seconds after the dialog opens
-    const NX_TEXT = {
-        what: 'Not included: addresses, tokens, server settings, its topic.',
-        unsaved: '⚠️ Includes unsaved changes.',
-        stock: 'Stock notification: ',
-        custom: 'Custom notification: ',
-        replaces: n => `Replaces "${n}".`,
-        full: n => `Up to ${n} custom notifications: delete one first.`,
-    };
-    function nxImport() {
-        if (!state) return;
-        el('nx-file').value = '';
-        el('nx-file').click();
-    }
-    let nxLeft = 0, nxTimer = null;
-    function nxTick() {
-        el('nx-yes').disabled = nxLeft > 0;
-        el('nx-yes').textContent = nxLeft > 0 ? `Import (${nxLeft})` : 'Import';
-        if (nxLeft > 0) nxTimer = setTimeout(() => { nxLeft--; nxTick(); }, 1000);
-    }
-    el('nx-file').onchange = async () => {
-        const f = el('nx-file').files[0];
-        if (!f) return;
-        let data;
-        try {
-            if (f.size > 200000) throw new Error('too big for a notification file');
-            data = JSON.parse(await f.text());
-            if (!data || typeof data !== 'object' || !('pushraker_notification' in data)) throw new Error('not a pushraker notification file');
-        } catch (e) {
-            bkSay('⚠️ Can\'t import ' + f.name + ': ' + e.message);
-            return;
-        }
-        let r;
-        try {
-            r = await api('/server/pushraker/backup', 'POST', { how: 'notification_inspect', file: data });
-        } catch (e) {
-            bkSay('⚠️ Can\'t import ' + f.name + ': ' + e.message);
-            return;
-        }
-        nxIn = data;
-        const custom = r.kind === 'custom';
-        const same = custom ? customs.find(c => c.name.toLowerCase() === String(r.id).toLowerCase()) : null;
-        if (custom && !same && customs.length >= (state.meta.custom_max || 20)) {
-            bkSay('⚠️ ' + NX_TEXT.full(state.meta.custom_max || 20));
-            nxIn = null;
-            return;
-        }
-        el('nx-in-file').textContent = '📄 ' + f.name;
-        el('nx-in-list').innerHTML = `<li>${esc(custom ? NX_TEXT.custom : NX_TEXT.stock)}<b>${esc(r.label)}</b></li>`;
-        el('nx-in-fit').innerHTML = (r.notes || []).map(n => `<li>${esc(n)}</li>`).join('');
-        const replaces = custom ? (same ? same.name : '') : r.label;
-        el('nx-in-red').textContent = replaces ? '⚠️ ' + NX_TEXT.replaces(replaces) : '';
-        el('nx-in-red').style.display = replaces ? '' : 'none';
-        clearTimeout(nxTimer);
-        nxLeft = replaces ? 5 : 0;
-        nxTick();
-        el('nx-modal').classList.add('open');
-    };
-    el('nx-no').onclick = () => { clearTimeout(nxTimer); el('nx-modal').classList.remove('open'); nxIn = null; };
-    el('nx-yes').onclick = async () => {
-        if (el('nx-yes').disabled || !nxIn) return;
-        el('nx-modal').classList.remove('open');
-        const data = nxIn, keep = saved, was = savedState;
-        nxIn = null;
-        let p;
-        try {
-            p = await api('/server/pushraker/backup', 'POST', { how: 'notification_import', file: data });
-        } catch (e) {
-            bkSay('⚠️ Can\'t import this notification: ' + e.message);
-            return;
-        }
-        if (p.kind === 'custom') {
-            const same = customs.find(c => c.name.toLowerCase() === p.custom.name.toLowerCase());
-            if (same) Object.assign(same, p.custom);
-            else customs.push(Object.assign({ _id: ++customSeq, _saved: null }, p.custom));
-            renderCustomRows();
-        } else {
-            // Everything else on this page stays as it is, unsaved changes
-            // too: the page as it stands, with this notification replaced
-            const page = collect(false), kept = customs;
-            const typed = { secret: page.secret, email_password: page.email_password, webhook_url: page.webhook_url };
-            const merged = Object.assign({}, state, page);
-            merged.rows = Object.assign(JSON.parse(JSON.stringify(state.rows)), page.rows);
-            merged.rows[p.id] = p.row;
-            merged.templates = JSON.parse(JSON.stringify(tplEdits));
-            if (p.template) merged.templates[p.id] = p.template; else delete merged.templates[p.id];
-            Object.assign(merged, p.options || {});
-            ['secret', 'email_password', 'webhook_url'].forEach(k => { delete merged[k]; });
-            merged.meta = state.meta;
-            render(merged);
-            customs = kept;
-            renderCustomRows();
-            const box = { ntfy: 'nt-secret', pushover: 'nt-po-token', gotify: 'nt-gt-token', telegram: 'nt-tg-token',
-                discord: 'nt-dc-hook', discord_dm: 'nt-dc-token' }[merged.provider];
-            if (typed.secret && box) el(box).value = typed.secret;
-            if (typed.email_password) el('nt-email-password').value = typed.email_password;
-            if (typed.webhook_url) el('nt-wh-url').value = typed.webhook_url;
-        }
-        saved = keep; savedState = was;
-        markDirty();
-        bkSay('✓ Imported on this page: check it, then Save & Apply');
-    };
     // Discard changes: back to the last saved settings, on this page.
     // Only with unsaved changes (the button is greyed out otherwise)
     let closing = false;
     const dirty = () => !!state && JSON.stringify(collect(false)) !== saved;
-    const markDirty = () => { el('pr-close').disabled = !dirty(); markChanged(); renderTopicWarning(); };
+    const markDirty = () => { el('pr-close').disabled = !dirty(); markChanged(); };
     document.addEventListener('input', markDirty);
     document.addEventListener('change', markDirty);
     // Buttons that fill a field in (Fill in, Random, Use public server)
@@ -3387,7 +2136,7 @@
     }
     el('pr-close').onclick = async () => {
         if (!dirty() || !(await confirmDiscard())) return;
-        render(savedState || state);
+        render(state);
         el('pr-close').disabled = true;
         el('pr-status').textContent = 'Changes discarded';
     };

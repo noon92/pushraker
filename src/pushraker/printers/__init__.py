@@ -17,29 +17,12 @@ file per printer), listed in PRINTERS below, not in the component.
 """
 
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
-
-from .. import preprint
-
-
-class Frame(bytes):
-    """A JPEG from snapshot() that was taken earlier, not just now:
-    `taken` is when (time.time()). The notification then says how old it
-    is, when it's old."""
-    taken: Optional[float] = None
-
-    def __new__(cls, data: bytes, taken: Optional[float]) -> "Frame":
-        obj = super().__new__(cls, data)
-        obj.taken = taken
-        return obj
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 class Printer:
     """A plain Moonraker printer."""
     name = "generic"
-    # The printer's model as people know it ("Snapmaker U1"), for backups'
-    # "from"; empty: the profile's name stands in
-    model_name = ""
     # Moonraker event carrying the printer's coded faults (None: only
     # print_stats and Klipper shutdowns report faults)
     exception_event: Optional[str] = None
@@ -94,24 +77,6 @@ class Printer:
     # computing), and the method this printer defaults to
     time_methods: Dict[str, Tuple[str, str]] = {}
     time_default = "blend"
-    # Status fields adjust_status reads, subscribed and queried with the
-    # component's ({object: [fields]}); Klipper leaves out the fields an
-    # object doesn't have. virtual_sdcard's layer and layer_count: Creality's
-    # Klipper fork (the Hi, confirmed; the K1 family probably, unconfirmed)
-    # counts layers there instead of in print_stats.info
-    status_fields: Dict[str, List[str]] = {
-        "virtual_sdcard": ["layer", "layer_count"]}
-    # The printer's own web page (its web UI), for the Printer URL: a URL
-    # with "{host}" for the printer's address as the browser reaches it
-    # ("http://{host}:4408/"), and what to call it on the page. "": none
-    # declared, the web pages found on the machine are offered instead
-    # (pushraker.discover.web_pages)
-    web_page = ""
-    web_page_name = ""
-    # Why this printer's own camera picture can be old (snapshot() giving a
-    # Frame taken earlier): the end of the text's "Camera image from 74 s
-    # ago: ..." line; "" says only how old
-    frame_note = ""
 
     def __init__(self, objects: Sequence[str]) -> None:
         self.objects = list(objects)
@@ -124,69 +89,9 @@ class Printer:
         self.extruders = [e for e in ("extruder", "extruder1", "extruder2",
                                       "extruder3", "extruder4", "extruder5")
                           if e in self.objects] or ["extruder"]
-        # Whether print_stats.info comes from the slicer (SET_PRINT_STATS_
-        # INFO; Klipper only sets current_layer together with total_layer)
-        self._slicer_layers = False
-        # Pre-print calibrations from stock Klipper (pushraker.preprint),
-        # for a profile without detection of its own: bed mesh, Z tilt,
-        # gantry level, as far as the printer has them
-        self.generic_preprint = not self.preprint_calibrations and \
-            preprint.available(self.objects)
-        if self.generic_preprint:
-            fields = dict(self.status_fields)
-            for obj, f in preprint.STATUS_FIELDS.items():
-                if obj in self.objects:
-                    fields[obj] = list(dict.fromkeys(
-                        list(fields.get(obj, [])) + f))
-            self.status_fields = fields
-            self.rows_unavailable = tuple(
-                r for r in self.rows_unavailable if r != "preprint_done")
 
     def has(self, obj: str) -> bool:
         return obj in self.objects
-
-    def cameras(self) -> Dict[str, Dict[str, str]]:
-        """The printer's own cameras that neither Moonraker nor the
-        generic discovery (pushraker.discover) can find: {name:
-        {"snapshot": a URL giving a JPEG, "stream": the live view's path
-        or URL}}. None on a plain printer."""
-        return {}
-
-    def snapshot(self, name: str, ctx: Dict[str, Any]
-                 ) -> Tuple[Optional[bytes], str]:
-        """A JPEG from one of this printer's own cameras ("printer:<name>"
-        addresses from cameras()), or why there's none. `ctx`: "state"
-        (print_stats.state), "since_end" (seconds since a print ended, or
-        None). Blocking: called in a thread. A picture taken earlier
-        comes as a Frame, with when."""
-        return None, "this printer has no camera of its own"
-
-    def model(self, hostname: str = "") -> str:
-        """The most specific model name known (`hostname`: Klipper's,
-        from printer.info)."""
-        return self.model_name or self.name
-
-    def missing_rows(self) -> Set[str]:
-        """Rows for hardware this printer doesn't have, from Klipper's
-        objects at Klippy ready (one added later shows after a restart):
-        left off the page whatever their setting, which stays as saved.
-        One table for every printer; empty before Klipper is known."""
-        o = self.objects
-        if not o:
-            return set()
-        chamber = any(x.startswith("heater_generic ") for x in o) or \
-            "purifier" in o or "dragonbreath" in o
-        needs = {
-            # a chamber target: any heater_generic (M141/M191), Snapmaker's
-            # chamber wait (its purifier), a DragonBreath
-            "chamber_waiting": chamber,
-            "chamber_reached": chamber,
-            "chamber_fault": chamber,
-            # X/Y drivers that report their own temperature
-            "driver_hot": bool(self.drivers),
-            "bed_cooled": "heater_bed" in o,
-        }
-        return {rid for rid, ok in needs.items() if not ok}
 
     @classmethod
     def matches(cls, objects: Sequence[str]) -> bool:
@@ -226,48 +131,6 @@ class Printer:
         objects' current status in `state`)."""
         return []
 
-    def adjust_status(self, data: Dict[str, Any],
-                      status: Dict[str, Dict[str, Any]]) -> None:
-        """Fill in a standard value the printer keeps somewhere else (in
-        place, in `status`: the component's merged status), after each
-        update `data` is merged. The values the notifications show stay
-        the standard ones; only where they come from differs.
-
-        Layers: Creality's Klipper fork counts them in virtual_sdcard
-        (`layer`: +1 at each layer marker in the file, ";LAYER_CHANGE" and
-        the like, the first at the start of layer 1, 0 before it and while
-        idle, restored after a power-loss resume; `layer_count`: the file's
-        layer count, set when the print starts; both zeroed when the print
-        ends, is cancelled or fails), and Creality Print doesn't write
-        SET_PRINT_STATS_INFO, so print_stats.info stays empty. Wherever
-        those fields exist they are copied into print_stats.info, unless a
-        slicer did write SET_PRINT_STATS_INFO: that one wins."""
-        ps = status.get("print_stats")
-        if ps is None:
-            return
-        new_info = (data.get("print_stats") or {}).get("info")
-        if isinstance(new_info, dict):
-            self._slicer_layers = new_info.get("total_layer") is not None
-        if self._slicer_layers:
-            return
-        vsd = status.get("virtual_sdcard") or {}
-        if "layer" not in vsd and "layer_count" not in vsd:
-            return              # a standard virtual_sdcard
-        try:
-            total = int(vsd.get("layer_count") or 0)
-            layer = int(vsd.get("layer") or 0)
-        except (TypeError, ValueError):
-            return
-        if not total and not layer:
-            if ps.get("state") in ("complete", "cancelled", "error"):
-                return          # zeroed at the end: keep the job's last
-            info: Dict[str, Any] = {"total_layer": None,
-                                    "current_layer": None}
-        else:
-            info = {"total_layer": total or None,
-                    "current_layer": min(layer, total) if total else layer}
-        ps["info"] = info
-
     def left_seconds(self, method: str, ctx: Dict[str, Any]) -> Optional[float]:
         """Seconds left by one of this printer's own time_methods. `ctx`:
         estimated (the slicer's seconds), print_duration, progress (file
@@ -278,9 +141,8 @@ class Printer:
 
 
 from .snapmaker_u1 import SnapmakerU1  # noqa: E402
-from .creality import Creality  # noqa: E402
 
-PRINTERS: Tuple[type, ...] = (SnapmakerU1, Creality)
+PRINTERS: Tuple[type, ...] = (SnapmakerU1,)
 
 
 def detect(objects: Sequence[str]) -> Printer:

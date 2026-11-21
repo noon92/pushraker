@@ -48,7 +48,6 @@
 from __future__ import annotations
 import asyncio
 import base64
-import collections
 import datetime
 import html
 import http
@@ -60,14 +59,11 @@ import os
 import re
 import shutil
 import tempfile
-import concurrent.futures
-import threading
 import time
-import urllib.parse
 import urllib.request
 from typing import (
-    TYPE_CHECKING, Any, Awaitable, Callable, Deque, Dict, List, NamedTuple, Optional,
-    Sequence, Set, Tuple
+    TYPE_CHECKING, Any, Awaitable, Dict, List, NamedTuple, Optional, Sequence, Set,
+    Tuple
 )
 
 import apprise
@@ -85,28 +81,14 @@ except Exception as e:
     email_html = None  # type: ignore
 
 try:
-    # Registers pntfy://: ntfy with access tokens for an Apprise without
-    # (1.2.0, the Creality Hi's)
-    from . import ntfy
-except Exception as e:
-    logging.warning("[pushraker] own ntfy sender unavailable: %s", e)
-    ntfy = None  # type: ignore
-
-try:
-    # Registers the discordwh:// and discorddm:// Apprise plugins
+    # Registers the discordhook:// and discorddm:// Apprise plugins
     from . import discord
 except Exception as e:
     logging.warning("[pushraker] Discord unavailable: %s", e)
     discord = None  # type: ignore
 
-from . import compat
-from . import discover
-from . import thumbs
-from . import gmeta
-from . import preprint
-from .compat import JobEvent
+from moonraker.common import JobEvent, KlippyState
 from . import settings as cfgmod
-from . import values as pvalues
 from . import printers
 from . import templating as tp
 from . import engine as jj
@@ -121,16 +103,6 @@ if TYPE_CHECKING:
 # start, it simply never fires on a printer without one
 EXCEPTION_EVENTS = printers.EXCEPTION_EVENTS
 REMOTE_METHOD = "pushraker"
-# Camera servers Moonraker doesn't know (the tests swap it)
-FIND_CAMERAS = discover.discover
-FIND_WEB_PAGES = discover.web_pages
-# The printer profiles' keys in values_map (values by printer)
-PROFILE_KEYS = {"Snapmaker U1": "snapmaker_u1", "creality": "creality"}
-PROBE_IMAGE = discover.probe
-# Moonraker webcam services that show a web page, not a picture
-NO_PICTURE_SERVICES = ("iframe",)
-# The settings page, served by Moonraker (compat.register_page)
-PAGE_ENDPOINT = "/server/pushraker/page"
 # The 0.1 name, still answered (a Klipper macro file from 0.1 calls it)
 OLD_REMOTE_METHOD = "push_notification"
 MILESTONES = (25, 50, 75)
@@ -138,7 +110,6 @@ ROW_IDS = (
     "started", "preprint_done", "layer_started", "first_layer", "progress_25", "progress_50", "progress_75",
     "status_report",
     "paused", "file_pause", "resumed", "object_complete", "complete", "cancelled",
-    "bed_cooled",
     "calibration",
     "chamber_waiting", "chamber_reached", "chamber_fault",
     "filament_change",
@@ -198,8 +169,6 @@ EXTRUDERS_ADDED = {"filaments": ("filament", "name"),
                    "vendors": ("filament", "vendor"),
                    "colors": ("filament", "color"),
                    "grams_left": ("filament", "grams_left"),
-                   "grams_full": ("filament", "grams_full"),
-                   "percent_left": ("filament", "percent_left"),
                    "slots": ("slot",)}
 TITLES = {
     "started": "▶️ {name} started",
@@ -229,9 +198,8 @@ TITLES = {
     "error": "⚠️ {name} Error: {kind}",
     "warning": "⚠️ {name} Warning",
     "shutdown": "🛑 {name} Error: shutdown",
-    "power_loss": "🔌 {name} power loss",
+    "power_loss": "⚡ {name} power loss",
     "driver_hot": "🌡️ {name} driver running hot",
-    "bed_cooled": "🛏️ {name} bed cooled to {limit} °C",
     "filament_loaded": "🧵 {name} filament loaded",
     "filament_unloaded": "🧵 {name} filament unloaded",
     "filament_short": "🧵 {name} not enough filament",
@@ -263,9 +231,6 @@ INTERVENTION_HOLD = 15.
 # is fed, so a change is reported once it has held this long. Not during
 # a print job: runouts and refills have their own notifications.
 FILAMENT_CHANGE_SETTLE = 3.
-FEED_PREFIX = "filament_feed "      # Snapmaker U1: left, right
-# The same change from the feeder and from filament_exist: reported once
-FILAMENT_CHANGE_SAME = 120.
 FAULT_ROWS = ("error", "warning", "shutdown")
 # Chamber temperature, whatever heats the chamber: a print job "waits" when,
 # before its first layer, there is a chamber target and the chamber is below
@@ -292,7 +257,6 @@ SETTINGS_POLL = 20.
 HOOKS_MACRO = "_NTFY_HOOKS"
 ORDINALS = {1: "1st", 2: "2nd", 3: "3rd"}
 SNAPSHOT_TIMEOUT = 5.
-SNAPSHOT_TOTAL = 10.        # seconds for a whole picture, however it trickles
 SNAPSHOT_MAX = 5 * 1024 * 1024
 # A pause is reported when it starts; the head moves away from the part
 # afterwards, so the snapshot waits (the bed doesn't lower on a pause).
@@ -314,21 +278,10 @@ ACE_REFILL_WAIT = 180.
 MACRO_PREFIX = "notify "
 # RESPOND PREFIX=notify_custom MSG=<name>: send a custom notification
 CUSTOM_PREFIX = "notify_custom "
-# RESPOND PREFIX=notify_custom MSG="pushraker.<name> <Jinja added at the end>"
-# (the pushraker. keeps a plain word from setting one off by chance)
-CUSTOM_CALL = "pushraker."
-RX_CUSTOM_CALL = re.compile(r"pushraker\.([A-Za-z0-9_]+)(?:\s+(.*))?",
-                            re.I | re.S)
 # Custom notifications' conditions are checked this often (seconds); one
 # isn't sent again within CUSTOM_GAP of the last
 CUSTOM_INTERVAL = 5.
 CUSTOM_GAP = 60.
-# Evaluated at an event (layer change, tool change...): sent each time it's
-# true then, but not again within CUSTOM_EVENT_GAP seconds
-CUSTOM_EVENT_GAP = 10.
-# Events being evaluated at once, at most (a macro printing hundreds of
-# console lines): the rest are skipped
-CUSTOM_EVENT_PENDING = 20
 MACRO_SEP = " || "
 MACRO_LEVELS = ("min", "low", "default", "high", "max")
 # (runout_exception_id: printers.py)
@@ -435,11 +388,6 @@ GCODE_EXTS = (".gcode", ".gco", ".g")
 # job paused for the heat and resumed can warn a second time)
 # (drivers: printers.py, found from the object list)
 DRIVER_HOT_DEFAULT = 105
-# Bed cooled: the bed is looked at this often after a print ends, for at
-# most this long (a bed held hot by hand never sends)
-BED_COOL_DEFAULT = 40
-BED_COOL_POLL = 15.
-BED_COOL_MAX = 3 * 3600.
 # Print-by-object (Orca "print_sequence = by object"): the slicer's config
 # block at the end of the file says so, and its EXCLUDE_OBJECT markers tell
 # Klipper which object is being printed. Layer numbers run on across the
@@ -459,11 +407,6 @@ RX_M117 = re.compile(rb"^M117[ \t]+([^\r\n]*)", re.I)
 PAUSE_MERGE = 400
 PAUSE_WINDOW = 2048
 RX_BY_OBJECT = re.compile(rb"^; *print_sequence *= *by object *$", re.M)
-# When the file was sliced, from its header: "; generated by OrcaSlicer
-# 2.3.0 on 2025-03-20 at 15:39:31" (PrusaSlicer adds UTC)
-RX_SLICED = re.compile(rb"^; *generated by .*? on (\d{4}-\d{2}-\d{2}) at "
-                       rb"(\d{1,2}:\d{2}(?::\d{2})?)( UTC)?", re.M | re.I)
-HEADER_HEAD = 16384
 RX_OBJECT_NAME = re.compile(r"^(.*?)_id_(\d+)_copy_(\d+)$")
 
 
@@ -629,20 +572,6 @@ SAMPLE_RENDER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "web", "sample-render.jpg")
 
 # event.* a notification has only sometimes: shown in the tree
-# What a custom notification evaluated at an event has in event.*
-CUSTOM_SAMPLES: Dict[str, Dict[str, Any]] = {
-    "layer": {"layer": 120, "previous_layer": 119},
-    "tool": {"toolhead": "extruder1", "previous_toolhead": "extruder"},
-    "object": {"object": {"name": "Benchy", "number": 2, "count": 4},
-               "previous_object": {"name": "Calibration cube", "number": 1,
-                                   "count": 4}},
-    "excluded": {"object": {"name": "Benchy", "number": 2, "count": 4}},
-    "progress": {"progress": 50},
-    "console": {"message": "Probe triggered at z=0.012"},
-}
-# job.pause in the preview: a pause planned in the file
-SAMPLE_PAUSE = {"planned": True, "number": 1, "layer": 42,
-                "kind": "filament change", "message": "Change to red"}
 SAMPLE_EXTRA: Dict[str, Dict[str, Any]] = {
     "paused": {"planned": True, "pause": {
         "number": 1, "layer": 42, "kind": "filament change",
@@ -666,7 +595,7 @@ PARITY_LOG: List[Tuple[str, str, str, str]] = []
 JOB_BRANCHES = [re.compile(p) for p in (
     r"time", r"time\.remaining", r"filaments", r"filament\d+",
     r"queue", r"queue\.next", r"queue\.(?:job)?\d+", r"extruders",
-    r"pauses", r"pause\d+", r"pause", r"objects")]
+    r"pauses", r"pause\d+", r"objects")]
 
 # job.* values: while a print job runs or is paused, and this long after it
 # ends, for the notifications sent just after it
@@ -759,8 +688,7 @@ def short_cause(messages: List[str]) -> str:
     "401 Unauthorized", "timed out", "SSL error", "535 login rejected"."""
     text = " | ".join(messages)
     low = text.lower()
-    # ntfy's own codes have five digits, the HTTP status first (40301)
-    m = re.search(r"error=(\d{3})(?:\d{2})?\b", text)
+    m = re.search(r"error=(\d{3})\b", text)
     if m:
         code = int(m.group(1))
         try:
@@ -784,70 +712,6 @@ def short_cause(messages: List[str]) -> str:
     if "connect" in low:
         return "could not connect"
     return "failed"
-
-
-class SnapshotProblem(str):
-    """A camera picture that couldn't be taken: no picture (""), with the
-    reason. The notification still goes out (with the print's render when
-    it has one), and its text says why."""
-    why = ""
-
-    def __new__(cls, path: str, why: str) -> "SnapshotProblem":
-        obj = super().__new__(cls, path)
-        obj.why = why
-        return obj
-
-
-CAMERA_ERROR = "Error sending camera image: {why}"
-# A picture older than this says how old (a printer's camera that only
-# takes its own pictures now and then: the Creality Hi, one per layer)
-CAMERA_OLD = 60.
-CAMERA_AGE = "Camera image from {age} ago"
-
-
-class SnapshotPath(str):
-    """A camera picture's file, with a line for the text (`note`: how old
-    the picture is, when it's old)."""
-    note = ""
-
-    def __new__(cls, path: str, note: str) -> "SnapshotPath":
-        obj = super().__new__(cls, path)
-        obj.note = note
-        return obj
-
-
-def age_text(seconds: float) -> str:
-    """74 s under 2 minutes, 4 min above."""
-    t = max(0, int(seconds))
-    return f"{t} s" if t < 120 else f"{t // 60} min"
-
-
-def camera_age_line(age: Optional[float], why: str = "") -> str:
-    """"Camera image from 74 s ago: <why>." for a picture older than
-    CAMERA_OLD seconds (`why`: the printer's reason, its frame_note), else
-    ""."""
-    if age is None or age <= CAMERA_OLD:
-        return ""
-    line = CAMERA_AGE.format(age=age_text(age))
-    return f"{line}: {why}." if why else f"{line}."
-
-
-def camera_line(path: Any) -> str:
-    """The camera's line for the text: its error (a SnapshotProblem), or
-    the picture's age (a SnapshotPath of an old picture); else ""."""
-    why = getattr(path, "why", "")
-    if why:
-        return CAMERA_ERROR.format(why=why)
-    return getattr(path, "note", "") or ""
-
-
-def with_camera_error(body: str, path: Any) -> str:
-    """The text with the camera's line appended (a blank line, then the
-    line): its error, or how old an old picture is; else as it was."""
-    line = camera_line(path)
-    if not line:
-        return body
-    return f"{body}\n\n{line}"
 
 
 class AppriseLog(logging.Handler):
@@ -876,10 +740,8 @@ class AppriseLog(logging.Handler):
         if record.levelno >= self.forward_level:
             logging.getLogger().handle(record)
         path = (record.pathname or "").replace("\\", "/")
-        # Lowercase: Apprise before 1.7 names its plugins NotifyNtfy.py,
-        # NotifyEmail.py...; newer ones ntfy.py, email/...
-        where = (path.rsplit("/apprise/", 1)[-1] if "/apprise/" in path
-                 else os.path.basename(path)).lower()
+        where = path.rsplit("/apprise/", 1)[-1] if "/apprise/" in path \
+            else os.path.basename(path)
         for key, channel in APPRISE_SOURCES:
             if key in where:
                 try:
@@ -938,13 +800,11 @@ class PushNotifications:
             app_args = {}
         data_path = app_args.get("data_path") or os.path.expanduser(
             "~/printer_data")
-        # printer_data/config, also when moonraker.conf lives elsewhere
-        config_dir = compat.config_dir(app_args, data_path)
+        config_dir = os.path.dirname(app_args.get("config_file") or "") \
+            or os.path.join(data_path, "config")
         self._low_path = os.path.join(data_path, ".pushraker.json")
         # CodeMirror, when installed: <data>/pushraker/codemirror/
         self._cm_dir = os.path.join(data_path, "pushraker", "codemirror")
-        # Thumbnails read from G-code headers Moonraker didn't parse
-        self._thumb_dir = os.path.join(data_path, "pushraker", "thumbs")
         # 0.1 kept it under this name; moved on first read
         self._old_low_path = os.path.join(data_path, ".push_notifications.json")
         # Where the settings come from: pushraker.conf (the page edits it,
@@ -976,17 +836,8 @@ class PushNotifications:
                 name=config.get("name", "Printer"))
         self._apply_options(self._legacy_options(config) if legacy else {})
         self._init_state()
-        compat.register_job_events(self.server, self._on_job_event)
-        # Older Moonraker sends status updates as an event rather than to a
-        # subscription callback
-        try:
-            self._status_cb = compat.takes_status_callback(
-                self.server.lookup_component("klippy_apis"))
-        except Exception:
-            self._status_cb = True
-        if not self._status_cb:
-            self.server.register_event_handler(
-                "server:status_update", self._on_status_event)
+        self.server.register_event_handler(
+            "job_state:state_changed", self._on_job_event)
         for event in EXCEPTION_EVENTS:
             self.server.register_event_handler(event, self._on_exception)
         self.server.register_event_handler(
@@ -1010,40 +861,17 @@ class PushNotifications:
                          self._ep_preview_image),
                         ("codemirror", ["GET", "POST"], self._ep_codemirror),
                         ("codemirror_js", ["GET"], self._ep_codemirror_js),
-                        ("status", ["GET"], self._ep_status),
-                        ("backup", ["POST"], self._ep_backup)):
+                        ("status", ["GET"], self._ep_status)):
                     try:
                         self.server.register_endpoint(
                             f"{base}/{path}", methods, handler)
                     except Exception as e:
                         logging.error("[pushraker] endpoint "
                                       "%s/%s: %s", base, path, e)
-            # The settings page itself, for printers without an nginx of
-            # their own to serve it from (open http://<printer>:7125/server/
-            # pushraker/page)
-            try:
-                compat.register_page(self.server, PAGE_ENDPOINT,
-                                     self._ep_page)
-            except Exception as e:
-                logging.error("[pushraker] page endpoint: %s", e)
             self._spawn(self._watch_settings())
             self._spawn(self._custom_watch())
             self._spawn(self._cm_follow())
             self._retire()
-
-    async def _ep_page(self, web_request: Any) -> str:
-        """The settings page (web/index.html), read again when it changed
-        (a package upgrade without a Moonraker restart)."""
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            "web", "index.html")
-        try:
-            stamp = os.stat(path).st_mtime_ns
-            if self._page is None or self._page[0] != stamp:
-                with open(path, encoding="utf-8") as f:
-                    self._page = (stamp, f.read())
-        except OSError as e:
-            raise self.server.error(f"settings page unavailable: {e}", 500)
-        return self._page[1]
 
     async def close(self) -> None:
         """Moonraker shutting down or restarting (it reuses the process):
@@ -1089,7 +917,6 @@ class PushNotifications:
         rows: Dict[str, Tuple[str, List[Destination]]] = {}
         customs = [cfgmod.custom_rid(c["name"])
                    for c in (self.settings or {}).get("custom") or []]
-        push_base: Dict[str, str] = {}
         for rid in list(ROW_IDS) + customs:
             image = ""
             dests: List[Destination] = []
@@ -1113,17 +940,14 @@ class PushNotifications:
                     srv.socket_connect_timeout = max(
                         srv.socket_connect_timeout, SEND_CONNECT_TIMEOUT)
                 channel = "email" if email else url.split(":", 1)[0]
-                channel = {"ntfys": "ntfy", "pntfy": "ntfy",
-                           "pover": "pushover",
+                channel = {"ntfys": "ntfy", "pover": "pushover",
                            "gotifys": "gotify",
-                           "tgram": "telegram", "discordwh": "discord",
+                           "tgram": "telegram", "discordhook": "discord",
                            "discorddm": "discord", "json": "webhook",
                            "jsons": "webhook"}.get(
                     channel, channel)
                 image = image or kind
                 dests.append(Destination(channel, ap, email))
-                if key == rid:
-                    push_base[rid] = url
             if dests:
                 rows[rid] = (image, dests)
         self.rows = rows
@@ -1143,16 +967,11 @@ class PushNotifications:
         # sets its own ({% set priority = "max" %}): "<row>@<priority>"
         self.priority_urls: Dict[str, str] = {
             k: v for k, v in opts.items() if "@" in k and v}
-        # ...and each row's own (for a topic a template or the editor sets)
-        self.priority_urls.update(push_base)
         # Which of loaded / unloaded the Filament loaded / unloaded row sends
         self.filament_change_events = {
             e.strip() for e in get(
                 "filament_change_events", "loaded,unloaded").split(",")}
         self.tz: Optional[datetime.tzinfo] = None
-        # A time zone a template set ({% set timezone = ... %}), for the
-        # render running in this thread
-        self._tz_here = threading.local()
         tz_name = get("timezone", "")
         if tz_name:
             try:
@@ -1176,9 +995,6 @@ class PushNotifications:
         # The option is driver_temp: driver_hot is the row
         self.driver_hot: float = num(
             "driver_temp", DRIVER_HOT_DEFAULT, 40., 150.)
-        # Bed cooled: below this after a print ends (the row: bed_cooled)
-        self.bed_cool: float = num(
-            "bed_cool_temp", BED_COOL_DEFAULT, 20., 100.)
         # Status report: every this many minutes of print time
         self.report_interval: float = num("report_interval", 30., 1., 720.)
         self.web_ui_url: str = get("web_ui_url", "")
@@ -1199,37 +1015,9 @@ class PushNotifications:
         # last sent (and in which print job), the last error logged
         self._custom_was: Dict[str, bool] = {}
         self._custom_sent: Dict[str, float] = {}
-        self._custom_job: Dict[str, Tuple[int, int]] = {}
-        # Resumes so far: "once per print job, again after a pause"
-        self._resumes = 0
+        self._custom_job: Dict[str, int] = {}
         self._custom_err: Dict[str, str] = {}
-        # A When that ran past its time, as it was: skipped until changed
-        self._custom_stuck: Dict[str, str] = {}
-        # Events custom notifications can be evaluated at: the layer, 1% of
-        # progress, toolhead and excluded objects last seen in the job
-        self._ev_layer = 0
-        self._ev_pct = 0
-        self._ev_tool = ""
-        self._ev_excluded: Set[str] = set()
-        # pushraker's own console lines, and how many events are being
-        # evaluated (a flood of console lines isn't rendered one each)
-        self._own_lines: Deque[str] = collections.deque(maxlen=50)
-        self._ev_busy = 0
-        self._ev_dropped = False
-        # pushraker.*: what each notification sent since pushraker started
-        # (by its row: at, count, job, job_count, failed, failed_count),
-        # the last one sent, and when pushraker started
-        self._sent: Dict[str, Dict[str, Any]] = {}
-        self._sent_last: Optional[str] = None
-        self._boot_at = time.time()
-        # A custom notification's When as last evaluated
-        self._custom_state: Dict[str, bool] = {}
-        # job.pause: the pause now (planned in the file or not)
-        self._pause_now: Optional[Dict[str, Any]] = None
         self._filament_job = 0      # bumped per job; stops an old watcher
-        # Print jobs started: "once per print job" (the time after a print
-        # job ends still counts as that job)
-        self._job_number = 0
         self._job_map: List[Any] = []       # extruder_map_table at start
         self._job_tools: Set[int] = set()   # slicer filaments the job uses
         self._job_weights: Dict[int, float] = {}  # grams per slicer filament
@@ -1266,19 +1054,6 @@ class PushNotifications:
         self._faults_pending: Set[FaultKey] = set()
         self._last_fault_send = 0.
         self._ready_once = False
-        self._page: Optional[Tuple[int, str]] = None
-        self._hostname = ""          # Klipper's (printer.info)
-        # The files' own metadata (pushraker.gmeta), per file version
-        self._gmeta_cache: Dict[Tuple[str, int, int], Dict[str, Any]] = {}
-        # Camera servers Moonraker doesn't know, found at Klippy ready
-        self._found_cams: Dict[str, Dict[str, str]] = {}
-        # Moonraker webcams whose snapshot gave no picture at Klippy ready
-        self._bad_webcams: Set[str] = set()
-        self._bed_watching = False
-        # The printer's web pages (pushraker.discover.web_pages), for the
-        # page's Printer URL "Fill in"; found at Klippy ready
-        self._web_pages: List[Dict[str, Any]] = []
-        self._status_seen = True     # logged after each Klippy ready
         # Per-job state
         self._job_active = False
         self._job_done_sent = False
@@ -1290,9 +1065,6 @@ class PushNotifications:
         self._pp_pending: set = set()
         self._pp_running: Optional[Tuple[str, Optional[int]]] = None
         self._pp_sent = True
-        # The generic pre-print watch (pushraker.preprint), during a job's
-        # start routine on printers without detection of their own
-        self._ppw: Optional[preprint.PreprintWatch] = None
         self._milestones_sent: Set[int] = set()
         # Print time (which stops while paused) the next status report is
         # due at; None until the job's first status update sets it
@@ -1302,8 +1074,6 @@ class PushNotifications:
         # Print-by-object: the object being printed, the layer each began
         # on, and the objects already reported
         self._by_object = False
-        # When the print job's file was sliced (its header)
-        self._job_sliced: Optional[datetime.datetime] = None
         # Pauses in the print job's file (see _scan_pauses) and the ones
         # already reported, by index
         self._job_pauses: List[Dict[str, Any]] = []
@@ -1323,7 +1093,7 @@ class PushNotifications:
         self._status: Dict[str, Dict[str, Any]] = {
             "print_stats": {}, "virtual_sdcard": {}, "print_task_config": {},
             "exclude_object": {}, "machine_state_manager": {},
-            "idle_timeout": {}, "toolhead": {}, ACE_OBJECT: {}}
+            "idle_timeout": {}, ACE_OBJECT: {}}
         self._cal_busy_at = 0.      # when Klipper was last seen busy
         self._idle_was = ""         # idle_timeout.state last seen
         # Filament loaded / unloaded: last reported filament_exist per
@@ -1332,14 +1102,6 @@ class PushNotifications:
         self._exist_seen: Optional[List[bool]] = None
         self._exist_names: Dict[int, str] = {}
         self._exist_gen = 0
-        # The Snapmaker U1's feeders (filament_feed left/right): each
-        # toolhead's channel_state; loading and unloading from the screen
-        # end in load_finish / unload_finish while filament_exist stays
-        # true (the filament is still in the inlet)
-        self._feeds: List[str] = []
-        self._feed_state: Dict[Tuple[str, str], str] = {}
-        # Last filament change reported per toolhead: (loaded, when)
-        self._fil_said: Dict[int, Tuple[bool, float]] = {}
         # Chamber: the printer's heater_generic objects, whether it has
         # Snapmaker's chamber sensor / purifier / a DragonBreath (found at
         # klippy_ready), and this job's chamber state (see _track_chamber)
@@ -1400,58 +1162,23 @@ class PushNotifications:
                 found = wc.get_webcams()
                 if inspect.isawaitable(found):    # sync in Moonraker 0.9+
                     found = await found
-                chosen = self._chosen_cameras()
                 for name, cam in dict(found).items():
                     if not getattr(cam, "enabled", True):
-                        continue
-                    # A webcam that can't give a picture (an embedded web
-                    # page, or a snapshot address that gave none at Klippy
-                    # ready): not offered, unless already chosen (its
-                    # notifications then say why there's no picture)
-                    if str(name) not in chosen and (
-                            str(getattr(cam, "service", "") or "").lower()
-                            in NO_PICTURE_SERVICES
-                            or str(name) in getattr(self, "_bad_webcams",
-                                                    ())):
                         continue
                     snap = str(getattr(cam, "snapshot_url", "") or "")
                     stream = str(getattr(cam, "stream_url", "") or "")
                     if snap:
                         # Moonraker roots a partial URL on its own default
-                        # host; a local address becomes 127.0.0.1 here
-                        # (Moonraker's convert_local runs `ss`, which some
-                        # printers lack: the Creality Hi)
+                        # host and turns a local address into 127.0.0.1
                         try:
                             snap = await cam.get_snapshot_url(
-                                convert_local=False)
+                                convert_local=True)
                         except Exception:
                             if "://" not in snap:
                                 snap = "http://127.0.0.1/" + snap.lstrip("/")
-                        snap = await self.eventloop.run_in_thread(
-                            discover.local_url, snap)
-                    if not snap and stream:
-                        # No snapshot address: a frame from the stream (an
-                        # MJPEG stream; RTSP, HLS and WebRTC say they can't)
-                        snap = stream if "://" in stream else \
-                            "http://127.0.0.1/" + stream.lstrip("/")
                     cams[str(name)] = {"snapshot": snap, "stream": stream}
         except Exception as e:
             logging.warning("[pushraker] webcams: %s", e)
-        # The printer's own, then camera servers Moonraker doesn't know
-        # (found at Klippy ready): never one Moonraker already has
-        try:
-            extra = dict(self.printer.cameras())
-        except Exception as e:
-            logging.warning("[pushraker] printer cameras: %s", e)
-            extra = {}
-        extra.update(self._found_cams)
-        for name, cam in extra.items():
-            if name in cams or any(
-                    discover.same_url(cam.get("snapshot", ""),
-                                      c.get("snapshot", ""))
-                    for c in cams.values()):
-                continue
-            cams[name] = dict(cam)
         spoolman = ""
         try:
             sm = self.server.lookup_component("spoolman", None)
@@ -1464,14 +1191,7 @@ class PushNotifications:
                           name=self.store.default_name if self.store
                           else self.name,
                           rows_unavailable=self.printer.rows_unavailable,
-                          rows_missing=self.printer.missing_rows(),
-                          ntfy_token=ntfy is None or ntfy.apprise_has_token(),
-                          # The profile's own (the U1) or stock Klipper's
-                          # (printers.Printer.generic_preprint: the Hi)
-                          preprint=bool(self.printer.preprint_calibrations
-                                        or getattr(self.printer,
-                                                   "generic_preprint",
-                                                   False)),
+                          preprint=bool(self.printer.preprint_calibrations),
                           time_methods=[
                               {"id": m, "label": l, "help": h}
                               for m, (l, h) in self._time_methods().items()],
@@ -1483,7 +1203,7 @@ class PushNotifications:
         if self.store is None:
             return
         self.env = await self._env()
-        self.settings = self._own_camera(self.store.load())
+        self.settings = self.store.load()
         try:
             err = cfgmod.stored_error(self.settings, self.env)
         except Exception as e:
@@ -1550,25 +1270,8 @@ class PushNotifications:
 
     async def _view(self) -> Dict[str, Any]:
         assert self.store is not None
-        out = cfgmod.public_view(self.settings, self.env, self._busy(),
-                                 __version__)
-        # What is being sent right now: the file's settings, the ones from
-        # before a change that can't be applied, or nothing (it couldn't
-        # be applied since the start)
-        self._page_meta(out)
-        out["meta"]["sending"] = "nothing" if not self.rows else \
-            "previous" if out["meta"].get("stored_error") else "current"
-        return out
-
-    def _page_meta(self, out: Dict[str, Any]) -> None:
-        """For the page's Printer URL: the printer profile's web page
-        (Printer.web_page) and the web pages found on the machine."""
-        tpl = str(getattr(self.printer, "web_page", "") or "")
-        out["meta"]["web_page"] = {
-            "url": tpl, "name": str(getattr(self.printer, "web_page_name",
-                                            "") or "Web UI")} \
-            if "{host}" in tpl else None
-        out["meta"]["web_pages"] = list(self._web_pages)
+        return cfgmod.public_view(self.settings, self.env, self._busy(),
+                                  __version__)
 
     async def _refresh(self) -> None:
         """Before answering the page: pick up a hand edit (and apply it,
@@ -1579,23 +1282,9 @@ class PushNotifications:
                 await self._reload("file changed")
             else:
                 self.env = await self._env()
-                self.settings = self._own_camera(self.store.load())
+                self.settings = self.store.load()
         else:
             self.env = await self._env()
-
-    def _own_camera(self, s: Dict[str, Any]) -> Dict[str, Any]:
-        """No camera set: the printer's own (its profile's cameras(), e.g.
-        the Creality Hi's "Printer camera"), on a fresh install and
-        whenever it is empty. A camera found on a port is never chosen
-        for the user."""
-        if s and not s.get("camera"):
-            try:
-                own = list(self.printer.cameras())
-            except Exception:
-                own = []
-            if own:
-                s["camera"] = own[0]
-        return s
 
     async def _ep_config(self, web_request: Any) -> Dict[str, Any]:
         assert self.store is not None
@@ -1642,13 +1331,10 @@ class PushNotifications:
                         "check them (server, user name, addresses)")
         try:
             self.store.save(s)
-        except cfgmod.SecretsNotRestored as e:
-            raise cfgmod.ConfigError(f"Could not write the settings: {e}.")
         except OSError as e:
-            # Either file failing leaves both as they were
             raise cfgmod.ConfigError(f"Could not write the settings: {e}. "
                                      "Nothing was saved.")
-        self.settings = self._own_camera(s)
+        self.settings = s
         self._apply_options(opts)
         await self._push_hooks()
         if cfgmod.push_configured(s) and s["provider"] == "gotify":
@@ -1670,235 +1356,6 @@ class PushNotifications:
                 "rows": sorted(self.rows),
                 "cameras": sorted(self.env.cameras),
                 "spoolman": bool(self.env.spoolman_url)}
-
-    async def _ep_backup(self, web_request: Any) -> Dict[str, Any]:
-        """The saved settings as a backup file (no tokens, passwords or
-        webhook URL, unless a download asks for them): for the page to
-        download, or sent as a file by the push service or by email (to
-        the address the page gives), even with notifications off."""
-        assert self.store is not None
-        await self._refresh()
-        args = web_request.get_args()
-        how = str(args.get("how") or "download")
-        s = self.settings
-        now = datetime.datetime.now(self.tz)
-        # Tokens and passwords: only in a download that asks for them,
-        # never in one sent by push or email
-        secrets = how == "download" and args.get("secrets") is True
-        data = cfgmod.backup(s, __version__,
-                             now.isoformat(timespec="seconds"), secrets,
-                             model=self.printer.model(self._hostname))
-        name = cfgmod.backup_name(s, now.strftime("%Y-%m-%d"))
-        if how == "download":
-            if secrets:
-                # They don't otherwise leave the printer: on the record
-                logging.warning("[pushraker] ⚠️ a backup with tokens and "
-                                "passwords was downloaded")
-                self._console("⚠️ pushraker: a backup with tokens and "
-                              "passwords was downloaded")
-            return {"name": name, "backup": data}
-        if how == "restore":
-            return await self._restore_view(args.get("backup"))
-        if how == "inspect":
-            # The Restore dialog, before Restore: what doesn't fit here
-            return {"notes": cfgmod.restore_notes(
-                args.get("backup"), __version__,
-                self.printer.model(self._hostname),
-                sorted(self.printer.missing_rows()))}
-        if how == "reset":
-            # Reset…: the chosen sections as a new install has them, for
-            # the page to load; Save & Apply saves it and drops the secrets
-            try:
-                fresh = cfgmod.defaults(self.store.default_name,
-                                        self.store.unavailable)
-                out, forget, keys = cfgmod.reset(s, fresh,
-                                                 args.get("sections"))
-            except cfgmod.ConfigError as e:
-                raise self.server.error(str(e), 400)
-            view = cfgmod.public_view(out, self.env, self._busy(),
-                                      __version__)
-            view["meta"]["sending"] = (await self._view())["meta"]["sending"]
-            # keys: the page keeps what else was changed on it and unsaved
-            return {"view": view, "forget": forget, "keys": keys}
-        if how in ("notification", "notification_inspect",
-                   "notification_import"):
-            return await self._ep_notification(how, args)
-        if how not in ("push", "email"):
-            raise self.server.error("Invalid request", 400)
-        return await self._send_file(
-            how, name, data, f"💾 {s['name']} settings backup",
-            "pushraker settings backup. Not included: tokens, passwords, "
-            "webhook URLs.", str(args.get("to") or "").strip(), "backup")
-
-    async def _ep_notification(self, how: str, args: Dict[str, Any]
-                               ) -> Dict[str, Any]:
-        """One notification in a file. notification: the editor's
-        notification as a file ({kind, id or name, notification}), checked
-        like a save and turned into the file, downloaded or sent (via:
-        download, push, email). notification_inspect: what the Import
-        dialog says about a file. notification_import: a file's
-        notification, checked, for the page to put in place (Save & Apply
-        saves it)."""
-        s = self.settings
-        model = self.printer.model(self._hostname)
-        file = args.get("file") if how != "notification" else \
-            args.get("notification")
-        try:
-            kind, ident, n, unused = cfgmod.notification_read(file)
-            values = cfgmod.notification_values(
-                s, kind, ident, n, self.env, set(self.env.cameras))
-        except cfgmod.ConfigError as e:
-            raise self.server.error(str(e), 400)
-        if how == "notification_import":
-            return dict(values, kind=kind, id=ident)
-        label = cfgmod.TEMPLATE[ident][2] if kind == "stock" else ident
-        if how == "notification_inspect":
-            notes = cfgmod.import_notes(file, __version__, model)
-            if kind == "stock" and ident in (
-                    set(self.printer.rows_unavailable)
-                    | self.printer.missing_rows()):
-                notes.append(cfgmod.IMPORT_NOTES["hidden"].format(
-                    name=label))
-            texts = [n.get("title", ""), n.get("contents", "")]
-            if kind == "custom" and n.get("when"):
-                texts.append("{{ " + str(n["when"]) + " }}")
-            missing, unknown = pvalues.check(
-                pvalues.referenced(str(t) for t in texts),
-                PROFILE_KEYS.get(self.printer.name, "generic"),
-                self.printer.objects)
-            if missing:
-                notes.append(cfgmod.IMPORT_NOTES["missing"].format(
-                    values=", ".join(missing)))
-            if unknown:
-                notes.append(cfgmod.IMPORT_NOTES["unknown"].format(
-                    values=", ".join(unknown)))
-            if unused:
-                notes.append(cfgmod.IMPORT_NOTES["unused"].format(
-                    keys=", ".join(unused)))
-            return {"kind": kind, "id": ident, "label": label,
-                    "notes": notes}
-        data = cfgmod.notification_export(values, kind, ident, __version__,
-                                          model)
-        name = cfgmod.notification_file_name(kind, ident)
-        via = str(args.get("via") or "download")
-        if via == "download":
-            return {"name": name, "file": data}
-        if via not in ("push", "email"):
-            raise self.server.error("Invalid request", 400)
-        return await self._send_file(
-            via, name, data, f"🔔 {s['name']} notification: {label}",
-            f"pushraker notification \"{label}\". Import it on the "
-            "settings page (Custom notifications: Import…).",
-            str(args.get("to") or "").strip(), "notification")
-
-    async def _send_file(self, how: str, name: str, data: Any, title: str,
-                         body: str, to: str, what_kind: str
-                         ) -> Dict[str, Any]:
-        """A JSON file sent by the push service or by email (to `to`), with
-        the saved settings, even with notifications off."""
-        s = self.settings
-        now = datetime.datetime.now(self.tz)
-        targets = cfgmod.backup_targets(s)
-        on = dict(s, enabled=True, push_enabled=True, email_enabled=True)
-        if how == "push":
-            if targets["push"]:
-                raise self.server.error(targets["push"], 400)
-            url = cfgmod.row_url(on, "test", "default", self.env)
-            what = targets["push_label"]
-        else:
-            if targets["email"]:
-                raise self.server.error(targets["email"], 400)
-            if not cfgmod.RX_EMAIL.fullmatch(to):
-                raise self.server.error("Enter an email address to send "
-                                        f"the {what_kind} to", 400)
-            url = cfgmod.email_url(dict(on, email_to=to), inline=False)
-            what = to
-            if email_html is not None:
-                body = email_html.render(title, body, [], "info", None,
-                                         now, s["name"])
-        ap = apprise.Apprise()
-        if not ap.add(url):
-            raise self.server.error("Could not build an address from the "
-                                    "saved settings", 400)
-        for srv in ap:
-            srv.socket_connect_timeout = max(
-                srv.socket_connect_timeout, SEND_CONNECT_TIMEOUT)
-            srv.socket_read_timeout = max(
-                srv.socket_read_timeout, SEND_READ_TIMEOUT)
-        channel = "email" if how == "email" else url.split(":", 1)[0]
-        tmp = tempfile.mkdtemp(prefix=f"pushraker-{what_kind}-")
-        try:
-            path = os.path.join(tmp, name)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            self.apprise_log.take(channel)
-            ok = await ap.async_notify(title=title, body=body, attach=path)
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-        if not ok:
-            why = short_cause(self.apprise_log.take(channel))
-            raise self.server.error(f"Not sent to {what}"
-                                    + (f" ({why})" if why else ""), 502)
-        return {"name": name, "sent": what}
-
-    async def _restore_view(self, backup: Any) -> Dict[str, Any]:
-        """A backup file's settings for the page to load (and save with
-        Save & Apply): validated like a save, so nothing in a file gets
-        onto the page unchecked; the tokens and passwords stay the ones
-        stored here. A backup that needs a token this printer doesn't
-        have (none, or one for another service) loads all the same,
-        switched off for the check: saving asks for the token."""
-        try:
-            settings = cfgmod.backup_settings(backup)
-            data = {k: v for k, v in settings.items()
-                    if k not in cfgmod.SECRET_FIELDS
-                    + ("secret_for", "email_password_for", "meta")
-                    and not k.startswith("has_")}
-            # Cameras this printer doesn't have (the backup is from another
-            # one): the camera chosen here stays, default and per row
-            cams = set(self.env.cameras)
-            if data.get("camera") and data["camera"] not in cams:
-                data["camera"] = self.settings.get("camera", "")
-            here_tpl = self.settings.get("templates") or {}
-            for key, tpl in (data.get("templates") or {}).items():
-                if isinstance(tpl, dict) and tpl.get("camera") \
-                        and tpl["camera"] not in cams:
-                    mine = here_tpl.get(key) if isinstance(
-                        here_tpl.get(key), dict) else {}
-                    tpl["camera"] = mine.get("camera", "")
-            # Another printer model's backup: its Printer URL is that
-            # printer's address; the one here stays (same model: restored)
-            other = cfgmod.other_model(backup,
-                                       self.printer.model(self._hostname))
-            if other:
-                data["printer_url"] = self.settings.get("printer_url", "")
-            # Tokens and passwords the file has: as if typed into the page
-            secrets = cfgmod.backup_secrets(backup)
-            data.update(secrets)
-            off = dict(data, enabled=False)
-            bare = dict(self.settings, secret_for="", email_password_for="",
-                        **{k: "" for k in cfgmod.SECRET_FIELDS})
-            s = None
-            for d, cur in ((data, self.settings), (off, self.settings),
-                           (off, bare)):
-                try:
-                    s = cfgmod.validate(d, cur, self.env)
-                    break
-                except cfgmod.ConfigError:
-                    if cur is bare:
-                        raise
-            assert s is not None
-            s["enabled"] = bool(data.get("enabled", s["enabled"]))
-        except cfgmod.ConfigError as e:
-            raise self.server.error(f"Can't restore this backup: {e}", 400)
-        out = cfgmod.public_view(s, self.env, self._busy(), __version__)
-        out["meta"]["sending"] = (await self._view())["meta"]["sending"]
-        self._page_meta(out)
-        # Another model's backup and no Printer URL here: the page fills in
-        # this printer's own web page (Printer.web_page)
-        out["meta"]["other_model"] = bool(other)
-        # The page puts them in its fields: Save & Apply stores them
-        return {"view": out, "secrets": secrets}
 
     async def _ep_test(self, web_request: Any) -> Dict[str, Any]:
         """Send a test notification with the settings the page holds (not
@@ -1960,24 +1417,12 @@ class PushNotifications:
                          "Gotify.")
         cam = cfgmod.camera(s, env)
         path = None
-        problem: Optional[str] = None     # the camera's line (error, age)
         if cam and cam.get("snapshot"):
             path = await self.eventloop.run_in_thread(
                 self._fetch_snapshot_sync, True, cam["snapshot"])
-            if getattr(path, "why", ""):
-                lines.append(CAMERA_ERROR.format(why=path.why))
-                body = with_camera_error(body, path)
-                problem = path
-                path = path or None
-            else:
-                lines.append("Attaching a camera snapshot" if path else
-                             "Camera snapshot unavailable; sending "
-                             "without an image")
-                if getattr(path, "note", ""):
-                    # An old picture: how old, in the text and the console
-                    lines.append(path.note)
-                    body = with_camera_error(body, path)
-                    problem = path
+            lines.append("Attaching a camera snapshot" if path else
+                         "Camera snapshot unavailable; sending without "
+                         "an image")
         elif s["camera"]:
             lines.append(f'No webcam named "{s["camera"]}" in Moonraker; '
                          "sending without an image")
@@ -1985,11 +1430,6 @@ class PushNotifications:
         t0 = time.monotonic()
         try:
             for target, url, text in dests:
-                if text is not None:
-                    # Push and webhook texts were made before the camera:
-                    # its line goes at their end too (email is made below,
-                    # from `body`, which has it)
-                    text = with_camera_error(text, problem)
                 if text is None and email_html is not None:
                     text = email_html.render(
                         title, body, btns, "info",
@@ -2008,8 +1448,7 @@ class PushNotifications:
                         srv.socket_read_timeout, SEND_READ_TIMEOUT)
                 channel = "email" if url.startswith("mailto") else (
                     "webhook" if url.startswith("json") else
-                    {"pntfy": "ntfy", "ntfys": "ntfy"}.get(
-                        url.split(":", 1)[0], url.split(":", 1)[0]))
+                    url.split(":", 1)[0])
                 self.apprise_log.take(channel)
                 lines.append(f"Sending to {target}...")
                 ok = await ap.async_notify(
@@ -2067,7 +1506,6 @@ class PushNotifications:
         tokens: List[tp.Token] = []
         need: Dict[str, Any] = {}
         all_exts = False
-        current: Optional[str] = None
         for text in texts:
             for obj, fields in jj.printer_needs(text).items():
                 if obj == "*":
@@ -2081,26 +1519,13 @@ class PushNotifications:
                 if root == "job" and path:
                     tokens.append(tp.Token("", tp.JOB, list(path), ""))
                 elif root == "extruders":
-                    path = list(path)
-                    # extruders.current: the toolhead in use, as itself
-                    if path and path[0] == "current":
-                        if current is None:
-                            current = await self._current_extruder()
-                        path[0] = current
                     if not path:
                         all_exts = True
                     elif RX_EXTRUDER.fullmatch(path[0]):
                         if len(path) > 1:
                             tokens.append(tp.Token("", path[0], path[1:], ""))
-                            # Klipper's own fields of it (temperature…)
-                            if path[1] not in EXTRUDER_ADDED:
-                                cur = need.setdefault(path[0], [])
-                                if cur is not None and path[1] not in cur:
-                                    cur.append(path[1])
                         else:
-                            need[path[0]] = None
-                            tokens.append(tp.Token("", path[0],
-                                                   ["filament", "name"], ""))
+                            all_exts = True
                     else:
                         tokens.append(tp.Token("", tp.EXTRUDERS, path, ""))
         exts = list(self.printer.extruders)
@@ -2124,63 +1549,16 @@ class PushNotifications:
             except Exception as e:
                 logging.warning("[pushraker] template query: %s", e)
         resolve = await self._resolver(tokens, state, sample)
-        # event.time: when the notification was set off (_send marks it)
-        ev = dict(event or {})
-        at = ev.pop("_at", None) or time.time()
-        ev = jj.prune(ev)
-        ev["time"] = self._time_view(at)
         return {"printer": state,
                 "job": self._job_view(resolve, sample),
-                "extruders": self._extruders_view(resolve, state, sample,
-                                                  current),
-                "event": ev,
-                "machine": self._machine(),
-                "pushraker": self._pushraker_view()}
-
-    # event.time: when the notification was set off, in its time zone;
-    # {{ event.time }} is the clock time, its parts are fields
-    TIME_FIELDS = ("hour", "minute", "date", "day", "month", "month_name",
-                   "year", "weekday", "weekday_number", "timezone",
-                   "timestamp")
-
-    def _time_values(self, when: Optional[float] = None) -> Dict[str, Any]:
-        tz = self._zone()
-        when = time.time() if when is None else when
-        at = datetime.datetime.fromtimestamp(when, tz) if tz else \
-            datetime.datetime.fromtimestamp(when)
-        return {"clock": tp.Clock(at, 0), "hour": at.hour,
-                "minute": at.minute, "date": at.strftime("%Y-%m-%d"),
-                "day": at.day, "month": at.month,
-                "month_name": at.strftime("%B"), "year": at.year,
-                "weekday": at.strftime("%A"),
-                "weekday_number": at.isoweekday(),
-                "timezone": str(tz) if tz else None,
-                "timestamp": int(when)}
-
-    def _time_view(self, when: float, name: str = "event.time") -> jj.View:
-        """event.time (or another time) at `when`, read when the template
-        reads it, so {% set timezone %} applies."""
-        def look(path: List[str]) -> Any:
-            if path == ["time"]:
-                return self._time_values(when)["clock"]
-            if len(path) == 2 and path[1] in self.TIME_FIELDS:
-                return self._time_values(when)[path[1]]
-            return None
-        return jj.View(look, lambda p: p == ["time"], lambda p: None,
-                       ["time"], name)
+                "extruders": self._extruders_view(resolve, state, sample),
+                "event": jj.prune(event or {}),
+                "machine": self._machine()}
 
     def _job_view(self, resolve: Any, sample: bool) -> jj.View:
         def look(path: List[str]) -> Any:
             if not path:
                 return None
-            # job.state: Klipper's (printing, paused, complete...); job.pause:
-            # the pause now, planned in the file or not
-            if path == ["state"]:
-                return "printing" if sample else \
-                    self._ps_state() or None
-            if path[0] == "pause" and len(path) == 2:
-                p = SAMPLE_PAUSE if sample else self._pause_now
-                return (p or {}).get(path[1])
             return resolve(tp.Token("", tp.JOB, self._job_path(path), ""))
 
         def branch(path: List[str]) -> bool:
@@ -2204,7 +1582,7 @@ class PushNotifications:
             if path == ["pauses"]:
                 return list((base.get("pauses") or {}).get("items") or [])
             return list(base.get("extruders") or [])
-        return self._live_view(look, branch, items, "job")
+        return jj.View(look, branch, items, [], "job")
 
     @staticmethod
     def _job_path(path: List[str]) -> List[str]:
@@ -2215,36 +1593,13 @@ class PushNotifications:
                 return ["queue", m.group(1)] + path[2:]
         return list(path)
 
-    async def _current_extruder(self) -> str:
-        """The toolhead in use (Klipper's toolhead.extruder)."""
-        try:
-            got = await asyncio.wait_for(
-                self._query({"toolhead": ["extruder"]}), DATA_QUERY_TIMEOUT)
-            name = (got.get("toolhead") or {}).get("extruder")
-        except Exception:
-            name = None
-        return name if name and RX_EXTRUDER.fullmatch(str(name)) \
-            else "extruder"
-
     def _extruders_view(self, resolve: Any, state: Dict[str, Any],
-                        sample: bool, current: Optional[str] = None
-                        ) -> jj.View:
+                        sample: bool) -> jj.View:
         exts = list(self.printer.extruders)
 
-        def here(path: List[str]) -> List[str]:
-            """extruders.current.* as the toolhead it is."""
-            if path and path[0] == "current":
-                return [current or "extruder"] + list(path[1:])
-            return path
-
         def look(path: List[str]) -> Any:
-            path = here(path)
             if not path:
                 return None
-            if len(path) > 1 and RX_EXTRUDER.fullmatch(path[0]) and \
-                    path[1] not in EXTRUDER_ADDED:
-                return (state.get(path[0]) or {}).get(path[1]) \
-                    if len(path) == 2 else None
             if RX_EXTRUDER.fullmatch(path[0]):
                 return resolve(tp.Token("", path[0], path[1:], "")) \
                     if len(path) > 1 else self._ext_name(
@@ -2252,7 +1607,6 @@ class PushNotifications:
             return resolve(tp.Token("", tp.EXTRUDERS, path, ""))
 
         def branch(path: List[str]) -> bool:
-            path = here(path)
             return bool(path) and RX_EXTRUDER.fullmatch(path[0]) is not None \
                 and (len(path) == 1 or path[1:] == ["filament"])
 
@@ -2270,7 +1624,7 @@ class PushNotifications:
                 d["name"] = self._ext_name(ch)
                 out.append(d)
             return out
-        return self._live_view(look, branch, items, "extruders")
+        return jj.View(look, branch, items, [], "extruders")
 
     def _machine(self) -> Dict[str, Any]:
         import socket
@@ -2288,9 +1642,7 @@ class PushNotifications:
             moonraker = self.server.get_app_args().get("software_version")
         except Exception:
             moonraker = None
-        out = {"name": self.name,
-               # The printer's model as backups record it ("Creality Hi")
-               "model": self.printer.model(self._hostname),
+        out = {"name": self.name, "model": self.printer.name,
                "hostname": hostname or None, "ip": host or None,
                "pushraker_version": __version__,
                "moonraker_version": moonraker,
@@ -2310,67 +1662,16 @@ class PushNotifications:
     async def _render(self, text: str, ctx: Dict[str, Any]) -> str:
         return (await self._render_vars(text, ctx))[0]
 
-    def _zone(self) -> Optional[datetime.tzinfo]:
-        """The time zone for ETAs: a template's own, or the setting."""
-        return getattr(self._tz_here, "tz", None) or self.tz
-
-    def _render_in_zone(self, text: str, ctx: Dict[str, Any],
-                        tz: Optional[datetime.tzinfo],
-                        loop: Optional[asyncio.AbstractEventLoop] = None,
-                        loop_thread: Optional[int] = None
-                        ) -> Tuple[str, Dict[str, Any]]:
-        self._tz_here.tz = tz
-        # Off the loop: live values are read on it (_live)
-        self._tz_here.loop = loop if loop_thread is not None and \
-            threading.get_ident() != loop_thread else None
-        try:
-            return jj.render_vars(text, ctx)
-        finally:
-            self._tz_here.tz = None
-            self._tz_here.loop = None
-
-    def _live(self, fn: Callable[..., Any], *args: Any) -> Any:
-        """A live value (the print job's, the toolheads'), read on
-        Moonraker's event loop while a template renders in a thread, so it
-        never sees the printer's state half updated. In the template's
-        time zone."""
-        loop = getattr(self._tz_here, "loop", None)
-        if loop is None:
-            return fn(*args)
-        tz = getattr(self._tz_here, "tz", None)
-        fut: "concurrent.futures.Future[Any]" = concurrent.futures.Future()
-
-        def run() -> None:
-            before = getattr(self._tz_here, "tz", None)
-            self._tz_here.tz = tz
-            try:
-                fut.set_result(fn(*args))
-            except BaseException as e:
-                fut.set_exception(e)
-            finally:
-                self._tz_here.tz = before
-        loop.call_soon_threadsafe(run)
-        return fut.result(timeout=TEMPLATE_TIMEOUT)
-
-    def _live_view(self, look: Callable[..., Any], branch: Callable[..., Any],
-                   items: Callable[..., Any], name: str) -> jj.View:
-        return jj.View(lambda p: self._live(look, p),
-                       lambda p: self._live(branch, p),
-                       lambda p: self._live(items, p), [], name)
-
-    async def _render_vars(self, text: str, ctx: Dict[str, Any],
-                           tz: Optional[datetime.tzinfo] = None
+    async def _render_vars(self, text: str, ctx: Dict[str, Any]
                            ) -> Tuple[str, Dict[str, Any]]:
         """Rendered off Moonraker's event loop, with a time limit: a
         template that loops for long doesn't hold up the printer. Also
         what the template set ({% set priority = ... %})."""
         try:
             return await asyncio.wait_for(self.eventloop.run_in_thread(
-                self._render_in_zone, text, ctx, tz,
-                asyncio.get_running_loop(), threading.get_ident()),
-                TEMPLATE_TIMEOUT)
+                jj.render_vars, text, ctx), TEMPLATE_TIMEOUT)
         except asyncio.TimeoutError:
-            raise jj.TemplateTimeout(
+            raise jj.TemplateError(
                 f"took longer than {TEMPLATE_TIMEOUT:.0f} seconds") from None
 
     @staticmethod
@@ -2386,31 +1687,12 @@ class PushNotifications:
         the row's)."""
         t, tv = await self._render_vars(title, ctx)
         c, cv = await self._render_vars(contents, ctx)
-        # {% set timezone = "Europe/Warsaw" %}: rendered again, with the
-        # ETAs in that time zone
-        zone = str(cv.get("timezone", tv.get("timezone", "")) or "").strip()
-        if zone:
-            tz = None
-            if cfgmod.RX_TIMEZONE.fullmatch(zone):
-                try:
-                    from zoneinfo import ZoneInfo
-                    tz = ZoneInfo(zone)
-                except Exception:
-                    tz = None
-            if tz is None:
-                logging.info("[pushraker] no such time zone: %r", zone)
-            else:
-                t, tv = await self._render_vars(title, ctx, tz)
-                c, cv = await self._render_vars(contents, ctx, tz)
         sets: Dict[str, str] = {}
         for name, allowed in (("priority", PRIORITY_NAMES),
                               ("image", tuple(IMAGE_SET))):
             v = str(cv.get(name, tv.get(name, "")) or "").strip().lower()
             if v in allowed:
                 sets[name] = v
-        topic = str(cv.get("topic", tv.get("topic", "")) or "").strip()
-        if cfgmod.RX_TOPIC.fullmatch(topic):
-            sets["topic"] = topic
         return self._one_line(t), c, sets
 
     async def _resolver(self, tokens: Sequence[tp.Token],
@@ -2481,29 +1763,16 @@ class PushNotifications:
         if spool:
             fil["name"] = self._spool_name(spool) or fil.get("name")
             fil["grams_left"] = self._remaining(spool)
-            fil["grams_full"] = self._full_weight(spool)
-            fil["percent_left"] = self._percent(fil["grams_left"],
-                                                fil["grams_full"])
         out = {"filament": fil or None, "slot": vals.get("slot")}
         if sample and not fil:
             name, mat, vendor, colour, _, _ = \
                 SAMPLE_FILAMENTS[ch % len(SAMPLE_FILAMENTS)]
             out["filament"] = {"name": name, "material": mat,
                                "vendor": vendor, "color": colour,
-                               "grams_left": 640., "grams_full": 1000.,
-                               "percent_left": 64.}
+                               "grams_left": 640.}
         if sample and out["slot"] is None and self._ace_on:
             out["slot"] = f"ACE 1 slot {ch + 1}"
         return out
-
-    @staticmethod
-    def _percent(left: Optional[float], full: Optional[float]
-                 ) -> Optional[float]:
-        """What's left of the spool, 0 to 100 (one decimal); None when its
-        full weight isn't known."""
-        if left is None or not full:
-            return None
-        return round(max(0., min(100., 100. * left / full)), 1)
 
     def _printer_context(self) -> Dict[str, Any]:
         """What the harness sees when it adds its values."""
@@ -2586,13 +1855,10 @@ class PushNotifications:
             if m:
                 items = (base.get("pauses") or {}).get("items") or []
                 n = int(m.group(1))
-                # The sample job has any pause asked for, like its filaments
-                it = items[n - 1] if 0 < n <= len(items) else (
-                    self._sample_pause(n) if sample and not active and n > 0
-                    else None)
-                if it is None:
+                if not 0 < n <= len(items):
                     return None
-                return tp.dig(it, rest) if rest else it.get("layer")
+                return tp.dig(items[n - 1], rest) if rest else \
+                    items[n - 1].get("layer")
             m = re.fullmatch(r"filament(\d+)", head)
             if m:
                 f = filament(int(m.group(1)))
@@ -2616,46 +1882,12 @@ class PushNotifications:
         # The printer's clock runs on UTC: an ETA needs the time zone
         # setting (the page fills it from the browser). The preview's
         # sample shows one anyway.
-        tz = self._zone()
-        if left is None or (tz is None and not sample):
+        if left is None or (self.tz is None and not sample):
             return None
-        now = datetime.datetime.now(tz) if tz else \
+        now = datetime.datetime.now(self.tz) if self.tz else \
             datetime.datetime.now()
         at = now + datetime.timedelta(seconds=max(0., left))
         return tp.Clock(at, (at.date() - now.date()).days)
-
-    def _clock_at(self, at: Optional[Any],
-                  sample: bool = False) -> Optional[tp.Clock]:
-        """A moment as a clock time in the time zone: a timestamp, or a
-        datetime (one without a zone is shown as written). The preview's
-        sample shows one without the setting too."""
-        if at is None:
-            return None
-        tz = self._zone()
-        if isinstance(at, datetime.datetime) and at.tzinfo is None:
-            today = (datetime.datetime.now(tz) if tz
-                     else datetime.datetime.now()).date()
-            return tp.Clock(at, (at.date() - today).days)
-        if tz is None and not sample:
-            return None     # the printer's clock is UTC: needs the setting
-        moment = at.astimezone(tz) if isinstance(at, datetime.datetime) \
-            else datetime.datetime.fromtimestamp(float(at), tz)
-        now = datetime.datetime.now(tz) if tz else datetime.datetime.now()
-        return tp.Clock(moment, (moment.date() - now.date()).days)
-
-    def _started_at(self) -> Optional[float]:
-        """When the print job was started: Moonraker's job history, else
-        the print job's total time (pauses included) back from now."""
-        try:
-            hist = self.server.lookup_component("history", None)
-            start = getattr(getattr(hist, "current_job", None),
-                            "start_time", None)
-            if start:
-                return float(start)
-        except Exception:
-            pass
-        total = self._status["print_stats"].get("total_duration")
-        return time.time() - float(total) if total else None
 
     def _job_live(self) -> Dict[str, Any]:
         info = self._status["print_stats"].get("info") or {}
@@ -2673,9 +1905,7 @@ class PushNotifications:
             "time": dict(self._times(
                 {m: self._left_seconds(m) for m in self._time_methods()},
                 self._left_seconds(self._time_method()), pd),
-                estimated=self._dur(self._estimated_time(filename) or None),
-                started=self._clock_at(self._started_at()),
-                sliced=self._clock_at(self._job_sliced)),
+                estimated=self._dur(self._estimated_time(filename) or None)),
             "filaments": fils,
             "pauses": self._pauses_values(self._job_pauses),
             "objects": self._objects_values(),
@@ -2748,13 +1978,7 @@ class PushNotifications:
         secs = sum(float(i["time"]) for i in items if i.get("time"))
         grams = [i["grams"] for i in items if i.get("grams")]
         meters = [i["meters"] for i in items if i.get("meters")]
-        mats: List[str] = []
-        for i in items:
-            for m in i.get("materials") or []:
-                if m not in mats:
-                    mats.append(m)
         return {"remaining": len(items), "items": items,
-                "materials": mats or None,
                 "list": [i["name"] for i in items] or None,
                 "time": self._dur(secs) if items else None,
                 "eta": self._eta((left or 0.) + secs, sample) if items
@@ -2771,7 +1995,7 @@ class PushNotifications:
         for f in self._queue_files(filename):
             try:
                 fm = self.server.lookup_component("file_manager")
-                meta = self._meta(f, fm)
+                meta = fm.get_metadata_storage().get(f, {}) or {}
             except Exception:
                 meta = {}
             secs = float(meta.get("estimated_time") or 0.)
@@ -2797,11 +2021,6 @@ class PushNotifications:
             files = files[1:]
         return files
 
-    @staticmethod
-    def _sample_pause(n: int) -> Dict[str, Any]:
-        return {"layer": 42 + 30 * (n - 1), "message": "Insert the magnets",
-                "kind": "filament change"}
-
     def _job_sample(self) -> Dict[str, Any]:
         methods = self._time_methods()
         # Each method a little off the others, as on a real print
@@ -2818,19 +2037,12 @@ class PushNotifications:
                 "layer": 120, "layers": 285, "plate": "Textured PEI Plate",
                 "queue": self._queue_summary(queue, SAMPLE_LEFT, sample=True),
                 "preprint": ["Bed levelling", "Flow calibration"],
-                "pauses": self._pauses_values([self._sample_pause(1)]),
-                "objects": {"count": 3, "names": ["Base", "Lid", "Hinge"],
-                            "current": "Lid", "by_object": True},
+                "pauses": self._pauses_values([
+                    {"layer": 42, "message": "Insert the magnets",
+                     "kind": "filament change"}]),
                 "time": dict(self._times(spread, SAMPLE_LEFT,
                                          18 * 3600 + 51 * 60, sample=True),
-                             estimated=self._dur(46 * 3600 + 3 * 60),
-                             started=self._clock_at(
-                                 time.time() - (18 * 3600 + 51 * 60), True),
-                             sliced=self._clock_at(datetime.datetime.now(
-                                 self._zone()).replace(
-                                     hour=22, minute=40, second=0,
-                                     microsecond=0, tzinfo=None)
-                                 - datetime.timedelta(days=1))),
+                             estimated=self._dur(46 * 3600 + 3 * 60)),
                 "filaments": fils,
                 "extruders": sorted({f["extruder"] for f in fils},
                                     key=lambda e: self._ext_index(e) or 0)}
@@ -2982,7 +2194,6 @@ class PushNotifications:
             placed.add(obj)
         if heads:
             heads.insert(0, self._extruders_node(exts, state, heads))
-            heads.insert(1, self._current_node(exts, state, heads[1:]))
         # Fans
         fans = []
         for obj in objs:
@@ -3024,109 +2235,14 @@ class PushNotifications:
             # What the notification can also have, for the tree (the
             # preview shows the plain case)
             event.update(SAMPLE_EXTRA.get(key, {}))
-            tv = self._time_values()
-            parts = self._value_tree("event.time", {
-                k: v for k, v in tv.items() if k != "clock"})
             cats.insert(0, {"id": "event", "label": "⚡ This notification",
                             "hint": "event", "info": "What this notification is about. The "
                             "preview shows a sample.", "guide": "event",
-                            "children": self._value_tree("event", event) + [{
-                                "name": "time", "expr": "event.time",
-                                "hint": "🕐 when it was set off",
-                                "info": "{{ event.time }}: the clock time, in "
-                                "its time zone. weekday_number: 1 Monday to "
-                                "7 Sunday; timestamp: Unix seconds.",
-                                "formats": tp.format_options(tv["clock"]),
-                                "children": parts}]})
-        cats.insert(len(cats) - 1, {
-            "id": "pushraker", "label": "📣 pushraker",
-            "info": "pushraker's settings, and what each notification sent "
-            "since pushraker started (Moonraker restarting resets them).",
-            "guide": "pushraker-values", "children": self._pushraker_tree()})
+                            "children": self._value_tree("event", event)})
         cats.insert(len(cats) - 1, {"id": "machine", "label": "🖥️ Machine",
                      "children": self._value_tree(
                          "machine", jj.prune(self._machine()))})
         return {"categories": [c for c in cats if c["children"]]}
-
-    def _pushraker_tree(self) -> List[Dict[str, Any]]:
-        """pushraker.* for the Objects pane."""
-        def leaf(expr: str, hint: str = "", info: str = "",
-                 kids: Optional[List[Dict[str, Any]]] = None
-                 ) -> Dict[str, Any]:
-            out: Dict[str, Any] = {"name": expr.rsplit(".", 1)[-1],
-                                   "expr": expr}
-            if hint:
-                out["hint"] = hint
-            if info:
-                out["info"] = info
-            if kids:
-                out["children"] = kids
-            return out
-
-        def fired(p: str) -> List[Dict[str, Any]]:
-            return [
-                leaf(f"{p}.fired", "yes / no", "Sent since pushraker "
-                     "started.", [
-                         leaf(f"{p}.fired.time", "🕐 when",
-                              "The last time it was sent; .hour, .date… "
-                              "as in event.time."),
-                         leaf(f"{p}.fired.ago", "seconds since")]),
-                leaf(f"{p}.count", "times sent"),
-                leaf(f"{p}.failed", "yes / no",
-                     "The last one didn't get through.", [
-                         leaf(f"{p}.failed.count", "times it didn't")])]
-
-        def one(p: str, hint: str, custom: bool = False
-                ) -> Dict[str, Any]:
-            kids = [leaf(f"{p}.enabled", "push or email on"),
-                    leaf(f"{p}.push", "yes / no"),
-                    leaf(f"{p}.email", "yes / no"),
-                    leaf(f"{p}.priority"),
-                    leaf(f"{p}.image", "render, camera, graphic, none"),
-                    leaf(f"{p}.camera")] + fired(p) + [
-                leaf(f"{p}.job_count", "times sent this print job")]
-            if custom:
-                kids += [leaf(f"{p}.when", "the condition", "", [
-                    leaf(f"{p}.when.state", "yes / no",
-                         "True or False when last evaluated.")]),
-                    leaf(f"{p}.evaluate", "poll, layer, tool…")]
-            return leaf(p, hint, "", kids)
-
-        s = self.settings or {}
-        labels = {r[0]: r[1] for r in cfgmod.ROWS}
-        rows = [one(f"pushraker.{r}", labels.get(r, ""))
-                for r in s.get("rows") or {}]
-        custom = [one(f"pushraker.{c['name']}", "custom", True)
-                  for c in s.get("custom") or []]
-        return [
-            leaf("pushraker.enabled", "yes / no", "The main switch."),
-            leaf("pushraker.version"),
-            leaf("pushraker.started", "🕐 when it started", "", [
-                leaf("pushraker.started.ago", "seconds since")]),
-            leaf("pushraker.push", "", "", [
-                leaf("pushraker.push.enabled", "yes / no"),
-                leaf("pushraker.push.service", "ntfy, Telegram…"),
-                leaf("pushraker.push.server"),
-                leaf("pushraker.push.topic")]),
-            leaf("pushraker.email", "", "", [
-                leaf("pushraker.email.enabled", "yes / no"),
-                leaf("pushraker.email.to", "addresses")]),
-            leaf("pushraker.last", "the last notification sent",
-                 "Its name, and the same as any notification's: "
-                 ".fired.time, .fired.ago, .failed…",
-                 [leaf("pushraker.last.name"),
-                  leaf("pushraker.last.fired", "yes / no", "", [
-                      leaf("pushraker.last.fired.time", "🕐 when"),
-                      leaf("pushraker.last.fired.ago", "seconds since")]),
-                  leaf("pushraker.last.failed", "yes / no")]),
-            leaf("pushraker.failed", "yes / no",
-                 "The last notification sent didn't get through.", [
-                     leaf("pushraker.failed.count",
-                          "all that didn't")]),
-            {"name": "notifications", "hint": "by name",
-             "children": rows},
-        ] + ([{"name": "custom notifications", "hint": "by name",
-               "children": custom}] if custom else [])
 
     def _value_tree(self, prefix: str, value: Dict[str, Any]
                     ) -> List[Dict[str, Any]]:
@@ -3163,30 +2279,6 @@ class PushNotifications:
             else:
                 out.append(base + k)
         return out
-
-    def _current_node(self, exts: Sequence[str], state: Dict[str, Any],
-                      heads: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """extruders.current: the toolhead in use, with all its values (a
-        copy of its entries, named through current)."""
-        active = str((state.get("toolhead") or {}).get("extruder") or "")
-        i = exts.index(active) if active in exts else 0
-        src = heads[i]
-
-        def rename(n: Dict[str, Any]) -> Dict[str, Any]:
-            out = dict(n)
-            if out.get("expr"):
-                out["expr"] = re.sub(
-                    rf"^(?:extruders\.{exts[i]}|printer\.{exts[i]})"
-                    r"(?=\.|$)", "extruders.current", out["expr"])
-            if out.get("children"):
-                out["children"] = [rename(c) for c in out["children"]]
-            return out
-        return tp.node("current",
-                       info="The toolhead in use, with all its values: "
-                       "extruders.current.filament.material is the "
-                       "material in whichever toolhead is printing.",
-                       children=[rename(c) for c in
-                                 src.get("children") or []])
 
     def _extruders_node(self, exts: Sequence[str], state: Dict[str, Any],
                         heads: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -3279,11 +2371,6 @@ class PushNotifications:
                 leaf("time.elapsed", info="Print time; stops while "
                      "paused."),
                 leaf("time.eta", info="Your time zone; +1d tomorrow."),
-                leaf("time.started", info="When it was sent to print; "
-                     "the date when that was another day."),
-                leaf("time.sliced", info="When the slicer made the file "
-                     "(from its header; PrusaSlicer's in your time zone, "
-                     "Orca's as the slicer wrote it)."),
             ]),
             n("filaments", hint="all filaments", children=[
                 leaf("filaments.names"), leaf("filaments.materials"),
@@ -3304,42 +2391,9 @@ class PushNotifications:
                 leaf("queue.time", info="All waiting print jobs, slicer "
                      "estimates."),
                 leaf("queue.eta", info="When the last one should finish."),
-                leaf("queue.materials", info="All waiting print jobs, "
-                     "each material once."),
                 leaf("queue.grams", info="All waiting print jobs."),
                 leaf("queue.meters", info="All waiting print jobs."),
             ]),
-            n("objects", hint="exclude-object objects", children=[
-                leaf("objects.count"), leaf("objects.names"),
-                leaf("objects.current", info="The one printing now."),
-                leaf("objects.by_object", info="True when printing by "
-                     "object (Orca's Print sequence: By object).")]),
-            n("pauses", hint="pauses in the file", info="M600, PAUSE, "
-              "M601… written into the print job. Loop over job.pauses for "
-              "each.", children=[
-                  leaf("pauses.count"),
-                  leaf("pauses.layers", info="When every pause's layer is "
-                       "known.")]),
-            n("pause#", hint="a pause by number", info="Replace # with "
-              "the pause's number (1 = first).", children=[
-                  leaf("pause#.layer"), leaf("pause#.message",
-                                             info="Any message the slicer "
-                                             "put with it."),
-                  leaf("pause#.kind")]),
-            leaf("preprint", info="Pre-print calibrations chosen "
-                 "(Snapmaker U1)."),
-            n("state", hint="printing, paused…", token="job.state",
-              info="Klipper's: standby, printing, paused, complete, "
-              "cancelled, error."),
-            n("pause", hint="the pause now", info="While paused.",
-              children=[
-                  n("planned", token="job.pause.planned", hint="yes / no",
-                    info="Written into the file (M600, PAUSE, M601…)."),
-                  n("number", token="job.pause.number",
-                    info="Planned: which of the file's pauses."),
-                  n("layer", token="job.pause.layer"),
-                  n("kind", token="job.pause.kind"),
-                  n("message", token="job.pause.message")]),
         ]
 
     async def _ep_preview(self, web_request: Any) -> Dict[str, Any]:
@@ -3425,10 +2479,8 @@ class PushNotifications:
         if key == "paused":
             return {"planned": False}
         if key.startswith("custom"):
-            base, _, mode = key.partition("@")
-            return {"name": str(base[len("custom_"):] or "my_notification"),
-                    "trigger": mode if mode in CUSTOM_SAMPLES
-                    else "condition", **CUSTOM_SAMPLES.get(mode, {})}
+            return {"name": str(key[len("custom_"):] or "my_notification"),
+                    "trigger": "condition"}
         if key == "macro":
             return {"title": "Bed ready", "message": "60 °C, levelled",
                     "priority": "default"}
@@ -3436,9 +2488,6 @@ class PushNotifications:
             return {"calibration": {"name": "Bed levelling",
                                     "result": "complete",
                                     "next": "Flow calibration"}}
-        if key == "bed_cooled":
-            return {"kind": "complete", "file": file, "limit": 40,
-                    "temperature": 39., "cooled_in": "14m"}
         if key == "driver_hot":
             return {"limit": 105, "drivers": [
                 {"name": "X", "temperature": 108., "hot": True},
@@ -3454,7 +2503,7 @@ class PushNotifications:
             name, sid, rem, _col = SAMPLE_SPOOLS[0]
             return {"loaded": True, "extruder": self._ext_name(0),
                     "filament": {"name": name, "grams_left": rem,
-                                 "grams_full": 1000., "spool_id": sid}}
+                                 "spool_id": sid}}
         if key in ("filament_short", "filament_low"):
             it = self._sample_issue(low=key == "filament_low")
             return {"file": file if key == "filament_short" else None,
@@ -3664,20 +2713,10 @@ class PushNotifications:
             cams = self.env.cameras if self.env else {}
             url = (cams.get(name) or {}).get("snapshot") or \
                 self.snapshot_url
-            if not url:
-                return {"image": None, "error": (
-                    f"no camera named {name}" if name else "no camera set")}
-            tmp, why = await self.eventloop.run_in_thread(
-                self._snapshot_why, url)
-            if tmp is None:
-                logging.info("[pushraker] editor snapshot from %s: %s",
-                             url, why)
-                # The picture a notification would carry instead
+            if url:
                 tmp = await self.eventloop.run_in_thread(
-                    self._problem_picture, why)
-                if tmp is None:
-                    return {"image": None, "error": why}
-            path = tmp
+                    self._fetch_snapshot_sync, True, url)
+                path = tmp
         elif kind == "graphic" and key in cfgmod.TEMPLATE:
             rows = self._sample_rows(key)
             if rows and str(args.get("remaining", "true")).lower() \
@@ -3744,20 +2783,12 @@ class PushNotifications:
             logging.error("[pushraker] state query failed: %s", e)
             return {}
 
-    def _with_printer_fields(self, objects: Dict[str, Any]
-                             ) -> Dict[str, Any]:
-        """A subscription or query with the fields the printer's own
-        adjust_status reads added."""
-        out = dict(objects)
-        for obj, fields in self.printer.status_fields.items():
-            have = out.get(obj, [])
-            if obj in out and have is None:
-                continue            # already the whole object
-            out[obj] = list(dict.fromkeys(list(have or []) + list(fields)))
-        return out
-
     def _klippy_shutdown(self) -> bool:
-        return compat.klippy_shutdown(self.server)
+        try:
+            kconn = self.server.lookup_component("klippy_connection")
+            return kconn.state == KlippyState.SHUTDOWN
+        except Exception:
+            return False
 
     def _live_fault(self, ps: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """The fault in print_stats, unless it's the one a resume already
@@ -3789,13 +2820,16 @@ class PushNotifications:
         url = url or self.snapshot_url
         if not url:
             return None
-        data, why = self._picture(url)
-        if data is None:
+        try:
+            with urllib.request.urlopen(url, timeout=SNAPSHOT_TIMEOUT) as resp:
+                data = resp.read(SNAPSHOT_MAX + 1)
+        except Exception as e:
             if not quiet:
-                logging.warning("[pushraker] no snapshot from %s: %s", url,
-                                why)
-            # No stand-in picture: the notification says why in its text
-            return SnapshotProblem("", why)
+                logging.warning("[pushraker] no snapshot: %s", e)
+            return None
+        if not data.startswith(b"\xff\xd8") or len(data) > SNAPSHOT_MAX:
+            logging.warning("[pushraker] snapshot is not a JPEG")
+            return None
         tmpdir = tempfile.mkdtemp(prefix="pushraker_")
         path = os.path.join(tmpdir, "snapshot.jpg")
         try:
@@ -3805,109 +2839,7 @@ class PushNotifications:
             shutil.rmtree(tmpdir, ignore_errors=True)
             logging.warning("[pushraker] snapshot not saved: %s", e)
             return None
-        # A printer's own picture taken earlier (printers.Frame): how old
-        taken = getattr(data, "taken", None)
-        note = camera_age_line(
-            time.time() - taken if taken is not None else None,
-            getattr(self.printer, "frame_note", ""))
-        return SnapshotPath(path, note) if note else path
-
-    def _picture(self, url: str) -> Tuple[Optional[bytes], str]:
-        """A JPEG from a camera: the printer's own ("printer:<name>",
-        printers.Printer.snapshot) or an http(s) address. Blocking."""
-        if url.startswith("printer:"):
-            # _job_ended starts at -1e9: with no print ended since Moonraker
-            # started, "since_end" is huge (the profile then goes by the
-            # timelapse file's own time)
-            ended = getattr(self, "_job_ended", None)
-            ctx = {"state": self._status["print_stats"].get("state"),
-                   "since_end": (time.monotonic() - ended)
-                   if ended else None}
-            try:
-                return self.printer.snapshot(url[len("printer:"):], ctx)
-            except Exception as e:
-                return None, f"the printer's camera failed ({e})"
-        return self._read_picture(url)
-
-    @staticmethod
-    def _read_picture(url: str) -> Tuple[Optional[bytes], str]:
-        """A JPEG from a camera address: a snapshot, the first frame of an
-        MJPEG stream (an address that streams), or a PNG or WebP picture
-        converted. Or why there's none. http and https only."""
-        parts = urllib.parse.urlsplit(url)
-        scheme = parts.scheme.lower()
-        # Video streams need a decoder (ffmpeg) or a live connection
-        kind = "RTSP" if scheme in ("rtsp", "rtsps") else \
-            "WebRTC" if scheme.startswith(("webrtc", "ws")) else \
-            "HLS" if parts.path.lower().endswith(".m3u8") else ""
-        if kind:
-            return None, f"Error: {kind} stream snapshots unsupported."
-        if scheme not in ("http", "https"):
-            return None, "only http and https camera addresses are read"
-        deadline = time.monotonic() + SNAPSHOT_TOTAL
-        try:
-            with urllib.request.urlopen(url, timeout=SNAPSHOT_TIMEOUT) as resp:
-                buf = b""
-                while len(buf) <= SNAPSHOT_MAX:
-                    if time.monotonic() > deadline:
-                        return None, ("the camera took longer than "
-                                      f"{SNAPSHOT_TOTAL:.0f} seconds")
-                    # What has arrived (read() waits for all 64 kB)
-                    chunk = resp.read1(65536) if hasattr(resp, "read1") \
-                        else resp.read(65536)
-                    if not chunk:
-                        break
-                    buf += chunk
-                    start = buf.find(b"\xff\xd8")
-                    if start >= 0:
-                        end = buf.find(b"\xff\xd9", start + 2)
-                        if end >= 0:
-                            return buf[start:end + 2], ""
-        except Exception as e:
-            return None, f"the camera didn't answer ({e})"
-        if len(buf) > SNAPSHOT_MAX:
-            return None, "no picture in the first 5 MB the camera sent"
-        start = buf.find(b"\xff\xd8")
-        if start >= 0:
-            return buf[start:], ""
-        try:
-            import io
-            from PIL import Image
-            img = Image.open(io.BytesIO(buf)).convert("RGB")
-            out = io.BytesIO()
-            img.save(out, "JPEG", quality=90)
-            return out.getvalue(), ""
-        except Exception:
-            head = buf[:40].decode("latin-1", "replace").strip()
-            return None, ("the camera sent something that isn't a picture"
-                          + (f" (it starts: {head!r})" if head else
-                             " (nothing)"))
-
-    @staticmethod
-    def _problem_picture(why: str) -> Optional[str]:
-        """In place of a camera picture that couldn't be read: a picture
-        saying why, so the notification shows what went wrong."""
-        if images is None:
-            return None
-        tmpdir = tempfile.mkdtemp(prefix="pushraker_")
-        try:
-            return images.problem("No camera picture", why,
-                                  os.path.join(tmpdir, "snapshot.jpg"))
-        except Exception as e:
-            logging.warning("[pushraker] problem picture: %s", e)
-            shutil.rmtree(tmpdir, ignore_errors=True)
-            return None
-
-    def _snapshot_why(self, url: str) -> Tuple[Optional[str], str]:
-        """A snapshot for the editor, or why there's none."""
-        data, why = self._picture(url)
-        if data is None:
-            return None, why
-        tmpdir = tempfile.mkdtemp(prefix="pushraker_")
-        path = os.path.join(tmpdir, "snapshot.jpg")
-        with open(path, "wb") as f:
-            f.write(data)
-        return path, ""
+        return path
 
     async def _fetch_snapshot(self, quiet: bool = False,
                               key: str = "") -> Optional[str]:
@@ -3923,38 +2855,14 @@ class PushNotifications:
         while True:
             last = time.monotonic() + PL_CAMERA_POLL >= deadline
             path = await self._fetch_snapshot(quiet=not last, key=key)
-            if (path and not getattr(path, "why", "")) or last:
+            if path is not None or last:
                 return path
             await asyncio.sleep(PL_CAMERA_POLL)
-
-    def _meta(self, filename: str, fm: Any = None) -> Dict[str, Any]:
-        """Moonraker's metadata for a file, with what the file's own
-        comments say where Moonraker has nothing (pushraker.gmeta: an
-        older Moonraker doesn't know the Orca family of slicers). Read once
-        per version of the file."""
-        if fm is None:
-            fm = self.server.lookup_component("file_manager")
-        meta = fm.get_metadata_storage().get(filename, {}) or {}
-        if not filename:
-            return dict(meta)
-        try:
-            path = os.path.join(fm.get_directory("gcodes"), filename)
-            st = os.stat(path)
-        except Exception:
-            return dict(meta)
-        key = (path, st.st_size, st.st_mtime_ns)
-        own = self._gmeta_cache.get(key)
-        if own is None:
-            own = gmeta.from_file(path)
-            if len(self._gmeta_cache) > 50:
-                self._gmeta_cache.clear()
-            self._gmeta_cache[key] = own
-        return gmeta.merged(meta, own)
 
     def _thumbnail(self, filename: str) -> Optional[str]:
         try:
             fm = self.server.lookup_component("file_manager")
-            meta = self._meta(filename, fm)
+            meta = fm.get_metadata_storage().get(filename, {}) or {}
             root = fm.get_directory("gcodes")
         except Exception as e:
             logging.warning("[pushraker] metadata lookup failed: %s",
@@ -3962,49 +2870,15 @@ class PushNotifications:
             return None
         thumbs = [t for t in meta.get("thumbnails") or []
                   if t.get("relative_path")]
-        if thumbs:
-            best = max(thumbs, key=lambda t: t.get("width", 0) or 0)
-            rel = best["relative_path"]
-            for path in (os.path.join(root, os.path.dirname(filename), rel),
-                         os.path.join(root, rel)):
-                if os.path.isfile(path):
-                    return path
-        # None from Moonraker (an older one doesn't know the Orca family of
-        # slicers): the file's own thumbnail block
-        return self._header_thumbnail(os.path.join(root, filename))
-
-    def _header_thumbnail(self, gcode: str) -> Optional[str]:
-        """The G-code file's own thumbnail (pushraker.thumbs), kept in
-        <data>/pushraker/thumbs per file version (the newest 30)."""
-        try:
-            st = os.stat(gcode)
-        except OSError:
+        if not thumbs:
             return None
-        key = hashlib.sha1(f"{gcode}|{st.st_size}|{st.st_mtime_ns}"
-                           .encode("utf-8")).hexdigest()[:16]
-        for ext in (".png", ".jpg"):
-            cached = os.path.join(self._thumb_dir, key + ext)
-            if os.path.isfile(cached):
-                return cached
-        found = thumbs.extract(gcode)
-        if found is None:
-            return None
-        data, ext = found
-        try:
-            os.makedirs(self._thumb_dir, exist_ok=True)
-            path = os.path.join(self._thumb_dir, key + ext)
-            with open(path + ".tmp", "wb") as f:
-                f.write(data)
-            os.replace(path + ".tmp", path)
-            kept = sorted((os.path.join(self._thumb_dir, n)
-                           for n in os.listdir(self._thumb_dir)),
-                          key=lambda p: os.path.getmtime(p), reverse=True)
-            for old in kept[30:]:
-                os.remove(old)
-        except OSError as e:
-            logging.warning("[pushraker] thumbnail: %s", e)
-            return None
-        return path
+        best = max(thumbs, key=lambda t: t.get("width", 0) or 0)
+        rel = best["relative_path"]
+        for path in (os.path.join(root, os.path.dirname(filename), rel),
+                     os.path.join(root, rel)):
+            if os.path.isfile(path):
+                return path
+        return None
 
     async def _send(
         self, rid: str, title: str, body: str,
@@ -4012,8 +2886,6 @@ class PushNotifications:
         snapshot_ready: bool = False, delay: float = 0.,
         camera_wait: float = 0., event: Optional[Dict[str, Any]] = None,
         key: Optional[str] = None,
-        sets: Optional[Dict[str, str]] = None,
-        append: str = "",
     ) -> bool:
         """Send one notification to each of its destinations; images are
         optional and never block it.
@@ -4028,8 +2900,6 @@ class PushNotifications:
         if row is None:
             return False
         key = key or rid
-        # event.time: this moment, even when the sending waits
-        event = dict(event or {}, _at=time.time())
         await self._parity(key, title, body, event)
         image, dests = row
         # Take a place in each channel's queue now, before any waiting
@@ -4037,18 +2907,9 @@ class PushNotifications:
         try:
             if delay:
                 await asyncio.sleep(delay)
-            given = sets or {}
             title, body, sets = await self._compose(key, title, body, event)
-            # What the G-code itself added: at the end; what it set wins
-            # over the template's
-            if append:
-                body = self._lines(body, append)
-            sets = dict(sets, **given)
-            topic = sets.get("topic") or self._template(key).get("topic") \
-                or ""
-            if sets.get("priority") or topic:
-                dests = self._at_priority(rid, dests, sets.get("priority"),
-                                          topic)
+            if sets.get("priority"):
+                dests = self._at_priority(rid, dests, sets["priority"])
             # The image a template set (a spool picture only where the
             # notification draws one)
             if sets.get("image") and IMAGE_SET[sets["image"]] != "spool":
@@ -4058,27 +2919,17 @@ class PushNotifications:
             else:
                 path = await self._image(image, filename, snapshot,
                                          snapshot_ready, key)
-            # A camera picture that was asked for and failed: sent all the
-            # same, with the print's render if it has one, the text saying
-            # why
-            body = with_camera_error(body, path)
-            attach = path or None
-            if getattr(path, "why", "") and filename:
-                attach = self._thumbnail(filename)
-            named = self._named_copy(attach, title, filename)
+            named = self._named_copy(path, title, filename)
             report: List[Dict[str, Any]] = []
             try:
                 results = self._outcomes(rid, dests, await asyncio.gather(*(
                     self._deliver(rid, d, t, [(title, body, named)], report)
                     for d, t in zip(dests, tickets)), return_exceptions=True))
-                self._mark_sent(rid, event["_at"], all(results))
                 self._console_report(report)
             finally:
-                # Only the copy's own folder: never the original's (a
-                # Moonraker thumbnail, the render cache)
-                if named is not None and named not in (path, attach):
+                if named is not None and named != path:
                     shutil.rmtree(os.path.dirname(named), ignore_errors=True)
-                if path and image == "snapshot":
+                if path is not None and image == "snapshot":
                     shutil.rmtree(os.path.dirname(path), ignore_errors=True)
         finally:
             for t in tickets:
@@ -4086,29 +2937,19 @@ class PushNotifications:
         return all(results)
 
     def _at_priority(self, rid: str, dests: List[Destination],
-                     prio: Optional[str] = None,
-                     topic: str = "") -> List[Destination]:
-        """The push destinations of a row at the priority and topic a
-        template or the editor set (email and the webhook have neither).
-        A topic the service doesn't have is left out."""
-        base = self.priority_urls.get(rid)
-        url = None
-        if prio:
-            url = self.priority_urls.get(
-                f"macro_{prio}" if rid.startswith("macro_")
-                else f"{rid}@{prio}")
-        url = url or base
+                     prio: str) -> List[Destination]:
+        """The push destinations of a row at the priority a template set
+        (email and the webhook have none)."""
+        if rid.startswith("macro_"):
+            other = self.rows.get(f"macro_{prio}")
+            if other is None:
+                return dests
+            push = [d for d in other[1] if not d.email
+                    and d.channel != "webhook"]
+            return push + [d for d in dests if d.email
+                           or d.channel == "webhook"]
+        url = self.priority_urls.get(f"{rid}@{prio}")
         if not url:
-            return dests
-        if topic:
-            moved = cfgmod.with_topic(url, topic)
-            if moved is None:
-                logging.info("[pushraker] %s: topic %r isn't one this "
-                             "service takes; sent to the default", rid,
-                             topic)
-            else:
-                url = moved
-        if url == base:
             return dests
         ap = apprise.Apprise()
         if not ap.add(url):
@@ -4143,8 +2984,7 @@ class PushNotifications:
         images say what they were: time, printer, notification, file, e.g.
         2026-10-22_17-05-03_U1-martha_50pct_Benchy.jpg. Letters, digits,
         . _ - only (it is also the email's inline image reference)."""
-        now = datetime.datetime.now(self._zone()) if self._zone() \
-            else \
+        now = datetime.datetime.now(self.tz) if self.tz else \
             datetime.datetime.now()
         # The notification as its title says it, without the emoji and the
         # printer's name ("⏳ U1-martha 50%" -> "50%")
@@ -4248,8 +3088,7 @@ class PushNotifications:
         # Gmail hides text a thread already showed ("•••"), so a repeated
         # notification (same fault twice) would look empty: the time at the
         # top and bottom keeps every email distinct.
-        now = datetime.datetime.now(self._zone()) if self._zone() \
-            else \
+        now = datetime.datetime.now(self.tz) if self.tz else \
             datetime.datetime.now()
         subject = title
         if thread is not None:
@@ -4381,9 +3220,6 @@ class PushNotifications:
     # -- console --
 
     def _console(self, line: str) -> None:
-        # pushraker's own line: not a console message to evaluate custom
-        # notifications at (one sent at every line would answer itself)
-        self._own_lines.append(line)
         try:
             self.server.send_event("server:gcode_response", line)
         except Exception as e:
@@ -4539,10 +3375,9 @@ class PushNotifications:
         logging.info("[pushraker] %s: not sent, %s", what, why)
 
     def _clock(self, seconds_from_now: float) -> str:
-        tz = self._zone()
-        if tz is None:
+        if self.tz is None:
             return ""
-        now = datetime.datetime.now(tz)
+        now = datetime.datetime.now(self.tz)
         at = now + datetime.timedelta(seconds=seconds_from_now)
         days = (at.date() - now.date()).days
         return at.strftime("%H:%M") if days == 0 else \
@@ -4657,7 +3492,7 @@ class PushNotifications:
     def _filament_total(self, filename: str) -> float:
         try:
             fm = self.server.lookup_component("file_manager")
-            meta = self._meta(filename, fm)
+            meta = fm.get_metadata_storage().get(filename, {}) or {}
             return float(meta.get("filament_total") or 0.)
         except Exception:
             return 0.
@@ -4677,7 +3512,7 @@ class PushNotifications:
     def _estimated_time(self, filename: str) -> float:
         try:
             fm = self.server.lookup_component("file_manager")
-            meta = self._meta(filename, fm)
+            meta = fm.get_metadata_storage().get(filename, {}) or {}
             return float(meta.get("estimated_time") or 0.)
         except Exception:
             return 0.
@@ -4730,15 +3565,15 @@ class PushNotifications:
                 return title, body, {}
             if d is None:       # a custom notification: no default
                 return title, self._lines(
-                    body, f"⚠️ Template error: {e}"), {}
+                    body, f"⚠️ Your template failed: {e}"), {}
             try:
                 ctx = await self._template_context(list(d), False, event)
                 t, c, sets = await self._render_pair(d[0], d[1], ctx)
-                return t, self._lines(c, f"⚠️ Template error (sent the default): {e}"), \
+                return t, self._lines(c, f"⚠️ Your template failed: {e}"), \
                     sets
             except jj.TemplateError:
                 return title, self._lines(
-                    body, f"⚠️ Template error (sent the default): {e}"), {}
+                    body, f"⚠️ Your template failed: {e}"), {}
 
     async def _parity(self, key: str, title: str, body: str,
                       event: Optional[Dict[str, Any]]) -> None:
@@ -4813,7 +3648,6 @@ class PushNotifications:
             # queues, so filament warnings always arrive after it
             self._start_filament_watch(filename, progress, check_start=True)
         elif job_event == JobEvent.PAUSED:
-            self._spawn(self._note_pause())
             if ex is not None and "error" in self.rows and \
                     self._refill_expected(ex):
                 self._mark_fault(fault_key(ex))
@@ -4833,9 +3667,7 @@ class PushNotifications:
                     "paused", self._title("paused"), shown(filename),
                     delay=PAUSE_SNAPSHOT_DELAY, event={"planned": False}))
         elif job_event == JobEvent.RESUMED:
-            self._pause_now = None
             self._driver_hot_sent = False   # a hot driver may warn again
-            self._resumes += 1
             if ex is not None:
                 self._stale_fault = fault_key(ex)
             self._status["print_stats"].update(
@@ -4880,15 +3712,9 @@ class PushNotifications:
                     "complete" if job_event == JobEvent.COMPLETE
                     else "cancelled", ps))
         if job_event.finished:
-            self._pause_now = None
             self._job_active = False
             self._job_ended = time.monotonic()
             self._job_gen += 1
-            # Any end of a print: Bed cooled starts waiting
-            self._spawn(self._watch_bed(
-                "complete" if job_event == JobEvent.COMPLETE
-                else "error" if job_event == JobEvent.ERROR
-                else "cancelled", ps.get("filename") or ""))
             self._filament_job += 1
 
     async def _start_job(self, filename: str, query: bool = True) -> float:
@@ -4898,22 +3724,13 @@ class PushNotifications:
         can't report old progress."""
         self._job_active = False
         self._job_done_sent = False
-        self._job_number += 1
-        self._pause_now = None
         if query:
-            state = await self._query(self._with_printer_fields(
+            state = await self._query(
                 {"print_stats": ["info"], "virtual_sdcard": ["file_position"],
                  **({"print_task_config": PREPRINT_FIELDS}
-                    if self.printer.preprint_calibrations else {})}))
+                    if self.printer.preprint_calibrations else {})})
             for obj in self._status:
                 self._status[obj].update(state.get(obj) or {})
-            self.printer.adjust_status(state, self._status)
-        # The file's own metadata, where Moonraker has none, read in a thread
-        # (a fraction of a second on a slow printer), then cached
-        try:
-            await self.eventloop.run_in_thread(self._meta, filename)
-        except Exception as e:
-            logging.warning("[pushraker] file metadata: %s", e)
         self._gcode_bytes = self._get_gcode_bytes(filename)
         self._job_filename = filename
         layer = ((self._status["print_stats"].get("info") or {})
@@ -4929,8 +3746,6 @@ class PushNotifications:
                     "wait_start": 0., "announced": False, "gen": 0}
         self._by_object = await self.eventloop.run_in_thread(
             self._is_by_object, filename)
-        self._job_sliced = await self.eventloop.run_in_thread(
-            self._sliced_at, filename)
         self._job_slicer = await self.eventloop.run_in_thread(
             self._slicer_settings, filename)
         self._job_m73 = await self.eventloop.run_in_thread(
@@ -4951,12 +3766,6 @@ class PushNotifications:
             logging.info("[pushraker] %s is printed by object",
                          shown(filename))
         pct = self._progress() * 100.
-        # Custom notifications' events: only what happens from now on
-        self._ev_layer = int(layer)
-        self._ev_pct = int(pct)
-        self._ev_tool = str(self._status["toolhead"].get("extruder") or "")
-        self._ev_excluded = set(
-            self._status["exclude_object"].get("excluded_objects") or [])
         self._milestones_sent = {m for m in MILESTONES if m <= pct}
         self._report_next = None
         if self._first_layer_sent or self._milestones_sent:
@@ -5002,10 +3811,6 @@ class PushNotifications:
                 "Print time: "
                 f"{format_duration(ps.get('print_duration', 0))}",
                 self._queue_line(filename, starting=False))
-            via = self._bed_cooled_via()
-            if via:
-                body += f"\n\nNotification will be sent via {via} when " \
-                    "bed has cooled"
             event: Dict[str, Any] = {}
         elif ex is not None and fault_reported:
             rid, title = "cancelled", self._title("cancelled")
@@ -5039,107 +3844,6 @@ class PushNotifications:
         await self._send(rid, title, body, snapshot=snapshot,
                          snapshot_ready=True, event=event)
 
-    def _bed_cooled_via(self) -> str:
-        """How Bed cooled will be sent (push & email, push, email), for
-        Print complete to say; empty when it won't be."""
-        v = self._pushraker_values()
-        bed = v.get("bed_cooled") or {}
-        push = bed.get("push") and v["push"]["enabled"]
-        email = bed.get("email") and v["email"]["enabled"]
-        return " & ".join(m for m, on in (("push", push), ("email", email))
-                          if on)
-
-    async def _watch_bed(self, ended: str, filename: str,
-                         ended_ago: float = 0.) -> None:
-        """Bed cooled: after a print ends (complete, cancelled or failed), once
-        the bed is below the set temperature. Not when it already was (an
-        unheated bed), when a new print job starts, or after
-        BED_COOL_MAX. `ended_ago`: seconds since the end, for a watch
-        resumed after a restart (_resume_bed_watch). One watch at a time."""
-        if "bed_cooled" not in self.rows or self._bed_watching:
-            return
-        self._bed_watching = True
-        try:
-            await self._watch_bed_run(ended, filename, ended_ago)
-        finally:
-            self._bed_watching = False
-
-    async def _resume_bed_watch(self) -> None:
-        """After Moonraker restarted (an update, a crash) the bed watch of a
-        print that just ended is gone: resumed when Klipper reports the job
-        ended (complete, cancelled, error), Moonraker's job history has its
-        end within BED_COOL_MAX, and it is the same file. Sent once; the
-        watch itself skips a bed already cool."""
-        if "bed_cooled" not in self.rows or self._bed_watching:
-            return
-        ps = self._status.get("print_stats") or {}
-        ended = {"complete": "complete", "cancelled": "cancelled",
-                 "error": "error"}.get(str(ps.get("state") or ""))
-        if not ended:
-            return
-        try:
-            hist = self.server.lookup_component("history", None)
-            ids = list(getattr(hist, "cached_job_ids", None) or [])
-            job = await hist.get_job(ids[-1]) if ids else None
-        except Exception as e:
-            logging.debug("[pushraker] bed_cooled resume: %s", e)
-            job = None
-        if not isinstance(job, dict) or not job.get("end_time"):
-            return
-        filename = str(job.get("filename") or "")
-        if filename != str(ps.get("filename") or ""):
-            return
-        ago = time.time() - float(job["end_time"])
-        if not 0 <= ago < BED_COOL_MAX:
-            return
-        logging.info("[pushraker] bed_cooled: resuming the watch for %s "
-                     "(ended %s ago)", filename, format_duration(ago))
-        await self._watch_bed(ended, filename, ended_ago=ago)
-
-    async def _watch_bed_run(self, ended: str, filename: str,
-                             ended_ago: float) -> None:
-        job, start = self._job_number, time.monotonic() - ended_ago
-        limit = self.bed_cool
-        first = True
-        while time.monotonic() - start < BED_COOL_MAX:
-            if self._job_number != job:
-                self._skip("bed_cooled", "a new print job started")
-                return
-            try:
-                state = await self._query({"heater_bed": ["temperature"]})
-            except Exception as e:
-                logging.info("[pushraker] bed_cooled: %s", e)
-                state = {}
-            bed = state.get("heater_bed")
-            if first and not bed:
-                self._skip("bed_cooled", "no heated bed")
-                return
-            temp = (bed or {}).get("temperature")
-            if temp is not None and float(temp) < limit:
-                if first:
-                    self._skip("bed_cooled", f"the bed was already below "
-                               f"{limit:.0f} °C")
-                    return
-                if self._job_number != job:
-                    return
-                took = format_duration(time.monotonic() - start)
-                await self._send(
-                    "bed_cooled",
-                    self._title("bed_cooled", limit=f"{limit:.0f}"),
-                    f"{shown(filename)}\nBed {float(temp):.0f} °C, {took} "
-                    "after the print "
-                    + {"complete": "finished",
-                       "error": "failed"}.get(ended, "was cancelled"),
-                    filename=filename,
-                    event={"kind": ended, "file": shown(filename),
-                           "limit": limit, "temperature": float(temp),
-                           "cooled_in": took})
-                return
-            first = False
-            await asyncio.sleep(BED_COOL_POLL)
-        self._skip("bed_cooled", f"the bed stayed over {limit:.0f} °C for "
-                   f"{format_duration(BED_COOL_MAX)}")
-
     # ---- job queue -----------------------------------------------------
 
     def _queue_line(self, filename: str, starting: bool) -> str:
@@ -5153,8 +3857,6 @@ class PushNotifications:
             jq = None
         if jq is None:
             return ""
-        if not starting:
-            return self._queue_end_lines(filename)
         files = [str(j) for j in list(getattr(jq, "queued_jobs", {})
                                       .values())]
         state = getattr(jq, "queue_state", "")
@@ -5173,28 +3875,6 @@ class PushNotifications:
         return line + (f" (total {format_duration(total)})" if total > 0
                        else "")
 
-    def _queue_end_lines(self, filename: str) -> str:
-        """When a print ends: "1 print remaining in queue", or "3 prints
-        remaining in queue (Estimated print time: 5h 10m, Materials:
-        PLA/PETG, Filament: 212 g)", then "Next job: <file>"."""
-        q = self._queue_values(filename, None)
-        n = q["remaining"]
-        if not n:
-            return ""
-        line = f"{n} print{'s' if n != 1 else ''} remaining in queue"
-        if n > 1:
-            parts = []
-            if q["time"]:
-                parts.append("Estimated print time: "
-                             + tp.fmt_value(q["time"], ""))
-            if q["materials"]:
-                parts.append("Materials: " + "/".join(q["materials"]))
-            if q["grams"]:
-                parts.append(f"Filament: {int(q['grams'] + 0.5)} g")
-            if parts:
-                line += " (" + ", ".join(parts) + ")"
-        return line + "\nNext job: " + q["items"][0]["name"]
-
     # ---- exceptions ----------------------------------------------------
 
     # Event handlers must return quickly; do the waiting in a task.
@@ -5206,33 +3886,15 @@ class PushNotifications:
         message everything in between. On printers without this component
         the line is only console output."""
         for line in str(response or "").splitlines():
-            if self._ppw is not None and not self._pp_sent:
-                self._ppw.console(line)
-            if line in self._own_lines:
-                self._own_lines.remove(line)
-            elif line.strip() and not line.startswith(
-                    (CUSTOM_PREFIX, MACRO_PREFIX)):
-                self._custom_fire("console", {"message": line.strip()})
             if line.startswith(CUSTOM_PREFIX):
-                rest = line[len(CUSTOM_PREFIX):].strip()
-                m = RX_CUSTOM_CALL.fullmatch(rest)
-                customs = (self.settings or {}).get("custom") or []
-                if m is None:
-                    word = rest.split(" ", 1)[0]
-                    hint = f"; did you mean MSG=pushraker.{word}?" if any(
-                        c["name"].lower() == word.lower()
-                        for c in customs) else ""
-                    logging.info("[pushraker] notify_custom: %r is not "
-                                 "pushraker.<name>%s", rest[:60], hint)
-                    continue
-                name, extra = m.group(1).lower(), (m.group(2) or "").strip()
-                c = next((c for c in customs
-                          if c["name"].lower() == name), None)
+                name = line[len(CUSTOM_PREFIX):].strip()
+                c = next((c for c in (self.settings or {}).get("custom")
+                          or [] if c["name"] == name), None)
                 if c is None:
                     logging.info("[pushraker] notify_custom: no custom "
                                  "notification named %s", name)
                     continue
-                self._spawn(self._send_custom(c, "gcode", extra))
+                self._spawn(self._send_custom(c, "gcode"))
                 continue
             if not line.startswith(MACRO_PREFIX):
                 continue
@@ -5251,52 +3913,31 @@ class PushNotifications:
 
     # ---- custom notifications ------------------------------------------
 
-    async def _send_custom(self, c: Dict[str, Any], trigger: str,
-                           extra: str = "",
-                           values: Optional[Dict[str, Any]] = None) -> None:
+    async def _send_custom(self, c: Dict[str, Any], trigger: str) -> None:
         """Send a custom notification (its condition turned true, or
-        G-code asked for it). `extra`: Jinja the G-code added, rendered on
-        its own and put at the end; what it sets wins over the
-        template's."""
+        G-code asked for it)."""
         rid = cfgmod.custom_rid(c["name"])
         if rid not in self.rows:
             self._skip(rid, "off")
             return
         self._custom_sent[c["name"]] = time.monotonic()
-        self._custom_job[c["name"]] = (self._job_number, self._resumes)
-        event = {"name": c["name"], "trigger": trigger, **(values or {})}
-        added, sets = "", {}
-        if extra:
-            extra = extra.replace("\\n", "\n")
-            try:
-                ctx = await self._template_context([extra], event=event)
-                _t, added, sets = await self._render_pair("", extra, ctx)
-            except jj.TemplateError as e:
-                added = f"⚠️ Template error in the G-code: {e}"
-            sets = self._gcode_sets(sets, f"custom {c['name']}")
+        self._custom_job[c["name"]] = self._filament_job
         await self._send(
             rid, f"🔔 {self.name} {c['name']}", "",
             filename=self._job_filename if self._job_active else "",
-            event=event, sets=sets, append=added)
+            event={"name": c["name"], "trigger": trigger})
 
     def _custom_due(self, c: Dict[str, Any]) -> bool:
-        """Whether a condition that just turned true (or is true at its
-        event) may send now: never within a minute of the last one (10
-        seconds for an event); once per print job, or at most every N
-        minutes, when asked."""
+        """Whether a condition that just turned true may send now: never
+        within a minute of the last one; once per print job, or at most
+        every N minutes, when asked."""
         name = c["name"]
         last = self._custom_sent.get(name)
         now = time.monotonic()
-        gap = CUSTOM_GAP if c.get("evaluate", "poll") == "poll" \
-            else CUSTOM_EVENT_GAP
-        if last is not None and now - last < gap:
+        if last is not None and now - last < CUSTOM_GAP:
             return False
         if c["repeat"] == "job":
-            return self._custom_job.get(name, (None,))[0] != \
-                self._job_number
-        if c["repeat"] == "job_pause":
-            return self._custom_job.get(name) != (self._job_number,
-                                                  self._resumes)
+            return self._custom_job.get(name) != self._filament_job
         if c["repeat"] == "minutes" and last is not None:
             return now - last >= c["repeat_minutes"] * 60.
         return True
@@ -5304,11 +3945,8 @@ class PushNotifications:
     async def _custom_check(self) -> None:
         """One look at every custom notification's condition: one query
         for all of them; one that turns true (false before) is sent."""
-        # One whose When ran too long waits until its When is changed
         items = [c for c in (self.settings or {}).get("custom") or []
-                 if c["when"] and c.get("evaluate", "poll") == "poll"
-                 and cfgmod.custom_rid(c["name"]) in self.rows
-                 and self._custom_stuck.get(c["name"]) != c["when"]]
+                 if c["when"] and cfgmod.custom_rid(c["name"]) in self.rows]
         live = {c["name"] for c in items}
         for name in list(self._custom_was):
             if name not in live:
@@ -5321,15 +3959,8 @@ class PushNotifications:
             name = c["name"]
             try:
                 now = (await self._render(text, dict(
-                    ctx, event=dict(ctx["event"], name=name,
-                                    trigger="condition")))
+                    ctx, event={"name": name, "trigger": "condition"}))
                 ) == "1"
-            except jj.TemplateTimeout as e:
-                self._custom_stuck[name] = c["when"]
-                logging.warning("[pushraker] ⚠️ custom notification %s, "
-                                "When: %s; not checked again until its When "
-                                "is changed", name, e)
-                continue
             except jj.TemplateError as e:
                 if self._custom_err.get(name) != str(e):
                     logging.warning("[pushraker] custom notification %s, "
@@ -5341,259 +3972,8 @@ class PushNotifications:
             # true when pushraker starts isn't news
             was = self._custom_was.get(name)
             self._custom_was[name] = now
-            self._custom_state[name] = bool(now)
             if now and was is False and self._custom_due(c):
                 self._spawn(self._send_custom(c, "condition"))
-
-    def _mark_sent(self, rid: str, at: float, ok: bool) -> None:
-        """pushraker.*: a notification was sent (ok: it got through to
-        every destination)."""
-        # By its row: progress_25 is Progress, macro_high the G-code one
-        row = cfgmod.OPTION_KEYS.get(rid, rid)
-        st = self._sent.setdefault(row, {"count": 0, "failed_count": 0})
-        if st.get("job") != self._job_number:
-            st["job"], st["job_count"] = self._job_number, 0
-        st["at"] = at
-        st["count"] += 1
-        st["job_count"] += 1
-        st["failed"] = not ok
-        st["failed_count"] += 0 if ok else 1
-        self._sent_last = row
-
-    async def _note_pause(self) -> None:
-        """job.pause: whether this pause was written into the file."""
-        try:
-            state = await self._query({"virtual_sdcard": ["file_position"]})
-        except Exception:
-            state = {}
-        pos = (state.get("virtual_sdcard") or {}).get("file_position")
-        if self._ps_state() not in ("paused", "printing") or \
-                not self._job_active:
-            return                  # resumed or ended meanwhile
-        i = self._file_pause(pos) if self._job_pauses else None
-        if i is None:
-            self._pause_now = {"planned": False}
-            return
-        p = self._job_pauses[i]
-        self._pause_now = {"planned": True, "number": i + 1,
-                           "layer": p["layer"] or None,
-                           "kind": p["kind"] or "pause",
-                           "message": p["message"] or None}
-
-    def _pushraker_values(self) -> Dict[str, Any]:
-        """pushraker.*: its settings and what each notification sent since
-        it started. A dict's "" is the value of the name itself (fired is
-        yes/no and has .time and .ago)."""
-        s = self.settings or {}
-        now = time.time()
-        rows = s.get("rows") or {}
-
-        def stats(row: str) -> Dict[str, Any]:
-            return self._sent.get(row) or {}
-
-        def sent(st: Dict[str, Any], name: str) -> Dict[str, Any]:
-            at = st.get("at")
-            return {
-                "fired": {"": bool(at),
-                          "time": self._time_view(at, f"{name}.fired.time")
-                          if at else None,
-                          "ago": int(now - at) if at else None},
-                "count": st.get("count", 0),
-                "job_count": st.get("job_count", 0)
-                if st.get("job") == self._job_number else 0,
-                "failed": {"": bool(st.get("failed")),
-                           "count": st.get("failed_count", 0)}}
-
-        def settings(r: Dict[str, Any], tpl: Dict[str, Any]
-                     ) -> Dict[str, Any]:
-            push, email = bool(r.get("enabled")), bool(r.get("email"))
-            return {"enabled": push or email, "push": push, "email": email,
-                    "priority": r.get("priority") or "default",
-                    "image": tpl.get("image") or None,
-                    "camera": tpl.get("camera") or None}
-
-        out: Dict[str, Any] = {}
-        for row in rows:
-            key = row if row in cfgmod.TEMPLATE else next(
-                (k for k, t in cfgmod.TEMPLATE.items() if t[1] == row), None)
-            tpl = cfgmod.template(s, key) if key else {}
-            out[row] = dict(settings(rows[row], tpl),
-                            **sent(stats(row), f"pushraker.{row}"))
-        custom: Dict[str, Any] = {}
-        for c in s.get("custom") or []:
-            rid = cfgmod.custom_rid(c["name"])
-            name = f"pushraker.{c['name']}"
-            custom[c["name"]] = dict(
-                settings(c, c), **sent(stats(rid), name),
-                when={"": c.get("when") or None,
-                      "state": self._custom_state.get(c["name"])},
-                evaluate=c.get("evaluate") or "poll")
-        last_st = self._sent.get(self._sent_last or "") or {}
-        last = self._sent_last
-        if last and last.startswith("custom_"):
-            last = last[len("custom_"):]
-        on = bool(s.get("enabled"))
-
-        def safe(f: Callable[[Dict[str, Any]], Any], default: Any) -> Any:
-            # Settings not (yet) whole: as if not set up
-            try:
-                return f(s)
-            except (KeyError, TypeError):
-                return default
-        out.update({
-            "enabled": on,
-            "version": __version__,
-            "started": {"": self._time_values(self._boot_at)["clock"],
-                        "ago": int(now - self._boot_at)},
-            "push": {"enabled": on and bool(s.get("push_enabled"))
-                     and safe(cfgmod.push_configured, False),
-                     "service": cfgmod.PROVIDER_LABELS.get(
-                         s.get("provider") or "") or None,
-                     "server": s.get("server") or None,
-                     "topic": s.get("topic") or None},
-            "email": {"enabled": on and safe(cfgmod.email_configured,
-                                             False),
-                      "to": safe(cfgmod.recipients, [])},
-            "last": dict({"": last, "name": last},
-                         **sent(last_st, "pushraker.last"))
-            if last else None,
-            "failed": {"": bool(last_st.get("failed")),
-                       "count": sum(v.get("failed_count", 0)
-                                    for v in self._sent.values())}})
-        # Custom ones by their name (pushraker.benchy_detected, as in
-        # G-code); a built-in one keeps a name both have
-        for name, v in custom.items():
-            out.setdefault(name, v)
-        return out
-
-    def _pushraker_view(self) -> jj.View:
-        """pushraker.* for a template: read when the template reads it, on
-        Moonraker's event loop (what was sent changes under a render)."""
-        values: Optional[Dict[str, Any]] = None
-
-        def node(path: List[str]) -> Any:
-            nonlocal values
-            if values is None:
-                values = self._pushraker_values()
-            cur: Any = values
-            for p in path:
-                if not isinstance(cur, dict) or p == "":
-                    return None
-                cur = cur.get(p)
-            return cur
-
-        def look(path: List[str]) -> Any:
-            v = node(path)
-            return v.get("") if isinstance(v, dict) else v
-
-        def branch(path: List[str]) -> bool:
-            return isinstance(node(path), dict)
-
-        def items(path: List[str]) -> Optional[list]:
-            v = node(path)
-            return v if isinstance(v, list) else None
-        return self._live_view(look, branch, items, "pushraker")
-
-    def _ps_state(self) -> str:
-        return str(self._status["print_stats"].get("state") or "")
-
-    def _custom_events(self, data: Dict[str, Any]) -> None:
-        """A status update during a print job: the events custom
-        notifications can be evaluated at. An object excluded counts while
-        paused too; the rest only while printing, and a tool change only
-        from the first layer (the U1 switches toolheads to calibrate)."""
-        ex = data.get("exclude_object") or {}
-        if "excluded_objects" in ex:
-            now = set(ex.get("excluded_objects") or [])
-            for name in sorted(now - self._ev_excluded):
-                self._custom_fire("excluded",
-                                  {"object": self._object_info(name)})
-            self._ev_excluded = now
-        printing = self._ps_state() == "printing"
-        layer = int(((self._status["print_stats"].get("info") or {})
-                     .get("current_layer")) or 0)
-        tool = (data.get("toolhead") or {}).get("extruder")
-        if tool is not None and str(tool) != self._ev_tool:
-            prev, self._ev_tool = self._ev_tool, str(tool)
-            if printing and layer >= 1 and prev:
-                self._custom_fire("tool", {"toolhead": str(tool),
-                                           "previous_toolhead": prev})
-        if not printing:
-            return
-        if layer >= 1 and layer != self._ev_layer:
-            prev, self._ev_layer = self._ev_layer, layer
-            self._custom_fire("layer", {"layer": layer,
-                                        "previous_layer": prev or None})
-        pct = int(self._progress() * 100.)
-        if pct > self._ev_pct:
-            self._ev_pct = pct
-            self._custom_fire("progress", {"progress": pct})
-
-    def _custom_fire(self, kind: str, values: Dict[str, Any]) -> None:
-        """An event happened: the custom notifications evaluated at it
-        (none: nothing to do, which is most of the time)."""
-        items = [c for c in (self.settings or {}).get("custom") or []
-                 if c.get("evaluate") == kind
-                 and cfgmod.custom_rid(c["name"]) in self.rows
-                 and self._custom_stuck.get(c["name"]) != c["when"]]
-        if not items:
-            return
-        if self._ev_busy >= CUSTOM_EVENT_PENDING:
-            if not self._ev_dropped:
-                logging.warning("[pushraker] ⚠️ events are coming faster "
-                                "than custom notifications' When can be "
-                                "evaluated; some are skipped")
-            self._ev_dropped = True
-            return
-        self._ev_dropped = False
-        self._ev_busy += 1
-        self._spawn(self._custom_event(kind, items, values))
-
-    async def _custom_event(self, kind: str, items: List[Dict[str, Any]],
-                            values: Dict[str, Any]) -> None:
-        """Evaluate each one's When at this event (empty: always true);
-        one that's true, and due, is sent."""
-        try:
-            await self._custom_event_run(kind, items, values)
-        finally:
-            self._ev_busy -= 1
-
-    async def _custom_event_run(self, kind: str,
-                                items: List[Dict[str, Any]],
-                                values: Dict[str, Any]) -> None:
-        texts = [cfgmod.when_template(c["when"]) for c in items if c["when"]]
-        ctx = await self._template_context(texts) if texts else {}
-        for c in items:
-            name = c["name"]
-            if c["when"]:
-                try:
-                    true = (await self._render(
-                        cfgmod.when_template(c["when"]), dict(
-                            ctx, event=dict(ctx["event"], name=name,
-                                            trigger=kind, **values)))
-                            ) == "1"
-                except jj.TemplateTimeout as e:
-                    self._custom_stuck[name] = c["when"]
-                    logging.warning("[pushraker] ⚠️ custom notification "
-                                    "%s, When: %s; not evaluated again "
-                                    "until its When is changed", name, e)
-                    continue
-                except jj.TemplateError as e:
-                    if self._custom_err.get(name) != str(e):
-                        logging.warning("[pushraker] custom notification "
-                                        "%s, When: %s", name, e)
-                        self._custom_err[name] = str(e)
-                    continue
-                self._custom_err.pop(name, None)
-                self._custom_state[name] = true
-                if not true:
-                    continue
-            if not self._custom_due(c):
-                continue
-            # Marked now: the next event may come before the send starts
-            self._custom_sent[name] = time.monotonic()
-            self._custom_job[name] = (self._job_number, self._resumes)
-            self._spawn(self._send_custom(c, kind, values=values))
 
     async def _custom_watch(self) -> None:
         """Custom notifications' conditions, every CUSTOM_INTERVAL
@@ -5609,20 +3989,6 @@ class PushNotifications:
             except Exception as e:
                 logging.warning("[pushraker] custom notifications: %s", e)
 
-    def _gcode_sets(self, sets: Dict[str, str], what: str
-                    ) -> Dict[str, str]:
-        """What Jinja from G-code set (which may come from a file someone
-        shared): a topic not on the public ntfy server, where anyone can
-        read any topic, so it can't send the printer's details elsewhere."""
-        sets = dict(sets)
-        st = self.settings or {}
-        if sets.get("topic") and st.get("provider") == "ntfy" and \
-                cfgmod.is_public(str(st.get("server") or "")):
-            logging.warning("[pushraker] ⚠️ %s: topic %r not used: on the "
-                            "public ntfy server G-code can't choose the "
-                            "topic", what, sets.pop("topic"))
-        return sets
-
     async def _macro(self, rid: str, title: str, message: str,
                      priority: str) -> None:
         """A notification from G-code. Its title and message may hold Jinja
@@ -5630,35 +3996,22 @@ class PushNotifications:
         {% endraw %}, so Klipper passes it on): rendered here, with the same
         values as any template. One that fails is sent as written, with
         why."""
-        # \n in a G-code message: a line break
-        title, message = title.replace("\\n", " "), \
-            message.replace("\\n", "\n")
         texts = [t for t in (title, message) if "{{" in t or "{%" in t]
-        sets: Dict[str, str] = {}
         if texts:
             try:
                 ctx = await self._template_context(texts)
-                # priority, image, topic, timezone set in it: as in any
-                # template
-                title, message, sets = await self._render_pair(
-                    title, message, ctx)
+                if title in texts:
+                    title = await self._render(title, ctx)
+                if message in texts:
+                    message = await self._render(message, ctx)
             except jj.TemplateError as e:
                 message = self._lines(message,
-                                      f"⚠️ Template error in the G-code (sent as written): {e}")
-        sets = self._gcode_sets(sets, "macro")
-        # A priority set in it: that priority's row (each has its own
-        # services, and may be off)
-        want = sets.pop("priority", None)
-        if want:
-            if f"macro_{want}" not in self.rows:
-                self._skip("macro", f"{want} notifications are off")
-                return
-            rid, priority = f"macro_{want}", want
+                                      f"⚠️ Template in the G-code failed: {e}")
         await self._send(
             rid, self._title("macro", title=title), message,
             filename=self._job_filename if self._job_active else "",
             key="macro", event={"title": title, "message": message or None,
-                                "priority": priority}, sets=sets)
+                                "priority": priority})
 
     def _track_calibration(self) -> None:
         """Manual calibrations (touchscreen: bed levelling, XYZ offset,
@@ -5936,39 +4289,6 @@ class PushNotifications:
         if self._exist_seen[ch] == now:
             return      # already reported (e.g. the same change twice)
         self._exist_seen[ch] = now
-        await self._report_filament_change(ch, now)
-
-    def _track_feed(self, obj: str, values: Dict[str, Any]) -> None:
-        """A feeder's toolheads: a load or unload from the screen ending."""
-        for key, v in (values or {}).items():
-            ch = self._ext_index(key)
-            if ch is None or not isinstance(v, dict) or \
-                    "channel_state" not in v:
-                continue
-            state = str(v.get("channel_state") or "")
-            was = self._feed_state.get((obj, key))
-            self._feed_state[(obj, key)] = state
-            if was is None or was == state:
-                continue        # the first look only learns the state
-            logging.info("[pushraker] %s %s: %s -> %s", obj, key, was, state)
-            if state == "unload_finish":
-                self._spawn(self._feed_change(ch, False))
-            elif state.endswith("_finish") and "load" in state and \
-                    not state.startswith("unload"):
-                self._spawn(self._feed_change(ch, True))
-
-    async def _feed_change(self, ch: int, now: bool) -> None:
-        # The printer's filament info arrives shortly after
-        await asyncio.sleep(FILAMENT_CHANGE_SETTLE)
-        await self._report_filament_change(ch, now)
-
-    async def _report_filament_change(self, ch: int, now: bool) -> None:
-        said = self._fil_said.get(ch)
-        if said and said[0] == now and \
-                time.monotonic() - said[1] < FILAMENT_CHANGE_SAME:
-            return      # the feeder and the sensor saw the same change
-        self._fil_said[ch] = (now, time.monotonic())
-        ptc = self._status["print_task_config"]
         if self._job_active or "filament_change" not in self.rows or \
                 ("loaded" if now else "unloaded") \
                 not in self.filament_change_events:
@@ -5985,15 +4305,10 @@ class PushNotifications:
         if name:
             self._exist_names[ch] = name
         title = self._title("filament_loaded" if now else "filament_unloaded")
-        full = self._full_weight(spool)
-        left = ""
-        if remaining is not None and remaining > 0:
-            # 161/1000 g left: of the spool's full weight, when known
-            left = f"{remaining:.0f}/{full:.0f} g left" if full else \
-                f"{remaining:.0f} g left"
         body = self._lines(
             f"{self._toolhead(ch)}: {name}" if name else self._toolhead(ch),
-            left)
+            f"{remaining:.0f} g left" if remaining is not None
+            and remaining > 0 else "")
         # The spool picture: its colour from Spoolman or the printer, the
         # amount only when Spoolman knows it
         row = dict(toolhead=self._toolhead(ch), word="",
@@ -6009,7 +4324,6 @@ class PushNotifications:
                                           "grams_left": remaining
                                           if remaining and remaining > 0
                                           else None,
-                                          "grams_full": full or None,
                                           "spool_id": sid or None}})
 
     async def _intervention_hold(self, hold: int, what: str) -> None:
@@ -6116,14 +4430,11 @@ class PushNotifications:
         except Exception:
             objs = []
         self.printer = printers.detect(objs)
-        self._status_seen = False
         try:
             info = await kapis.get_klippy_info()
             self._klipper_version = (info or {}).get("software_version")
-            self._hostname = str((info or {}).get("hostname") or "")
         except Exception:
             self._klipper_version = None
-        self._spawn(self._discover_cameras())
         if first_ready:
             logging.info("[pushraker] printer: %s (drivers: %s, "
                          "extruders: %d)", self.printer.name,
@@ -6146,9 +4457,6 @@ class PushNotifications:
         for obj in list(self.printer.drivers) + self.printer.extruders:
             self._status.setdefault(obj, {})
         self._ace_on = ACE_OBJECT in objs
-        self._feeds = [o for o in objs if o.startswith(FEED_PREFIX)]
-        for obj in self._feeds:
-            self._status.setdefault(obj, {})
         # Subscribed whether or not their rows are on: the rows can be
         # turned on from the page at any time (the objects are cheap)
         if True:
@@ -6169,10 +4477,9 @@ class PushNotifications:
             for obj in chamber:
                 self._status.setdefault(obj, {})
         try:
-            status = await kapis.subscribe_objects(self._with_printer_fields(
+            status = await kapis.subscribe_objects(
                 dict({"print_stats": ["state", "filename", "info",
-                                      "print_duration", "total_duration",
-                                      "filament_used"],
+                                      "print_duration", "filament_used"],
                       "virtual_sdcard": ["progress", "file_position"],
                       "exclude_object": ["objects", "current_object",
                                          "excluded_objects"],
@@ -6187,26 +4494,19 @@ class PushNotifications:
                                                    "action_code"]}
                         if "machine_state_manager" in objs else {}),
                      **{"idle_timeout": ["state"]},
-                     **{"toolhead": ["extruder"]},
                      **({ACE_OBJECT: ACE_FIELDS} if self._ace_on else {}),
-                     **{f: None for f in self._feeds},
-                     **chamber)),
-                *((self._on_status_update,) if self._status_cb else ()),
-                default={})
+                     **chamber),
+                self._on_status_update, default={})
         except Exception as e:
             logging.error("[pushraker] subscribe failed: %s", e)
             status = {}
         for obj in self._status:
             self._status[obj].update(status.get(obj) or {})
-        self.printer.adjust_status(status, self._status)
         self._calibrating = self._cal_action = None   # Klipper restarted
         self._ace_src = self._ace_sources()
         self._exist_seen = None
         self._exist_gen += 1
         self._track_filament_change()
-        self._feed_state.clear()
-        for obj in self._feeds:
-            self._track_feed(obj, self._status[obj])
         self._cal_hold += 1
         ps = self._status["print_stats"]
         if ps.get("state") in ("printing", "paused"):
@@ -6216,123 +4516,16 @@ class PushNotifications:
                                        self._progress(), check_start=False)
         else:
             self._job_active = False
-        # A print that ended just before a restart: its Bed cooled
-        self._spawn(self._resume_bed_watch())
         if first_ready and "power_loss" in self.rows and \
                 self.printer.power_loss_env_paths and self._booted_recently():
             self._spawn(self._check_power_loss())
 
-    def _chosen_cameras(self) -> Set[str]:
-        """The cameras the settings use (the default and per notification):
-        always offered, whatever they give."""
-        s = getattr(self, "settings", None) or {}
-        out = {str(s.get("camera") or "")}
-        for tpl in (s.get("templates") or {}).values():
-            if isinstance(tpl, dict) and tpl.get("camera"):
-                out.add(str(tpl["camera"]))
-        out.discard("")
-        return out
-
-    async def _check_webcams(self) -> None:
-        """Moonraker's webcams whose snapshot address gives no JPEG or PNG
-        (the same probe as discovery), once per Klippy ready: not offered
-        (_env). Only an explicit snapshot address is asked; one made from a
-        stream (an MJPEG stream's first frame) is left alone."""
-        bad: Set[str] = set()
-        try:
-            wc = self.server.lookup_component("webcam", None)
-            found = wc.get_webcams() if wc is not None else {}
-            if inspect.isawaitable(found):
-                found = await found
-            for name, cam in dict(found).items():
-                snap = str(getattr(cam, "snapshot_url", "") or "")
-                if not snap or not getattr(cam, "enabled", True):
-                    continue
-                try:
-                    url = await cam.get_snapshot_url(convert_local=False)
-                except Exception:
-                    url = snap if "://" in snap else \
-                        "http://127.0.0.1/" + snap.lstrip("/")
-                url = await self.eventloop.run_in_thread(
-                    discover.local_url, url)
-                if not await self.eventloop.run_in_thread(PROBE_IMAGE, url):
-                    bad.add(str(name))
-        except Exception as e:
-            logging.warning("[pushraker] webcam check: %s", e)
-            return
-        self._bad_webcams = bad
-        if bad:
-            logging.info("[pushraker] webcams with no snapshot picture, not "
-                         "offered unless chosen: %s", ", ".join(sorted(bad)))
-
-    async def _discover_cameras(self) -> None:
-        """Camera servers Moonraker doesn't know (pushraker.discover), once
-        per Klippy ready: they appear in the camera choices; none is ever
-        chosen for the user."""
-        self._found_cams = {}
-        await self._check_webcams()
-        try:
-            known = [c.get("snapshot", "") for c in
-                     (await self._env()).cameras.values()]
-            found = await self.eventloop.run_in_thread(FIND_CAMERAS, known)
-        except Exception as e:
-            logging.warning("[pushraker] camera discovery: %s", e)
-            found = {}
-        self._found_cams = found
-        if found:
-            self.env = await self._env()
-            logging.info("[pushraker] cameras Moonraker doesn't list: %s",
-                         ", ".join(f"{n} ({c['snapshot']})"
-                                   for n, c in found.items()))
-        await self._discover_web_pages()
-
-    async def _discover_web_pages(self) -> None:
-        """The printer's web pages (pushraker.discover.web_pages), once per
-        Klippy ready, leaving out Moonraker's port and the cameras'."""
-        skip = set()
-        try:
-            skip.add(int(self.server.get_host_info().get("port") or 7125))
-        except Exception:
-            skip.add(7125)
-        for cam in self.env.cameras.values():
-            m = re.match(r":(\d+)", str(cam.get("stream") or ""))
-            if m:
-                skip.add(int(m.group(1)))
-        try:
-            self._web_pages = await self.eventloop.run_in_thread(
-                FIND_WEB_PAGES, sorted(skip))
-        except Exception as e:
-            logging.warning("[pushraker] web page discovery: %s", e)
-            return
-        if self._web_pages:
-            logging.info("[pushraker] web pages: %s", ", ".join(
-                f"{p['name']} (port {p['port']})" for p in self._web_pages))
-
-    async def _on_status_event(self, data: Dict[str, Any],
-                               *_: Any) -> None:
-        """server:status_update (older Moonraker): every object any
-        component subscribed to; ours are picked out like a callback's."""
-        if isinstance(data, dict) and self._ready_once:
-            await self._on_status_update(data, None)
-
     async def _on_status_update(
-        self, data: Dict[str, Any], _eventtime: Optional[float]
+        self, data: Dict[str, Any], _eventtime: float
     ) -> None:
-        if not self._status_seen:
-            # Once per Klippy ready: proof the subscription works, and which
-            # way this Moonraker delivers it
-            self._status_seen = True
-            logging.info("[pushraker] status updates arriving (%s): %s",
-                         "callback" if self._status_cb
-                         else "server:status_update",
-                         ", ".join(sorted(o for o in data
-                                          if o in self._status)) or "-")
         for obj, values in data.items():
             if obj in self._status and isinstance(values, dict):
                 self._status[obj].update(values)
-        self.printer.adjust_status(data, self._status)
-        if self._ppw is not None and not self._pp_sent:
-            self._ppw.status(data)
         ps = self._status["print_stats"]
         if "print_task_config" in data and self._job_active:
             self._check_spool_switch()
@@ -6348,15 +4541,10 @@ class PushNotifications:
             self._track_preprint()
         if "filament_exist" in (data.get("print_task_config") or {}):
             self._track_filament_change()
-        for obj in self._feeds:
-            if obj in data:
-                self._track_feed(obj, data[obj])
         if ACE_OBJECT in data:
             self._track_ace()
         if self._job_active and self._ch:
             self._track_chamber()
-        if self._job_active:
-            self._custom_events(data)
         if not self._job_active or ps.get("state") != "printing":
             return
         filename = ps.get("filename") or ""
@@ -6387,18 +4575,16 @@ class PushNotifications:
             self._by_object = False
             logging.info("[pushraker] no object markers in %s: "
                          "reported as one job", shown(filename))
-        if self._layer1_pd is None:
-            # Before anything sent at layer 1, so its text and its
-            # template's job.time see the same time left
-            layer = (ps.get("info") or {}).get("current_layer")
-            if layer is not None and int(layer) >= 1:
-                self._layer1_pd = float(ps.get("print_duration") or 0.)
         if not self._pp_sent:
             # Layer 1 began: the start routine is over, even if a chosen
             # calibration was skipped (a toolhead already calibrated)
             layer = (ps.get("info") or {}).get("current_layer")
             if layer is not None and int(layer) >= 1:
                 self._preprint_done(filename)
+        if self._layer1_pd is None:
+            layer = (ps.get("info") or {}).get("current_layer")
+            if layer is not None and int(layer) >= 1:
+                self._layer1_pd = float(ps.get("print_duration") or 0.)
         if "layer_started" in self.rows and not self._layer_started_sent:
             # Layer 1 begins once the start routine (homing, bed mesh,
             # flow calibration) is over: time to watch the first layer
@@ -6459,31 +4645,6 @@ class PushNotifications:
             "status_report", self._title("status_report"),
             self._lines(shown(filename), ", ".join(parts) + ".",
                         self._time_left())))
-
-    def _sliced_at(self, filename: str) -> Optional[datetime.datetime]:
-        """When the slicer wrote the file (its header): in UTC when the
-        slicer says so, else as written (the slicer's own clock). Runs in a
-        thread: it reads the file."""
-        if not filename:
-            return None
-        try:
-            fm = self.server.lookup_component("file_manager")
-            path = os.path.join(fm.get_directory("gcodes"), filename)
-            with open(path, "rb") as f:
-                m = RX_SLICED.search(f.read(HEADER_HEAD))
-            if m is None:
-                return None
-            hms = m.group(2).decode()
-            at = datetime.datetime.strptime(
-                m.group(1).decode() + " " + hms,
-                "%Y-%m-%d %H:%M:%S" if hms.count(":") == 2
-                else "%Y-%m-%d %H:%M")
-            return at.replace(tzinfo=datetime.timezone.utc) \
-                if m.group(3) else at
-        except Exception as e:
-            logging.warning("[pushraker] could not read %s: %s",
-                            shown(filename), e)
-            return None
 
     def _is_by_object(self, filename: str) -> bool:
         """Whether the slicer's config block (at the end of the file) says
@@ -6602,13 +4763,6 @@ class PushNotifications:
         (print_task_config), and so which runs to wait for."""
         self._pp_names, self._pp_pending = [], set()
         self._pp_running, self._pp_sent = None, True
-        self._ppw = None
-        if getattr(self.printer, "generic_preprint", False) and \
-                not recovered:
-            # What runs isn't known in advance: watched until layer 1
-            self._ppw = preprint.PreprintWatch(self.printer.objects)
-            self._pp_sent = False
-            return
         cal = self.printer.preprint_calibrations
         if not cal or recovered:
             return
@@ -6663,14 +4817,6 @@ class PushNotifications:
 
     def _preprint_done(self, filename: str) -> None:
         self._pp_sent = True
-        if self._ppw is not None:
-            # The generic watch: what ran, with how long; nothing ran,
-            # nothing to say
-            self._ppw.first_layer()
-            self._pp_names = self._ppw.ran()
-            self._ppw = None
-            if not self._pp_names:
-                return
         if cfgmod.PREPRINT_ROW not in self.rows:
             return
         done = ", ".join(self._pp_names)
@@ -6777,12 +4923,6 @@ class PushNotifications:
         if cur and cur != self._obj_cur:
             prev = self._obj_cur
             self._obj_cur = cur
-            if cur not in self._obj_start and \
-                    self._ps_state() == "printing":
-                self._custom_fire("object", {
-                    "object": self._object_info(cur),
-                    "previous_object": self._object_info(prev)
-                    if prev else None})
             self._obj_start.setdefault(cur, layer)
             if prev is not None and prev != cur and \
                     prev not in (ex.get("excluded_objects") or []):
@@ -6820,7 +4960,7 @@ class PushNotifications:
             return (None, None)
         try:
             fm = self.server.lookup_component("file_manager")
-            meta = self._meta(filename, fm)
+            meta = fm.get_metadata_storage().get(filename, {}) or {}
             return (meta.get("gcode_start_byte"), meta.get("gcode_end_byte"))
         except Exception as e:
             logging.warning("[pushraker] metadata lookup failed: %s",
@@ -7030,7 +5170,7 @@ class PushNotifications:
         """Slicer filament weight per slicer filament (T0..)."""
         try:
             fm = self.server.lookup_component("file_manager")
-            meta = self._meta(filename, fm)
+            meta = fm.get_metadata_storage().get(filename, {}) or {}
         except Exception:
             return {}
         weights = meta.get("filament_weight")
@@ -8210,7 +6350,6 @@ class PushNotifications:
             sent_to: List[Destination] = []
             for d in dests:
                 prio: Optional[str] = None
-                d_topic = ""
                 d_kind = kind
                 if packer is None:
                     msgs = []
@@ -8218,7 +6357,6 @@ class PushNotifications:
                         await self._parity(rid, t, b, event)
                         t, b, sets = await self._compose(rid, t, b, event)
                         prio = prio or sets.get("priority")
-                        d_topic = d_topic or sets.get("topic", "")
                         d_kind = IMAGE_SET.get(sets.get("image", ""), d_kind)
                         msgs.append((t, b, rows))
                     keyed = [((k,), m) for k, m in enumerate(msgs)]
@@ -8240,7 +6378,6 @@ class PushNotifications:
                             t, body, sets = await self._compose(
                                 rid, t, body, ev)
                             prio = prio or sets.get("priority")
-                            d_topic = d_topic or sets.get("topic", "")
                             d_kind = IMAGE_SET.get(sets.get("image", ""),
                                                    d_kind)
                         keyed.append((tuple(idx), (
@@ -8262,11 +6399,9 @@ class PushNotifications:
                         path = paths[key]
                     out.append((t, b, path))
                 per_dest.append(out)
-                # The priority and topic a template set, for this
-                # destination
-                topic = d_topic or self._template(rid).get("topic") or ""
-                sent_to.append(self._at_priority(rid, [d], prio, topic)[0]
-                               if prio or topic else d)
+                # The priority a template set, for this destination
+                sent_to.append(self._at_priority(rid, [d], prio)[0]
+                               if prio else d)
             report: List[Dict[str, Any]] = []
             results = self._outcomes(rid, dests, await asyncio.gather(*(
                 self._deliver(rid, d, t, msgs, report)
