@@ -887,7 +887,9 @@ python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubuserco
 - **Timelapse on, during a print**: pushraker takes its own fresh frame
   through Creality's capture and removes it again. If it coincides with
   Creality's own per-layer frame, it leaves it, so the timelapse video may
-  very rarely contain one extra frame (1/15 s). If its capture fails, the
+  very rarely contain one extra frame (1/15 s). After a print it waits
+  the few seconds the Hi takes to make its video, so *Print complete*
+  has a current picture too. If its capture fails, the
   Hi's last per-layer picture is sent, and when that is more than a minute
   old the text ends with e.g. "Camera image from 74 s ago: Creality takes
   one per layer."

@@ -256,25 +256,106 @@ open({tl!r}, "ab").write({frame(b"NEW")!r})
     check("idle: a captured frame, the file it made removed",
           data == b"\xff\xd8\xffNEW" and not os.path.exists(tl), why)
     check("...`capture 0`, once", open(calls).read() == "capture 0\n")
-    # Just after a print (Creality is making the video): its last frame,
-    # read only
+    # Just after a print: a fresh frame once Creality's video is made
     os.remove(calls)
-    with open(tl, "wb") as f:
-        f.write(frame(b"F01") + frame(b"END"))
-    data, why = c.snapshot("camera", {"state": "complete",
-                                      "since_end": 120.})
-    check("within 10 minutes of a print's end: the last frame, read only",
-          data == b"\xff\xd8\xffEND" and not os.path.exists(calls),
-          (data, why))
+    refer_switch(1)
+    end = frame(b"F01") + frame(b"END")
+
+    def end_file():
+        with open(tl, "wb") as f:
+            f.write(end)
+        os.utime(tl, (2000000, 2000000))
+        if os.path.exists(calls):
+            os.remove(calls)
+
+    def assembler(pid="77", start=0., run=1.):
+        """Creality's ffmpeg making the video from the file, for `run` s
+        from `start` s on."""
+        def go():
+            time.sleep(start)
+            d = os.path.join(proc, pid)
+            os.makedirs(d)
+            with open(os.path.join(d, "cmdline"), "wb") as f:
+                f.write(b"/usr/bin/ffmpeg\x00-framerate\x0015\x00-i\x00"
+                        + tl.encode() + b"\x00-vcodec\x00copy\x00")
+            time.sleep(run)
+            shutil.rmtree(d)
+        th = threading.Thread(target=go)
+        th.start()
+        return th
+
+    def end_untouched():
+        return open(tl, "rb").read() == end \
+            and os.stat(tl).st_mtime == 2000000
+
+    end_file()
+    th = assembler(start=0.4, run=1.0)
+    t0 = time.monotonic()
+    data, why = c.snapshot("camera", {"state": "complete", "since_end": 0.1})
+    took = time.monotonic() - t0
+    th.join()
+    check("print complete: waits for Creality's video (starting 0.4 s "
+          "later, 1 s long), then a fresh frame", data == b"\xff\xd8\xffNEW"
+          and took >= 1.4 and open(calls).read() == "capture 0\n",
+          (data, why, took))
+    check("...the file restored exactly", end_untouched())
+    end_file()
+    t0 = time.monotonic()
+    data, why = c.snapshot("camera", {"state": "complete", "since_end": 0.2})
+    took = time.monotonic() - t0
+    check("...no video made within ASSEMBLY_DUE (timelapse empty, say): "
+          "a fresh frame after it", data == b"\xff\xd8\xffNEW"
+          and creality.ASSEMBLY_DUE - 0.4 <= took
+          < creality.ASSEMBLY_DUE + 1.5 and end_untouched(), (data, took))
+    end_file()
+    t0 = time.monotonic()
+    data, why = c.snapshot("camera", {"state": "complete", "since_end": 30.})
+    took = time.monotonic() - t0
+    check("...later on (the video made by then): a fresh frame at once",
+          data == b"\xff\xd8\xffNEW" and took < 1.5 and end_untouched(),
+          (data, took))
+    end_file()
     data, why = c.snapshot("camera", {"state": "standby", "since_end": None})
     check("...also when Moonraker restarted meanwhile (the file is new)",
-          data == b"\xff\xd8\xffEND" and not os.path.exists(calls), why)
+          data == b"\xff\xd8\xffNEW" and end_untouched(), why)
+    # Cancelled: Creality's video comes 8-26 s later; fresh frame now. The
+    # assembly starting during ours: the file left as it is
+    end_file()
+    th = assembler(start=0.4, run=1.5)
+    data, why = c.snapshot("camera", {"state": "cancelled", "since_end": 1.})
+    th.join()
+    check("print cancelled, the video starting during ours: fresh frame, "
+          "the file left as it is", data == b"\xff\xd8\xffNEW"
+          and open(tl, "rb").read() == end + frame(b"NEW"), (data, why))
+    # The video takes longer than ASSEMBLY_MAX: the last frame, read only
+    end_file()
+    amax = creality.ASSEMBLY_MAX
+    creality.ASSEMBLY_MAX = 0.5
+    th = assembler(run=1.5)
+    time.sleep(0.2)
+    data, why = c.snapshot("camera", {"state": "complete", "since_end": 5.})
+    th.join()
+    creality.ASSEMBLY_MAX = amax
+    check("the video still being made after ASSEMBLY_MAX: the last frame, "
+          "read only, with its time", data == b"\xff\xd8\xffEND"
+          and not os.path.exists(calls) and end_untouched()
+          and getattr(data, "taken", None) == 2000000, (data, why))
+    refer_switch(0)
+    end_file()
+    t0 = time.monotonic()
+    data, why = c.snapshot("camera", {"state": "complete", "since_end": 0.1})
+    check("...timelapse off: no wait for a video", data ==
+          b"\xff\xd8\xffNEW" and time.monotonic() - t0 < 1.5
+          and end_untouched(), (data, why))
     os.remove(tl)
+    os.remove(calls)
     data, why = c.snapshot("camera", {"state": "complete",
-                                      "since_end": 120.})
+                                      "since_end": 0.1})
     check("...no file (no video pending): a capture, the file removed again",
           data == b"\xff\xd8\xffNEW" and not os.path.exists(tl)
           and open(calls).read() == "capture 0\n", (data, why))
+    check("assembling(): only a process reading the timelapse file",
+          not c.assembling())
     # Creality's own capture running
     os.makedirs(os.path.join(proc, "42"))
     with open(os.path.join(proc, "42", "cmdline"), "wb") as f:
