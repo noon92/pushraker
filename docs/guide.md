@@ -323,6 +323,9 @@ alone is the same). `job.time.eta` follows the selected method.
 
 ## Templates
 
+Every value a template can use, with examples: [values](values.md);
+which printers have which: [values by printer](values-by-printer.md).
+
 Each notification's title and contents are [Jinja](https://jinja.palletsprojects.com/en/stable/templates/)
 templates, the same language as Klipper macros. Each row's **Edit**
 button opens the editor: **Title**, **Contents**, **Image** and a
@@ -767,6 +770,19 @@ settings), custom notifications (all deleted), or all settings (those,
 and the main switch, printer name, cameras and time zone). What else you
 changed on the page stays. Nothing is saved until you click Save & Apply;
 that is also when the tokens and passwords are removed.
+
+**One notification** can go in a file of its own: **Export ▴** in its
+editor (Download, Send by push, Send by email; what's in the editor,
+unsaved changes included; never addresses, tokens, server settings or its
+topic), and **Import…** under the custom notifications. Importing says
+what the file is and what doesn't fit this printer (older or newer
+pushraker, another printer model, a notification this printer can't send,
+values it doesn't have or this version doesn't know, settings this
+version doesn't use). A stock notification replaces that one; a custom
+one replaces the one with its name (both after a 5-second countdown), or
+is added. Like Restore, it lands on the page: Save & Apply saves it. The
+format, with examples (also for having an AI assistant write one):
+[notification files](notification-files.md).
 
 **Restore…** loads a backup file onto the page. ⚠️ All settings are
 replaced by the backup's (excluding tokens, passwords and the webhook URL,

@@ -332,11 +332,13 @@ A request that is merely built proves nothing.
 ```sh
 python3 tests/test_pushraker.py      # the component against a stand-in Moonraker (also runs test_settings.py, test_install.py)
 python3 tests/test_settings.py
-python3 tests/test_creality_camera.py tests/test_preprint.py tests/test_discover.py tests/test_ntfy.py
+python3 tests/test_creality_camera.py; python3 tests/test_preprint.py; python3 tests/test_discover.py; python3 tests/test_ntfy.py
+python3 tests/test_values.py         # also: the generated values docs match the Objects tree
+python3 tests/gen_values.py          # after changing what the Objects tree offers: regenerate them
 python3 tests/serve_page.py 7813     # the settings page in a browser, no printer
 ```
 
-- A new profile: a test with the vendor's object list (detection, rows, status mapping), fake vendor files or servers for its camera (see `test_creality_camera.py`: fake `capture`, fake ffmpeg, a fake Unix-socket stream server with slow, refusing and closing variants).
+- A new profile: its object list in `tests/fixtures/objects-<printer>.json` and a row in `tests/gen_values.py`'s `PRINTERS`, so the values docs and the Import notices know it; a test with the vendor's object list (detection, rows, status mapping), fake vendor files or servers for its camera (see `test_creality_camera.py`: fake `capture`, fake ffmpeg, a fake Unix-socket stream server with slow, refusing and closing variants).
 - Page JS: `node --check` on the extracted `<script>`, and a load in headless Chrome to catch errors only real data triggers.
 
 ### 6.3 A second Moonraker on another port (no risk to the vendor's)
