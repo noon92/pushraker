@@ -1820,18 +1820,17 @@ def notification_values(s: Dict[str, Any], kind: str, ident: str,
 def notification_export(values: Dict[str, Any], kind: str, ident: str,
                         version: str, model: str) -> Dict[str, Any]:
     """The file for one notification, from notification_values' result:
-    no addresses, tokens or server settings (and no topic)."""
+    complete, every setting written out even when it equals today's
+    default (a default can change in a later version); no addresses,
+    tokens or server settings (and no topic)."""
     if kind == "custom":
         c = values["custom"]
-        # What differs from a new one, and what defines it
-        n = {k: c[k] for k in FILE_CUSTOM_FIELDS if k in c and (
-            c[k] != CUSTOM_DEFAULT[k] or k == "evaluate"
-            or (k in ("when", "title", "contents") and c[k]))}
+        n = {k: c[k] for k in FILE_CUSTOM_FIELDS if k in c}
         head: Dict[str, Any] = {"kind": "custom", "name": c["name"]}
     else:
         n = dict(values["row"])
-        n.update({k: v for k, v in (values["template"] or {}).items()
-                  if k in FILE_TEMPLATE_FIELDS})
+        tpl = dict(template_default(ident), **(values["template"] or {}))
+        n.update({k: tpl[k] for k in FILE_TEMPLATE_FIELDS})
         n.update(values["options"])
         head = {"kind": "stock", "id": ident}
     return dict({"pushraker_notification": NOTIFICATION_FORMAT,

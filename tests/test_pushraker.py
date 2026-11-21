@@ -2149,10 +2149,11 @@ async def test_notification_files():
             complete_objects="once")))["file"]
         check("a file: from, kind, id, the settings; never a topic",
               f["from"]["printer"] == "generic" and f["kind"] == "stock"
-              and f["id"] == "complete" and f["notification"] == {
-                  "enabled": False, "priority": "high", "email": True,
-                  "title": "Done {{ job.file }}", "complete_objects": "once"},
-              f)
+              and f["id"] == "complete" and f["notification"] == dict(
+                  {k: v for k, v in pn.cfgmod.template_default(
+                      "complete").items() if k != "topic"},
+                  enabled=False, priority="high", email=True,
+                  title="Done {{ job.file }}", complete_objects="once"), f)
         back = await call("notification_import", file=f)
         check("...imported: row, template edits, the row's own options",
               back["row"] == {"enabled": False, "priority": "high",
@@ -2183,31 +2184,35 @@ async def test_notification_files():
               and "topic" not in out["file"]["notification"]
               and "name" not in out["file"]["notification"], out)
         first = await call("notification_import", file=custom)
-        small = (await call("notification", via="download", notification=dict(
+        whole = (await call("notification", via="download", notification=dict(
             custom, notification=dict(first["custom"]))))["file"]
-        check("an exported custom one holds only what differs from a new "
-              "one, and what defines it", small["notification"] == {
-                  "evaluate": "layer", "when": "job.layer % 5 == 0",
-                  "title": "Layer {{ job.layer }}"}, small["notification"])
-        again = await call("notification_import", file=small)
-        small2 = (await call("notification", via="download",
+        check("an exported custom one is complete: every setting but its "
+              "name and topic", set(whole["notification"]) == set(
+                  pn.cfgmod.CUSTOM_DEFAULT) - {"topic"}, whole["notification"])
+        again = await call("notification_import", file=whole)
+        whole2 = (await call("notification", via="download",
                              notification=dict(custom, notification=dict(
                                  again["custom"]))))["file"]
         check("...imported back it is the same settings, and exports the "
               "same file", again["custom"] == first["custom"]
-              and small2 == small, (again, small2))
-        odd = dict(custom, notification={
-            "enabled": False, "email": True, "priority": "max",
-            "evaluate": "poll", "when": "", "title": "", "contents": "x",
-            "image": "none", "repeat": "minutes", "repeat_minutes": 7})
-        first = await call("notification_import", file=odd)
-        small = (await call("notification", via="download", notification=dict(
-            custom, notification=dict(first["custom"]))))["file"]
-        again = await call("notification_import", file=small)
-        check("...also with every setting away from its default (an empty "
-              "title too)", again["custom"] == first["custom"]
-              and small["notification"]["title"] == ""
-              and "when" not in small["notification"], (first, small, again))
+              and whole2 == whole, (again, whole2))
+        plain = (await call("notification", via="download",
+                            notification=stock("complete")))["file"]
+        d = pn.cfgmod.template_default("complete")
+        check("a stock one is complete too: its text, image, camera and "
+              "options as they are, even at today's default",
+              all(plain["notification"].get(k) == d[k] for k in (
+                  "title", "contents", "image", "camera", "remaining"))
+              and "complete_objects" in plain["notification"]
+              and "topic" not in plain["notification"], plain["notification"])
+        back = await call("notification_import", file=plain)
+        check("...imported, text equal to the default isn't an edit",
+              back["template"] is None, back["template"])
+        changed = json.loads(json.dumps(plain))
+        changed["notification"]["title"] = "Mine"
+        back = await call("notification_import", file=changed)
+        check("...text that differs is", back["template"] == {"title": "Mine"},
+              back["template"])
         # The camera: only one this printer has
         here = ((c.settings.get("templates") or {}).get("paused")
                 or {}).get("camera", "")
