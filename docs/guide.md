@@ -831,6 +831,59 @@ built with. Nothing is sent until you set it up:
 To stop all notifications, uncheck **Enable notifications**. Upgrades
 come with the firmware: there is no separate pushraker update.
 
+## Features by printer
+
+From the code: what each printer profile gives. ✅ yes, ➖ partly or when
+the printer has it (see the notes), ❌ no. "Other" is any Klipper printer
+with Moonraker and no profile of its own (the generic profile).
+
+**Notifications**
+
+| Notification | Snapmaker U1 | Creality Hi | Other |
+|---|---|---|---|
+| Print started | ✅ with the calibrations chosen | ✅ | ✅ |
+| Pre-print calibrations complete | ✅ | ✅ bed mesh | ➖ ¹ |
+| Paused / Resumed | ✅ | ✅ | ✅ |
+| First layer started, Layer complete | ✅ | ✅ | ➖ ² |
+| Progress, Status report | ✅ | ✅ | ✅ |
+| Print complete, Print cancelled | ✅ | ✅ from the job event | ✅ |
+| Bed cooled | ✅ | ✅ | ➖ heated bed |
+| From macros and G-code | ✅ | ✅ | ✅ |
+| Manual calibrations (touchscreen) | ✅ | ❌ | ❌ |
+| Filament loaded / unloaded | ✅ | ❌ | ❌ |
+| Not enough filament, Spool running low | ➖ Spoolman | ➖ Spoolman | ➖ Spoolman |
+| Switched to backup spool, ACE slot ran out | ✅ | ❌ | ❌ |
+| Chamber: waiting, reached, faults | ✅ | ❌ no chamber | ➖ ³ |
+| Error | ✅ coded faults | ✅ | ✅ |
+| Warning (coded, print continues) | ✅ | ❌ | ❌ |
+| Klipper shutdown | ✅ | ✅ | ✅ |
+| Power loss recovery | ✅ | ❌ | ❌ |
+| Driver running hot | ✅ | ❌ no reporting drivers | ➖ ⁴ |
+
+**Everything else**
+
+| Feature | Snapmaker U1 | Creality Hi | Other |
+|---|---|---|---|
+| Camera picture | ✅ Moonraker webcam | ✅ the camera's live stream | ➖ ⁵ |
+| Live Camera link | ✅ | ✅ the Hi's live page (:8000) | ➖ ⁵ |
+| Render (the file's picture) | ✅ | ✅ from the file | ✅ |
+| Time left and ETA | ✅ Snapmaker method by default | ✅ | ✅ |
+| Layers in the text and templates | ✅ | ✅ Creality's count | ➖ ² |
+| Print-end and cancel snapshots (print hooks) | ✅ | ❌ ⁶ | ➖ ⁶ |
+| Excluded and per-object notifications | ✅ | ✅ | ✅ |
+| Toolheads, filament and spools in templates | ✅ | ➖ Klipper's values only | ➖ Klipper's values only |
+| Printer URL default and Fill in | ✅ `http://<host>/` | ✅ Fluidd `http://<host>:4408/` | ➖ ⁷ |
+| Settings page | `http://<printer>/notifications/` | `http://<printer>:7125/server/pushraker/page` | the same, or an nginx alias |
+| Install | built into the Extended Firmware | SSH one-liner (`install.py`) | SSH one-liner or pip |
+
+¹ Bed mesh, Z tilt and quad gantry level, from stock Klipper's messages, when the printer has them; reported at the first layer with how long each took.
+² When the file sets them with `SET_PRINT_STATS_INFO` (the slicer's start and layer-change G-code), or the printer's Klipper counts layers itself.
+³ A chamber heater (`heater_generic`, set by `M141`/`M191`) or a DragonBreath.
+⁴ TMC2240 or TMC5160 drivers on X/Y (they report their temperature).
+⁵ A Moonraker webcam whose snapshot gives a picture, or a camera server found on the printer (ports 8080/8081, nginx `/webcam/`). WebRTC-only cameras need a printer profile.
+⁶ *Print complete* and *Print cancelled* are sent from the print's end either way; the snapshot before the printer parks needs `_PRINT_END_NTFY` / `_CANCEL_PRINT_NTFY` called from your macros (`install.py --klipper` adds the macro file).
+⁷ Fill in offers the web pages found on the printer (never Moonraker's port).
+
 ## Creality Hi
 
 pushraker runs on the Creality Hi's stock firmware: no custom firmware, and
