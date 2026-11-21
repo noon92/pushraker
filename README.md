@@ -13,19 +13,71 @@ own web page, live, with no Moonraker or Klipper restart.
 It grew out of the Push Notifications feature of the
 [Snapmaker U1 Extended Firmware](https://github.com/paxx12-snapmaker-u1/SnapmakerU1-Extended-Firmware),
 where it is built in. User documentation: the
-[Push Notifications guide](docs/guide.md).
+[Push Notifications guide](docs/guide.md). Bringing it to another
+printer: the [porting guide](docs/porting-guide.md).
 
-**Status: 0.3.** The component has been in
-use on the Snapmaker U1 for a while; the page, the settings file and the
-installer are new. Other printers: the generic parts work (Klipper's
-standard objects: print_stats, exclude_object, heater_generic, tmc
-drivers, Moonraker's webcams and Spoolman); printer-specific parts are
-behind `printers/`, one module per printer; `snapmaker_u1.py` is the
-first. Notifications a printer can't produce (the U1's touchscreen
-calibrations, coded warnings, power-loss recovery, toolhead-map refills,
-MMU slots) start off on other printers and are left off the page; turn
-one on in `pushraker.conf` and it shows on the page and is sent like any
-other.
+## One package, many printers
+
+- **Detection over configuration.** The same package runs on every
+  printer and works out what it can at start-up: Klipper's objects,
+  Moonraker's version and features, cameras (Moonraker's webcams and
+  camera servers it doesn't list), the printer's web pages, and what the
+  G-code files themselves say (render, estimate, layers, filament).
+- **Printer profiles only where needed** (`src/pushraker/printers/`): for
+  what can't be detected, such as a vendor camera with no snapshot address,
+  the vendor's own fault codes and calibrations, the model name and the
+  web UI's address. Printers without a profile get the generic one.
+- **Two install routes:** built into the Snapmaker U1 Extended Firmware;
+  or, on any Klipper printer with Moonraker, one command over SSH that
+  leaves the vendor's packages alone (below). pip works too.
+
+### Compatibility
+
+| | |
+|---|---|
+| **Tested** | Snapmaker U1 (Extended Firmware, built in); Creality Hi (stock firmware, SSH install) |
+| **Expected to work, untested** | any Klipper + Moonraker printer whose Moonraker has the `job_state` component (Nov 2021 on), with Python 3.7+, apprise 1.2+, Jinja2 3.0+ and requests: what the generic profile gives (chart below) |
+| **Not supported** | Moonraker without `job_state`; firmware without Moonraker |
+
+Untested, reports welcome (what is known, not a promise):
+- Creality K1 / K1 Max / older K1C: camera at `:8080/?action=snapshot`, found by discovery. K1C (2025 firmware) and K2: WebRTC only, like the Hi.
+- Sovol SV08, QIDI Q1 Pro, Flashforge AD5M with Klipper Mod: a camera server on 8080 that Moonraker doesn't list, found by discovery.
+- Elegoo Neptune 4: mjpg-streamer once set up (`/webcam/?action=snapshot`).
+
+### Features by printer
+
+| Feature | Snapmaker U1 | Creality Hi | Other Klipper printers |
+|---|---|---|---|
+| Print started/paused/resumed/complete/cancelled, progress, status reports, errors, Klipper shutdown, macros | ✅ | ✅ | ✅ |
+| Camera picture | ✅ | ✅ live stream | ➖ ¹ |
+| Live Camera link | ✅ | ✅ | ➖ ¹ |
+| Render, time left and ETA | ✅ | ✅ | ✅ |
+| Layers (first layer, layer complete) | ✅ | ✅ | ➖ ² |
+| Pre-print calibrations | ✅ listed in Started, reported when done | ✅ reported when done | ➖ reported when done ³ |
+| Bed cooled | ✅ | ✅ | ✅ (heated bed) |
+| Chamber temperature, driver temperature | ✅ | ❌ no such hardware | ➖ ⁴ |
+| Filament: toolhead map, backup spools, MMU slots | ✅ | ❌ | ❌ |
+| Filament: Spoolman (not enough, running low) | ✅ | ➖ with Spoolman | ➖ with Spoolman |
+| Coded warnings, touchscreen calibrations, power-loss recovery | ✅ | ❌ | ❌ |
+| Print-end and cancel snapshots (print hooks) | ✅ | ❌ ⁵ | ➖ ⁵ |
+| Excluded objects | ✅ | ✅ | ✅ |
+| Printer URL default (web UI) | ✅ | ✅ Fluidd :4408 | ➖ ⁶ |
+| Settings page | `/notifications/` | `:7125/server/pushraker/page` | `:7125/server/pushraker/page`, or an nginx alias |
+
+¹ A Moonraker webcam with a snapshot, or a camera server discovery finds (8080/8081, `/webcam/`); none for WebRTC-only cameras without a profile.
+² When the slicer writes `SET_PRINT_STATS_INFO`, or the Klipper fork counts layers (Creality's `virtual_sdcard.layer`).
+³ Bed mesh, Z tilt, quad gantry level from stock Klipper's messages, when the printer has them.
+⁴ Chamber: any `heater_generic`, a DragonBreath. Driver: TMC2240/TMC5160 on X/Y.
+⁵ *Print complete* and *Cancelled* are sent from the print's end event; the hooks need `_PRINT_END_NTFY`/`_CANCEL_PRINT_NTFY` called from your macros.
+⁶ Fill in offers the web pages found on the printer.
+
+Full chart: [guide](docs/guide.md#features-by-printer).
+
+**Status: 0.3.** The component has been in use on the Snapmaker U1 for a
+while; the page, the settings file, the installer and the multi-printer
+support are new. Notifications a printer can't produce start off and are
+left off the page; turn one on in `pushraker.conf` and it shows on the
+page and is sent like any other.
 
 ## Requirements
 
