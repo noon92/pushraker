@@ -868,6 +868,7 @@
     <div class="pr-modal-box">
         <h3 id="nx-out-title">Export this notification</h3>
         <div class="bk-file" id="nx-out-file"></div>
+        <p class="bk-red" id="nx-out-red"></p>
         <p class="bk-note" id="nx-out-what"></p>
         <div class="bk-to" id="nx-to-wrap">
             <label for="nx-to">Send to</label>
@@ -3164,6 +3165,26 @@
         ((state.meta.row_options || {})[key] || []).forEach(o => { n[o] = page[o]; });
         return { pushraker_notification: 1, kind: 'stock', id: key, notification: n };
     }
+    // Whether the editor's notification differs from what is saved
+    function nxUnsaved(f) {
+        const canon = o => JSON.stringify(Object.keys(o).sort().map(k => [k, o[k]]));
+        const was = JSON.parse(saved || '{}');
+        if (f.kind === 'custom') {
+            const c = customById(Number(editing.key.slice(7)));
+            const old = c && c._saved ? (was.custom || []).find(x => x.name === c._saved) : null;
+            if (!old || old.name !== f.name) return true;
+            const n = Object.assign({}, old);
+            delete n.name; delete n.topic;
+            return canon(n) !== canon(f.notification);
+        }
+        const key = f.id, row = (was.rows || {})[key] || state.rows[key] || {};
+        const t = (was.templates || {})[key];
+        const n = t ? diffFromDefault(key, t) : {};
+        delete n.topic;
+        n.enabled = !!row.enabled; n.email = !!row.email; n.priority = row.priority || 'default';
+        ((state.meta.row_options || {})[key] || []).forEach(o => { n[o] = was[o]; });
+        return canon(n) !== canon(f.notification);
+    }
     const nxFileName = f => 'pushraker-' + String(f.kind === 'custom' ? f.name : f.id).replace(/[^A-Za-z0-9_-]+/g, '-').slice(0, 60) + '.json';
     el('nx-send').onclick = e => {
         e.stopPropagation();
@@ -3188,6 +3209,9 @@
             nxHow === 'push' ? `Send this notification by push (${t.push_label})` : 'Send this notification by email';
         el('nx-out-file').textContent = '📄 ' + nxFileName(f);
         el('nx-out-what').textContent = NX_TEXT.what;
+        const changed = nxUnsaved(f);
+        el('nx-out-red').textContent = changed ? NX_TEXT.unsaved : '';
+        el('nx-out-red').style.display = changed ? '' : 'none';
         el('nx-go').textContent = nxHow === 'download' ? 'Download' : 'Send';
         el('nx-go').disabled = false;
         el('nx-to-wrap').style.display = nxHow === 'email' ? '' : 'none';
@@ -3225,7 +3249,8 @@
     // here (settings.IMPORT_NOTES), then it lands on this page like an
     // edit; replacing one: Import works 5 seconds after the dialog opens
     const NX_TEXT = {
-        what: 'This notification as it is in the editor, unsaved changes included. Not included: addresses, tokens, server settings, its topic.',
+        what: 'Not included: addresses, tokens, server settings, its topic.',
+        unsaved: '⚠️ Includes unsaved changes.',
         stock: 'Stock notification: ',
         custom: 'Custom notification: ',
         replaces: n => `Replaces "${n}".`,

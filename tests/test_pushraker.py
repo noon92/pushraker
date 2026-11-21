@@ -2182,6 +2182,32 @@ async def test_notification_files():
               and out["file"]["name"] == "Every5th"
               and "topic" not in out["file"]["notification"]
               and "name" not in out["file"]["notification"], out)
+        first = await call("notification_import", file=custom)
+        small = (await call("notification", via="download", notification=dict(
+            custom, notification=dict(first["custom"]))))["file"]
+        check("an exported custom one holds only what differs from a new "
+              "one, and what defines it", small["notification"] == {
+                  "evaluate": "layer", "when": "job.layer % 5 == 0",
+                  "title": "Layer {{ job.layer }}"}, small["notification"])
+        again = await call("notification_import", file=small)
+        small2 = (await call("notification", via="download",
+                             notification=dict(custom, notification=dict(
+                                 again["custom"]))))["file"]
+        check("...imported back it is the same settings, and exports the "
+              "same file", again["custom"] == first["custom"]
+              and small2 == small, (again, small2))
+        odd = dict(custom, notification={
+            "enabled": False, "email": True, "priority": "max",
+            "evaluate": "poll", "when": "", "title": "", "contents": "x",
+            "image": "none", "repeat": "minutes", "repeat_minutes": 7})
+        first = await call("notification_import", file=odd)
+        small = (await call("notification", via="download", notification=dict(
+            custom, notification=dict(first["custom"]))))["file"]
+        again = await call("notification_import", file=small)
+        check("...also with every setting away from its default (an empty "
+              "title too)", again["custom"] == first["custom"]
+              and small["notification"]["title"] == ""
+              and "when" not in small["notification"], (first, small, again))
         # The camera: only one this printer has
         here = ((c.settings.get("templates") or {}).get("paused")
                 or {}).get("camera", "")

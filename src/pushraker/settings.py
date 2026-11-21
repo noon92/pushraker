@@ -1823,7 +1823,10 @@ def notification_export(values: Dict[str, Any], kind: str, ident: str,
     no addresses, tokens or server settings (and no topic)."""
     if kind == "custom":
         c = values["custom"]
-        n = {k: c[k] for k in FILE_CUSTOM_FIELDS if k in c}
+        # What differs from a new one, and what defines it
+        n = {k: c[k] for k in FILE_CUSTOM_FIELDS if k in c and (
+            c[k] != CUSTOM_DEFAULT[k] or k == "evaluate"
+            or (k in ("when", "title", "contents") and c[k]))}
         head: Dict[str, Any] = {"kind": "custom", "name": c["name"]}
     else:
         n = dict(values["row"])

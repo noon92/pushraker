@@ -8,6 +8,8 @@ email), and **Import…** under the custom notifications.
 - A file holds one notification's own settings: whether it's sent, how
   (push, email, priority), its title and contents (Jinja templates), its
   image and camera, and the settings under its row.
+  Anything left out is the default, so an exported custom notification
+  holds only what differs from a new one, and what defines it.
 - **Never in a file**: tokens, passwords, addresses, server settings,
   and a notification's own topic (ntfy topic or Telegram topic: private to
   you). On import the notification keeps the topic it has here, if any; a
@@ -215,9 +217,9 @@ https://raw.githubusercontent.com/noon92/pushraker/main/docs/notification-files.
 https://raw.githubusercontent.com/noon92/pushraker/main/docs/values.md
 https://raw.githubusercontent.com/noon92/pushraker/main/docs/values-by-printer.md
 
-Before writing it, ask me anything I haven't said: printer model; push, email or both; priority; image (render, camera, graphic or none); title and wording; when it fires and how often (once per print or every time); whether to show time left. Then confirm your understanding in one sentence.
+Before writing it, ask me anything I haven't said: push, email or both; priority; image (render, camera, graphic or none); title and wording; when it fires; how often (once per print or every time), unless the condition can only be true once per print, like one layer number; whether to show time left. Then confirm your understanding in one sentence.
 
-Output exactly one JSON code block that I can save as a .json file. Omit "from" and any topic. Then explain in two lines how to import it (Import... on the settings page) and what each condition does.
+Give the result as a downloadable .json file if you can make files, otherwise as exactly one JSON code block. Omit "from" and any topic. Then explain in two lines how to import it (Import... on the settings page) and what each condition does.
 
 What I want:
 ```

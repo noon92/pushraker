@@ -772,9 +772,9 @@ changed on the page stays. Nothing is saved until you click Save & Apply;
 that is also when the tokens and passwords are removed.
 
 **One notification** can go in a file of its own: **Export ▴** in its
-editor (Download, Send by push, Send by email; what's in the editor,
-unsaved changes included; never addresses, tokens, server settings or its
-topic), and **Import…** under the custom notifications. Importing says
+editor (Download, Send by push, Send by email; what's in the editor, with
+a warning when that includes unsaved changes; never addresses, tokens,
+server settings or its topic), and **Import…** under the custom notifications. Importing says
 what the file is and what doesn't fit this printer (older or newer
 pushraker, another printer model, a notification this printer can't send,
 values it doesn't have or this version doesn't know, settings this
