@@ -70,31 +70,18 @@ ROWS = [
      False),
     ("cancelled", "Print cancelled", "🚫", True, "default", "snapshot",
      "print", False),
+    # After a print ends (complete, cancelled or failed), once the bed is below
+    # bed_cool_temp: the print can come off
+    ("bed_cooled", "Bed cooled", "🛏️", True, "default", "snapshot", "print",
+     False),
     ("macro", "From macros and G-code", "📣", True, "default", "snapshot",
      "print", False),
     ("calibration", "Manual calibrations", "📐", True, "high", "snapshot",
      "print", False),
-    # Filament loaded into or unloaded from a toolhead, outside a print job
+    # Filaments: loaded into or unloaded from a toolhead,
+    # outside a print job
     ("filament_change", "Filament loaded / unloaded", "🧵", False, "low",
-     "spool", "print", False),
-    # Chamber temperature: only when a print job waits on a chamber target
-    # (any chamber heater, or Snapmaker's own chamber wait)
-    ("chamber_waiting", "Waiting for chamber temperature", "🌡️", True,
-     "default", "snapshot", "chamber", False),
-    ("chamber_reached", "Reached chamber temperature", "🌡️", True,
-     "default", "snapshot", "chamber", False),
-    ("chamber_fault", "Chamber faults", "⚠️", True, "high", "snapshot",
-     "chamber", True),
-    ("error", "Error", "⚠️", True, "max", "snapshot", "fault", True),
-    ("warning", "Warning", "⚠️", True, "max", "snapshot", "fault", True),
-    ("shutdown", "Klipper shutdown", "🛑", True, "max", "snapshot", "fault",
-     True),
-    ("power_loss", "Power loss recovery", "⚡", True, "max", "snapshot", "fault",
-     True),
-    # X or Y stepper driver at or over the set temperature; once per print
-    # job, again after a pause
-    ("driver_hot", "Driver running hot", "🌡️", True, "max", "snapshot",
-     "fault", True),
+     "spool", "filament", False),
     # Need the Spoolman integration
     ("filament_short", "Not enough filament", "🧵", True, "high", "spool",
      "spoolman", True),
@@ -107,6 +94,24 @@ ROWS = [
     # multiACE: the slot feeding a toolhead went empty mid-print
     ("slot_empty", "Spool in ACE slot ran out", "🧵", True, "default",
      "spool", "refill", False),
+    # Chamber temperature: only when a print job waits on a chamber target
+    # (any chamber heater, or Snapmaker's own chamber wait)
+    ("chamber_waiting", "Waiting for chamber temperature", "🌡️", True,
+     "default", "snapshot", "chamber", False),
+    ("chamber_reached", "Reached chamber temperature", "🌡️", True,
+     "default", "snapshot", "chamber", False),
+    ("chamber_fault", "Chamber faults", "⚠️", True, "high", "snapshot",
+     "chamber", True),
+    ("error", "Error", "⚠️", True, "max", "snapshot", "fault", True),
+    ("warning", "Warning", "⚠️", True, "max", "snapshot", "fault", True),
+    ("shutdown", "Klipper shutdown", "🛑", True, "max", "snapshot", "fault",
+     True),
+    ("power_loss", "Power loss recovery", "🔌", True, "max", "snapshot", "fault",
+     True),
+    # X or Y stepper driver at or over the set temperature; once per print
+    # job, again after a pause
+    ("driver_hot", "Driver running hot", "🌡️", True, "max", "snapshot",
+     "fault", True),
 ]
 ROW_IDS = [r[0] for r in ROWS]
 
@@ -131,6 +136,7 @@ TEMPLATES = [
      JOB_IMAGES),
     ("complete", "complete", "Print complete", "camera", JOB_IMAGES),
     ("cancelled", "cancelled", "Print cancelled", "camera", JOB_IMAGES),
+    ("bed_cooled", "bed_cooled", "Bed cooled", "render", JOB_IMAGES),
     ("macro", "macro", "From macros and G-code", "camera", JOB_IMAGES),
     ("calibration", "calibration", "Manual calibrations", "camera",
      JOB_IMAGES),
@@ -159,7 +165,42 @@ TEMPLATES = [
 ]
 TEMPLATE_KEYS = [t[0] for t in TEMPLATES]
 TEMPLATE = {t[0]: t for t in TEMPLATES}
-TEMPLATE_FIELDS = ("title", "contents", "image", "camera", "remaining")
+TEMPLATE_FIELDS = ("title", "contents", "image", "camera", "remaining",
+                   "topic")
+# A notification's own topic (ntfy: a topic on the same server; Telegram:
+# a topic of the chat, by ID, in groups with topics on); "": the default.
+# Other services have none.
+TOPIC_PROVIDERS = ("ntfy", "telegram")
+RX_NTFY_URL = re.compile(r"(ntfys?://[^/?]+/)[^?]*(\?.*)?")
+RX_TGRAM_URL = re.compile(r"(tgram://[^/?]+/[^?:]+)(?::\d+)?(\?.*)?")
+
+
+def topics_not_for(s: Dict[str, Any]) -> List[str]:
+    """The notifications whose own topic the push service can't take
+    (Telegram: a topic ID, a number)."""
+    if s.get("provider") != "telegram":
+        return []
+    bad = [TEMPLATE[key][2] for key, t in (s.get("templates") or {}).items()
+           if key in TEMPLATE and (t or {}).get("topic")
+           and not str(t["topic"]).isdigit()]
+    bad += [c["name"] for c in s.get("custom") or []
+            if c.get("topic") and not str(c["topic"]).isdigit()]
+    return bad
+
+
+def with_topic(url: str, topic: str) -> Optional[str]:
+    """A push address sent to another topic (None: the service has none,
+    or the topic isn't one it takes)."""
+    topic = str(topic or "").strip()
+    if not RX_TOPIC.fullmatch(topic):
+        return None
+    m = RX_NTFY_URL.fullmatch(url)
+    if m:
+        return f"{m.group(1)}{topic}{m.group(2) or ''}"
+    m = RX_TGRAM_URL.fullmatch(url)
+    if m and topic.isdigit():
+        return f"{m.group(1)}:{topic}{m.group(2) or ''}"
+    return None
 TITLE_MAX = 1000          # the template, not the title it writes
 CONTENTS_MAX = 5000
 # The component's names for a row's notifications, to their templates
@@ -224,7 +265,8 @@ STRING_FIELDS = ("provider", "server", "topic", "auth", "username",
 # Free text with line breaks (stored with \n escaped)
 SECRET_FIELDS = ("secret", "email_password", "webhook_url")
 INT_FIELDS = ("layers_complete", "email_port", "filament_low_percent",
-              "filament_low_grams", "driver_temp", "report_interval")
+              "filament_low_grams", "driver_temp", "report_interval",
+              "bed_cool_temp")
 BOOL_FIELDS = ("enabled", "push_enabled", "email_enabled", "webhook_enabled",
                "filament_unknown")
 # Settings the form fills in for common providers
@@ -234,14 +276,25 @@ EMAIL_PRESETS = {
     "brevo": {"label": "Brevo", "host": "smtp-relay.brevo.com", "port": 587,
               "security": "starttls"},
 }
-# Older settings (the Snapmaker U1 extended firmware's form) named the
-# cameras by their place; Moonraker's webcams are named by the user
+# The Snapmaker U1 extended firmware's old form named the cameras by their
+# place; Moonraker's webcams are named by the user. Only its settings are
+# converted: in pushraker's own a webcam may well be called "internal"
 LEGACY_CAMERAS = {"internal": "case", "usb": "usb"}
 SETTINGS_FORMAT = 1
 
 
+class SecretsNotRestored(OSError):
+    """Saving failed after the secrets were written, and the previous
+    secrets couldn't be put back: something was changed."""
+
+
 class ConfigError(Exception):
-    pass
+    """A setting that can't be used; `field`: which (its pushraker.conf
+    name), when it's one."""
+
+    def __init__(self, message: str, field: str = "") -> None:
+        super().__init__(message)
+        self.field = field
 
 
 class Env:
@@ -257,6 +310,11 @@ class Env:
       name          the printer's default name
       rows_unavailable  rows the printer can't produce (off by default and
                     left off the page unless turned on in pushraker.conf)
+      ntfy_token    the installed Apprise's ntfy takes an access token
+                    (False on Apprise 1.2.0: pushraker.ntfy sends instead)
+      rows_missing  rows for hardware the printer doesn't have (a chamber,
+                    driver temperatures): left off the page even when on;
+                    their settings stay as saved
       preprint      the printer has pre-print calibrations (the Print
                     started row's checkbox)
       time_methods  [{"id", "label", "help"}] the time-left methods on
@@ -267,6 +325,8 @@ class Env:
                  spoolman_url: str = "",
                  error_index_url: str = "", name: str = "Printer",
                  rows_unavailable: Sequence[str] = (),
+                 rows_missing: Sequence[str] = (),
+                 ntfy_token: bool = True,
                  preprint: bool = False,
                  time_methods: Optional[List[Dict[str, str]]] = None,
                  time_default: str = "blend") -> None:
@@ -275,6 +335,8 @@ class Env:
         self.time_default = time_default
         self.preprint = preprint
         self.rows_unavailable = set(rows_unavailable)
+        self.rows_missing = set(rows_missing)
+        self.ntfy_token = ntfy_token
         self.spoolman_url = spoolman_url.rstrip("/")
         self.error_index_url = error_index_url
         self.name = name
@@ -337,6 +399,7 @@ def _defaults(name: str) -> Dict[str, Any]:
         # "" for the printer's default
         "time_left": "",
         "driver_temp": 105,     # °C, X or Y stepper driver (row: driver_hot)
+        "bed_cool_temp": 40,    # °C, the bed after a print (row: bed_cooled)
         "report_interval": 30,  # minutes of print time between status reports
         "email_enabled": False,
         "webhook_enabled": False,
@@ -375,20 +438,31 @@ CUSTOM_SECTION = "pushraker custom "
 
 # Custom notifications: a name (letters, digits, _; it's how G-code fires
 # one: RESPOND PREFIX=notify_custom MSG=<name>), a condition (a Jinja
-# expression, checked every few seconds: sent when it turns true), and a
-# template like the built-in ones
+# expression, evaluated every few seconds: sent when it turns true; or at
+# each layer change, tool change... : sent when true), and a template like
+# the built-in ones
 CUSTOM_MAX = 20
 RX_CUSTOM_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,31}")
+# pushraker.<name> in templates: a built-in notification's or pushraker's
+# own, so not a custom notification's name
+PUSHRAKER_NAMES = ("enabled", "version", "started", "push", "email", "last",
+                   "failed")
 CUSTOM_IMAGES = ("none", "render", "camera")
-CUSTOM_REPEATS = ("change", "job", "minutes")
+CUSTOM_REPEATS = ("change", "job", "job_pause", "minutes")
+# When the condition is evaluated: every few seconds (poll), or at each
+# layer change, tool change, next object (printing by object), excluded
+# object, 1% of progress, console line
+CUSTOM_EVALUATES = ("poll", "layer", "tool", "object", "excluded",
+                    "progress", "console")
 WHEN_MAX = 1000
 CUSTOM_DEFAULT = {
     "enabled": True, "priority": "default", "email": False,
     "when": "",
     "title": "🔔 {{ machine.name }} {{ event.name }}",
-    "contents": "{% if job.file %}\n{{ job.file }}\n{% endif %}",
-    "image": "camera", "camera": "",
-    "repeat": "change", "repeat_minutes": 10,
+    # Empty: the editor shows an example; sent empty, the title stands alone
+    "contents": "",
+    "image": "camera", "camera": "", "topic": "",
+    "repeat": "change", "repeat_minutes": 10, "evaluate": "poll",
 }
 
 
@@ -426,6 +500,11 @@ def clean_custom(items: Any, strict: bool = False) -> List[Dict[str, Any]]:
             if name.lower() in seen:
                 raise ConfigError(f'Two custom notifications are named '
                                   f'"{name}"')
+            if strict and name.lower() in {r[0] for r in ROWS} | set(
+                    PUSHRAKER_NAMES):
+                raise ConfigError(
+                    f'Custom notification "{name}": pushraker.{name} is '
+                    "taken by pushraker; choose another name")
             c["name"] = name
             c["enabled"] = bool(raw.get("enabled", c["enabled"]))
             c["email"] = bool(raw.get("email", c["email"]))
@@ -443,6 +522,11 @@ def clean_custom(items: Any, strict: bool = False) -> List[Dict[str, Any]]:
             if not RX_CAMERA.fullmatch(cam):
                 raise ConfigError("Invalid camera")
             c["camera"] = cam
+            topic = str(raw.get("topic") or "").strip()
+            if topic and not RX_TOPIC.fullmatch(topic):
+                raise ConfigError(f"{name}: a topic is up to 64 letters, "
+                                  "digits, - and _")
+            c["topic"] = topic
             repeat = str(raw.get("repeat") or "change")
             if repeat not in CUSTOM_REPEATS:
                 raise ConfigError(f"{name}: no such repeat")
@@ -454,6 +538,10 @@ def clean_custom(items: Any, strict: bool = False) -> List[Dict[str, Any]]:
             if not 1 <= minutes <= 1440:
                 raise ConfigError(f"{name}: repeat every 1 to 1440 minutes")
             c["repeat_minutes"] = minutes
+            evaluate = str(raw.get("evaluate") or "poll")
+            if evaluate not in CUSTOM_EVALUATES:
+                raise ConfigError(f"{name}: no such evaluate")
+            c["evaluate"] = evaluate
             for field, text in (("When", when_template(c["when"])),
                                 ("title", c["title"]),
                                 ("contents", c["contents"])):
@@ -483,11 +571,13 @@ def custom_lines(s: Dict[str, Any]) -> List[str]:
         lines += ["", f"[{CUSTOM_SECTION}{c['name']}]",
                   f"notification: {'on' if c['enabled'] else 'off'}, "
                   f"{c['priority']}, {'email' if c['email'] else 'no_email'}",
+                  f"evaluate: {c['evaluate']}",
                   f"when: {escape_text(c['when'])}",
                   f"title: {escape_text(c['title'])}",
                   f"contents: {escape_text(c['contents'])}",
                   f"image: {c['image']}",
                   f"camera: {c['camera']}",
+                  f"topic: {c['topic']}",
                   "repeat: " + (str(c["repeat_minutes"])
                                 if c["repeat"] == "minutes"
                                 else c["repeat"])]
@@ -509,9 +599,11 @@ def parse_custom(cfg: Any) -> List[Dict[str, Any]]:
         for key in ("when", "title", "contents"):
             if key in sec:
                 c[key] = unescape_text(sec.get(key).strip())
-        for key in ("image", "camera"):
+        for key in ("image", "camera", "topic"):
             if key in sec:
                 c[key] = sec.get(key).strip()
+        if "evaluate" in sec:
+            c["evaluate"] = sec.get("evaluate").strip().lower()
         repeat = (sec.get("repeat") or "change").strip().lower()
         if repeat.isdigit():
             c["repeat"], c["repeat_minutes"] = "minutes", int(repeat)
@@ -554,7 +646,8 @@ def section_lines(s: Dict[str, Any]) -> List[str]:
     lines.append("# defaults: <notification>_title, _contents, _image "
                  "(none|render|camera|graphic),")
     lines.append("# _camera (a Moonraker webcam name), _remaining "
-                 "(true|false: filament left on the graphic)")
+                 "(true|false: filament left on the graphic), _topic "
+                 "(ntfy, Telegram)")
     for key in TEMPLATE_KEYS:
         t = s["templates"].get(key) or {}
         for field in TEMPLATE_FIELDS:
@@ -639,7 +732,6 @@ def parse_section(sec: Any, s: Dict[str, Any]) -> Dict[str, Any]:
         s["rows"]["progress"].update(
             enabled=first["enabled"], priority=first["priority"],
             email=first["email"])
-    s["camera"] = LEGACY_CAMERAS.get(s["camera"], s["camera"])
     return s
 
 
@@ -720,8 +812,7 @@ class Store:
         return s
 
     def save(self, s: Dict[str, Any]) -> None:
-        """Secrets first: if their file can't be written, the settings
-        (which hold none) are untouched."""
+        """Save both files, restoring the old secrets if settings fail."""
         secrets = {k: s[k] for k in SECRET_FIELDS if s.get(k)}
         for key, of in (("secret_for", "secret"),
                         ("email_password_for", "email_password")):
@@ -734,10 +825,24 @@ class Store:
                 cfg.set(SECRETS_SECTION, k, v)
         buf = io.StringIO()
         cfg.write(buf)
+        try:
+            with open(self.secrets_path, encoding="utf-8") as f:
+                old_secrets = f.read()
+        except FileNotFoundError:
+            old_secrets = ""
         self._write(self.secrets_path, buf.getvalue() if secrets else "",
                     0o600)
-        os.makedirs(os.path.dirname(self.settings_path), exist_ok=True)
-        self._write(self.settings_path, "".join(section_lines(s)), 0o644)
+        try:
+            os.makedirs(os.path.dirname(self.settings_path), exist_ok=True)
+            self._write(self.settings_path, "".join(section_lines(s)), 0o644)
+        except OSError as save_error:
+            try:
+                self._write(self.secrets_path, old_secrets, 0o600)
+            except OSError as restore_error:
+                raise SecretsNotRestored(
+                    "Settings save failed and the previous secrets "
+                    f"could not be restored: {restore_error}") from save_error
+            raise
         self._stamp = self.stamp()
 
     @staticmethod
@@ -796,6 +901,7 @@ def import_ini(settings_file: str, section: str,
     if not cfg.has_section(section):
         return s
     parse_section(cfg[section], s)
+    s["camera"] = LEGACY_CAMERAS.get(s["camera"], s["camera"])
     if secrets_file:
         stored = _read_ini_or_json_section(secrets_file, secrets_section)
         for key in SECRET_FIELDS + ("secret_for", "email_password_for"):
@@ -819,6 +925,12 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     for key in BOOL_FIELDS:
         if key in data:
             s[key] = bool(data[key])
+    # A reset: the stored token, password or webhook URL is dropped (one
+    # typed since is kept, below)
+    forget = data.get("forget")
+    for key in SECRET_FIELDS:
+        if isinstance(forget, list) and key in forget:
+            s[key] = ""
     if "secret" in data and str(data["secret"]):
         s["secret_for"] = ""     # set below, once the service is known
     if "email_password" in data and str(data["email_password"]):
@@ -835,33 +947,40 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
             try:
                 s[key] = int(data[key] or 0)
             except (TypeError, ValueError):
-                raise ConfigError("Filament alert values must be numbers")
+                raise ConfigError("Filament alert values must be numbers", "filament_low_percent")
         if not lo <= s[key] <= hi:
-            raise ConfigError("Filament alert: 0-90 % and 0-5000 g")
+            raise ConfigError("Filament alert: 0-90 % and 0-5000 g", "filament_low_percent")
     if "email_port" in data:
         try:
             s["email_port"] = int(data["email_port"])
         except (TypeError, ValueError):
-            raise ConfigError("Email port must be a number")
+            raise ConfigError("Email port must be a number", "email_port")
     if "layers_complete" in data:
         try:
             s["layers_complete"] = int(data["layers_complete"])
         except (TypeError, ValueError):
-            raise ConfigError("Layer must be 1, 2 or 3")
+            raise ConfigError("Layer must be 1, 2 or 3", "layers_complete")
     if "driver_temp" in data:
         try:
             s["driver_temp"] = int(data["driver_temp"])
         except (TypeError, ValueError):
-            raise ConfigError("Driver temperature must be a number")
+            raise ConfigError("Driver temperature must be a number", "driver_temp")
     if not 40 <= s["driver_temp"] <= 150:
-        raise ConfigError("Driver temperature alert: 40 to 150 °C")
+        raise ConfigError("Driver running hot: the temperature must be 40 to 150 °C", "driver_temp")
+    if "bed_cool_temp" in data:
+        try:
+            s["bed_cool_temp"] = int(data["bed_cool_temp"])
+        except (TypeError, ValueError):
+            raise ConfigError("Bed temperature must be a number", "bed_cool_temp")
+    if not 20 <= s["bed_cool_temp"] <= 100:
+        raise ConfigError("Bed cooled: the temperature must be 20 to 100 °C", "bed_cool_temp")
     if "report_interval" in data:
         try:
             s["report_interval"] = int(data["report_interval"])
         except (TypeError, ValueError):
-            raise ConfigError("Status report interval must be a number")
+            raise ConfigError("Status report interval must be a number", "report_interval")
     if not 5 <= s["report_interval"] <= 720:
-        raise ConfigError("Status report: every 5 to 720 minutes")
+        raise ConfigError("Status report: every 5 to 720 minutes of print time", "report_interval")
     rows = data.get("rows") or {}
     if not isinstance(rows, dict):
         raise ConfigError("Invalid request")
@@ -891,6 +1010,10 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
         s["templates"] = clean_templates(s["templates"], strict=True)
     if "custom" in data:
         s["custom"] = clean_custom(data["custom"], strict=True)
+    bad = topics_not_for(s)
+    if bad:
+        raise ConfigError("Telegram topics are IDs (numbers): change or "
+                          "clear the topic of " + ", ".join(bad), "topic")
     if s["time_left"] == "first_layer":       # 0.3.1's name
         s["time_left"] = "slicer_first_layer"
     if s["time_left"] and env is not None and env.time_methods and \
@@ -911,26 +1034,27 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     s["email_password"] = s["email_password"].strip()
     # The push secret is one field for every service (ntfy token or
     # password, Pushover app token, Telegram bot token, Discord token or
-    # webhook). A stored one is only reused for the service, server and
-    # account it was entered for: switching services means entering the
-    # new one, and a saved token is never sent to another host.
+    # webhook). A stored one is only reused for the service it was entered
+    # for: switching services means entering the new one. (Settings from
+    # before kept the server too: "ntfy|token|https://…|"; the service is
+    # the part that counts.)
     scope = secret_scope(s)
-    if s["secret"] and s.get("secret_for", "") not in ("", scope):
+    if s["secret"] and s.get("secret_for", "").split("|")[0] \
+            not in ("", scope):
         s["secret"] = ""
         if s["push_enabled"]:
             raise ConfigError(
                 "The saved token or password was entered for another "
-                "service or server. Enter the one for this one.")
+                "service. Enter the one for this one.")
     s["secret_for"] = scope if s["secret"] else ""
     if s["provider"] not in PROVIDERS:
         raise ConfigError("Invalid notification service")
     if s["auth"] not in AUTH_MODES:
         raise ConfigError("Invalid authentication mode")
-    s["camera"] = LEGACY_CAMERAS.get(s["camera"], s["camera"])
     if not RX_CAMERA.fullmatch(s["camera"]):
         raise ConfigError("Invalid camera")
     if s["layers_complete"] not in (1, 2, 3):
-        raise ConfigError("Layer must be 1, 2 or 3")
+        raise ConfigError("Layer must be 1, 2 or 3", "layers_complete")
     for key in ("first_layer_objects", "complete_objects"):
         if s[key] not in ("each", "once"):
             raise ConfigError("When printing by object: once per object "
@@ -1064,7 +1188,8 @@ def template_default(key: str) -> Dict[str, Any]:
     from . import defaults
     title, contents = defaults.default(key) or ("", "")
     return {"title": title, "contents": contents,
-            "image": TEMPLATE[key][3], "camera": "", "remaining": True}
+            "image": TEMPLATE[key][3], "camera": "", "remaining": True,
+            "topic": ""}
 
 
 def clean_templates(tpls: Dict[str, Any],
@@ -1098,6 +1223,14 @@ def clean_templates(tpls: Dict[str, Any],
                 v = str(v or "")
                 if not RX_CAMERA.fullmatch(v):
                     raise ConfigError("Invalid camera")
+            elif field == "topic":
+                v = str(v or "").strip()
+                if v and not RX_TOPIC.fullmatch(v):
+                    if strict:
+                        raise ConfigError(f"{TEMPLATE[key][2]}: a topic is "
+                                          "up to 64 letters, digits, - "
+                                          "and _")
+                    continue
             else:
                 v = bool(v)
             if field in ("title", "contents") and strict:
@@ -1183,11 +1316,8 @@ def email_scope(s: Dict[str, Any]) -> str:
 
 
 def secret_scope(s: Dict[str, Any]) -> str:
-    """What a stored push secret is bound to."""
-    if s["provider"] == "ntfy":
-        return f"ntfy|{s['auth']}|{s['server'].lower()}|{s['username']}"
-    if s["provider"] == "gotify":
-        return f"gotify|{s['gotify_server'].lower().rstrip('/')}"
+    """What a stored push secret is bound to: the service it was entered
+    for (fixing the server's address keeps it)."""
     return s["provider"]
 
 
@@ -1224,12 +1354,24 @@ def configured(s: Dict[str, Any]) -> bool:
 
 def stored_error(s: Dict[str, Any], env: Optional[Env] = None) -> str:
     """Why the stored settings no longer pass validation (e.g. after an
-    update), or ""."""
+    update or an edit by hand), or ""."""
+    return stored_problem(s, env)["message"]
+
+
+def stored_problem(s: Dict[str, Any], env: Optional[Env] = None
+                   ) -> Dict[str, Any]:
+    """stored_error, with the setting it's about and its value in
+    pushraker.conf (for the page to point at)."""
     try:
         validate({}, s, env)
     except ConfigError as e:
-        return str(e)
-    return ""
+        field = getattr(e, "field", "")
+        # Never a token or password: the page shows the value
+        value = s.get(field) if field and field in s \
+            and field not in SECRET_FIELDS else None
+        return {"message": str(e), "field": field,
+                "value": "" if value is None else str(value)}
+    return {"message": "", "field": "", "value": ""}
 
 
 # ---- the printer's address and cameras --------------------------------
@@ -1250,6 +1392,15 @@ def camera_live_url(s: Dict[str, Any], env: Env) -> str:
         return ""
     if "://" in stream:
         return stream
+    if stream.startswith(":"):
+        # A camera server on its own port (pushraker.discover): that port
+        # on the Printer URL's host
+        port, _, path = stream[1:].partition("/")
+        u = urlparse(printer_root(s, env))
+        if not u.hostname or not port.isdigit():
+            return ""
+        host = f"[{u.hostname}]" if ":" in u.hostname else u.hostname
+        return f"{u.scheme or 'http'}://{host}:{port}/{path}"
     return printer_root(s, env) + "/" + stream.lstrip("/")
 
 
@@ -1307,7 +1458,7 @@ def row_url(s: Dict[str, Any], rid: str, priority: str, env: Env) -> str:
         return (f"tgram://{s['secret']}/{quote(s['telegram_chat'], safe='@-')}"
                 f"?{query(params)}")
     if s["provider"] in ("discord", "discord_dm"):
-        # discordhook:// and discorddm:// (pushraker.discord)
+        # discordwh:// and discorddm:// (pushraker.discord)
         params = {"silent": "yes" if priority in TELEGRAM_SILENT else "no"}
         if s["provider"] == "discord_dm":
             return (f"discorddm://{s['secret']}@{s['discord_user']}"
@@ -1318,7 +1469,7 @@ def row_url(s: Dict[str, Any], rid: str, priority: str, env: Env) -> str:
         params["name"] = s["name"]
         if s["discord_mention"] and priority in DISCORD_PING:
             params["ping"] = s["discord_mention"]
-        return f"discordhook://{m.group(1)}/{m.group(2)}?{query(params)}"
+        return f"discordwh://{m.group(1)}/{m.group(2)}?{query(params)}"
     u = urlparse(s["server"])
     scheme = "ntfys" if u.scheme == "https" else "ntfy"
     params = {"image": "no", "priority": priority}
@@ -1326,6 +1477,18 @@ def row_url(s: Dict[str, Any], rid: str, priority: str, env: Env) -> str:
         params["actions"] = "; ".join(
             f"view, {t}, {url}" + (", clear=true" if t == "Web UI" else "")
             for t, url in btns)
+    if not (env.ntfy_token if env is not None else True):
+        # An Apprise whose ntfy can't authenticate (1.2.0): pushraker's own
+        # sender (pushraker.ntfy), every auth mode alike
+        own = {"secure": "yes" if u.scheme == "https" else "no",
+               "priority": priority}
+        if "actions" in params:
+            own["actions"] = params["actions"]
+        if s["auth"] == "basic":
+            own.update(user=s["username"], **{"pass": s["secret"]})
+        elif s["auth"] == "token":
+            own["token"] = s["secret"]
+        return f"pntfy://{u.netloc}/{s['topic']}?{query(own)}"
     userinfo = ""
     extra = ""
     if s["auth"] == "basic":
@@ -1362,8 +1525,9 @@ def webhook_url(s: Dict[str, Any], rid: str, env: Env) -> str:
     return base + ("&" if own else "?") + "&".join(params)
 
 
-def email_url(s: Dict[str, Any]) -> str:
-    """Apprise URL for email (SMTP)."""
+def email_url(s: Dict[str, Any], inline: bool = True) -> str:
+    """Apprise URL for email (SMTP). inline: the image shown in the HTML
+    card (a backup file goes as a plain attachment)."""
     scheme = "mailto" if s["email_security"] == "none" else "mailtos"
     userinfo = ""
     if s["email_username"]:
@@ -1372,11 +1536,402 @@ def email_url(s: Dict[str, Any]) -> str:
     # HTML card (pushraker.email_html) with the image inline; Apprise adds
     # a plain-text version
     params = {"from": s["email_from"], "to": ",".join(recipients(s)),
-              "name": s["name"], "format": "html", "inline": "yes"}
+              "name": s["name"], "format": "html",
+              "inline": "yes" if inline else "no"}
     if s["email_security"] != "none":
         params["mode"] = s["email_security"]
     return (f"{scheme}://{userinfo}{s['email_host']}:{s['email_port']}"
             f"?{query(params)}")
+
+
+PROVIDER_LABELS = {"ntfy": "ntfy", "gotify": "Gotify", "pushover": "Pushover",
+                   "telegram": "Telegram", "discord": "Discord",
+                   "discord_dm": "Discord"}
+# Reset…: the page's sections, in its order, with the settings each one
+# puts back to a new install's and the secret it drops
+RESET_SECTIONS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
+    "push": (("push_enabled", "provider", "server", "topic", "auth",
+              "username", "pushover_user", "pushover_device",
+              "gotify_server", "telegram_chat", "discord_user",
+              "discord_mention"), ("secret",)),
+    "email": (("email_enabled", "email_host", "email_port",
+               "email_security", "email_username", "email_from",
+               "email_to"), ("email_password",)),
+    "webhook": (("webhook_enabled",), ("webhook_url",)),
+    "stock": (("rows", "templates", "layers_complete", "first_layer_objects",
+               "filament_change_events", "complete_objects",
+               "filament_low_percent", "filament_low_grams",
+               "filament_unknown", "progress_marks", "time_left",
+               "driver_temp", "bed_cool_temp", "report_interval"), ()),
+    "custom": (("custom",), ()),
+}
+
+
+def reset(s: Dict[str, Any], fresh: Dict[str, Any],
+          sections: Any) -> Tuple[Dict[str, Any], List[str], List[str]]:
+    """The settings with the chosen sections as a new install has them
+    ("all": every one, and the rest), the secrets that go with them (to
+    drop on saving), and which settings those were."""
+    if not isinstance(sections, list) or not sections or any(
+            x != "all" and x not in RESET_SECTIONS for x in sections):
+        raise ConfigError("Choose what to reset")
+    out = json.loads(json.dumps(s))
+    fresh = json.loads(json.dumps(fresh))
+    if "all" in sections:
+        keys: List[str] = [k for k in fresh if k not in SECRET_FIELDS
+                           + ("secret_for", "email_password_for")]
+        forget = list(SECRET_FIELDS)
+    else:
+        keys = [k for x in sections for k in RESET_SECTIONS[x][0]]
+        forget = [k for x in sections for k in RESET_SECTIONS[x][1]]
+    for key in keys:
+        out[key] = fresh[key]
+    for key in forget:
+        out[key] = ""
+    if "secret" in forget:
+        out["secret_for"] = ""
+    if "email_password" in forget:
+        out["email_password_for"] = ""
+    return out, forget, keys
+
+
+# A backup: the settings in a file, without what pushraker.secrets holds
+BACKUP_FORMAT = 1
+# Push services that can carry a backup file, and why the others can't
+BACKUP_PUSH = {"ntfy": "", "telegram": "", "discord": "", "discord_dm": "",
+               "pushover": "Pushover can only send pictures",
+               "gotify": "Gotify can't send files"}
+
+
+def backup(s: Dict[str, Any], version: str, created: str,
+           secrets: bool = False, model: str = "") -> Dict[str, Any]:
+    """The saved settings as a backup: no tokens, passwords or webhook
+    URL (the secrets), nothing about which service they were for.
+    secrets (a download the user asked to have them in): those that are
+    set, apart from the settings, under "secrets". "from": the pushraker
+    and the printer model it was made on (what Restore compares)."""
+    out = json.loads(json.dumps(s))
+    for key in SECRET_FIELDS + ("secret_for", "email_password_for"):
+        out.pop(key, None)
+    data = {"pushraker_backup": BACKUP_FORMAT, "version": version,
+            "printer": s.get("name") or "Printer", "created": created,
+            "from": {"pushraker": version, "printer": model},
+            "settings": out}
+    if secrets:
+        data["secrets"] = {k: str(s[k]) for k in SECRET_FIELDS if s.get(k)}
+    return data
+
+
+# What the Restore dialog says about a backup before it is restored: only
+# the lines that apply, never asking the user to set anything up (noon
+# checks this wording; it lives here alone)
+RESTORE_NOTES = {
+    "older": "Backup from pushraker {version} (older).",
+    "newer": "Backup from pushraker {version} (newer).",
+    "unknown": "Backup from an older pushraker.",
+    "model": "Backup from {article} {model}. Some settings may not apply "
+             "here.",
+    "hidden": "Not available on this printer: {rows}.",
+    "unused": "Not used by this version: {keys}.",
+}
+
+
+def _version_key(v: str) -> Tuple[int, ...]:
+    # 0.3.7.1+multiprinter: the local part doesn't count
+    return tuple(int(x) for x in re.findall(r"\d+", v.split("+")[0])) or (0,)
+
+
+def restore_notes(data: Any, version: str, model: str,
+                  hidden_rows: Sequence[str] = ()) -> List[str]:
+    """The Restore dialog's lines for a backup file (see RESTORE_NOTES):
+    where it is from when that differs from here, the notifications it has
+    on that this printer can't show (their settings are kept), and the
+    settings this version doesn't know (ignored)."""
+    if not isinstance(data, dict):
+        return []
+    out: List[str] = []
+    frm = data.get("from") if isinstance(data.get("from"), dict) else None
+    if frm is None:
+        out.append(RESTORE_NOTES["unknown"])
+    else:
+        theirs = str(frm.get("pushraker") or "")
+        a, b = _version_key(theirs), _version_key(version)
+        if theirs and a != b:
+            out.append(RESTORE_NOTES["older" if a < b else "newer"]
+                       .format(version=theirs.split("+")[0]))
+        other = str(frm.get("printer") or "").strip()
+        if other and model and other.lower() != model.lower():
+            out.append(RESTORE_NOTES["model"].format(
+                model=other, article="an" if other[:1].lower() in "aeiou"
+                else "a"))
+    settings = data.get("settings")
+    if not isinstance(settings, dict):
+        return out
+    rows = settings.get("rows") if isinstance(settings.get("rows"),
+                                              dict) else {}
+    labels = {r[0]: r[1] for r in ROWS}
+    hidden = [labels[r] for r in labels if r in hidden_rows
+              and isinstance(rows.get(r), dict)
+              and (rows[r].get("enabled") or rows[r].get("email"))]
+    if hidden:
+        out.append(RESTORE_NOTES["hidden"].format(rows=", ".join(hidden)))
+    fresh = _defaults("Printer")
+    known = set(fresh) | set(SECRET_FIELDS) | {
+        "secret_for", "email_password_for", "meta"}
+    unused = sorted(k for k in settings
+                    if k not in known and not k.startswith("has_"))
+    # A row this version doesn't have: a notification of a newer one
+    unused += sorted(f"{r} notification" for r in rows
+                     if r not in fresh["rows"] and r not in labels)
+    if unused:
+        out.append(RESTORE_NOTES["unused"].format(keys=", ".join(unused)))
+    return out
+
+
+# ---- one notification in a file (Export / Import) ----------------------
+
+NOTIFICATION_FORMAT = 1
+# A stock notification's own settings beyond on/off, priority and email:
+# the settings under its row on the page
+ROW_OPTIONS: Dict[str, Tuple[str, ...]] = {
+    "first_layer": ("layers_complete", "first_layer_objects"),
+    "complete": ("complete_objects",),
+    "progress": ("progress_marks",),
+    "status_report": ("report_interval",),
+    "bed_cooled": ("bed_cool_temp",),
+    "driver_hot": ("driver_temp",),
+    "filament_low": ("filament_low_percent", "filament_low_grams"),
+    "filament_short": ("filament_unknown",),
+    "filament_change": ("filament_change_events",),
+}
+ROW_KEYS = ("enabled", "priority", "email")
+# A notification's own topic is an address (on a public ntfy server,
+# whoever knows it reads it): never in a file, never taken from one
+FILE_TEMPLATE_FIELDS = tuple(f for f in TEMPLATE_FIELDS if f != "topic")
+FILE_CUSTOM_FIELDS = tuple(k for k in CUSTOM_DEFAULT if k != "topic")
+# What the Import dialog says, only the lines that apply (noon checks this
+# wording; it lives here alone)
+IMPORT_NOTES = {
+    "older": "From pushraker {version} (older).",
+    "newer": "From pushraker {version} (newer).",
+    "model": "From {article} {model}. Some settings may not apply here.",
+    "hidden": "Not available on this printer: {name}.",
+    "missing": "Uses values this printer doesn't have: {values}.",
+    "unknown": "Uses values this version doesn't know: {values}.",
+    "unused": "Not used by this version: {keys}.",
+    "replaces": 'Replaces "{name}".',
+}
+
+
+def notification_slug(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]+", "-", text).strip("-")[:60] or \
+        "notification"
+
+
+def notification_file_name(kind: str, ident: str) -> str:
+    return f"pushraker-{notification_slug(ident)}.json"
+
+
+def notification_read(data: Any) -> Tuple[str, str, Dict[str, Any],
+                                           List[str]]:
+    """A notification file's (kind, id or name, its settings, the keys in
+    them this version doesn't use). A file that isn't one, or names no
+    notification this version has, is refused with why."""
+    if not isinstance(data, dict) or "pushraker_notification" not in data:
+        raise ConfigError("Not a pushraker notification file")
+    try:
+        fmt = int(data["pushraker_notification"])
+    except (TypeError, ValueError):
+        raise ConfigError("Not a pushraker notification file")
+    if fmt > NOTIFICATION_FORMAT:
+        raise ConfigError("The file is from a newer pushraker; update this "
+                          "one first")
+    kind = data.get("kind")
+    n = data.get("notification")
+    if not isinstance(n, dict):
+        raise ConfigError("The file has no notification settings")
+    if kind == "stock":
+        ident = str(data.get("id") or "")
+        if ident not in TEMPLATE:
+            raise ConfigError(f'No stock notification "{ident}" in this '
+                              "version")
+        allowed = set(ROW_KEYS) | set(FILE_TEMPLATE_FIELDS) | set(
+            ROW_OPTIONS.get(ident, ()))
+    elif kind == "custom":
+        ident = str(data.get("name") or n.get("name") or "").strip()
+        if not RX_CUSTOM_NAME.fullmatch(ident):
+            raise ConfigError(
+                f'Custom notification "{ident}": the name is up to 32 '
+                "letters, digits and _, starting with a letter")
+        allowed = set(FILE_CUSTOM_FIELDS) | {"name"}
+    else:
+        raise ConfigError('"kind" is "stock" or "custom"')
+    unused = sorted(k for k in n if k not in allowed)
+    return kind, ident, {k: v for k, v in n.items() if k in allowed}, unused
+
+
+def notification_values(s: Dict[str, Any], kind: str, ident: str,
+                        n: Dict[str, Any], env: Optional[Env] = None,
+                        cams: Optional[Set[str]] = None
+                        ) -> Dict[str, Any]:
+    """A notification's settings from a file, checked like a save, as
+    they replace that notification here: what the file leaves out is the
+    default. A camera this printer doesn't have: the one set here stays.
+    {"row", "template" (the edits over the default, None for none),
+    "options"} for a stock one; {"custom"} for a custom one."""
+    cams = set(cams or ())
+    if kind == "custom":
+        here = next((c for c in s.get("custom") or []
+                     if c["name"].lower() == ident.lower()), None)
+        entry = dict(n, name=ident)
+        if entry.get("camera") and entry["camera"] not in cams:
+            entry["camera"] = (here or {}).get("camera", "")
+        entry["topic"] = (here or {}).get("topic", "")
+        return {"custom": clean_custom([entry], strict=True)[0]}
+    rid = ident
+    fresh = _defaults(s.get("name") or "Printer")
+    row = dict(fresh["rows"][rid])
+    for k in ROW_KEYS:
+        if k in n:
+            row[k] = n[k]
+    if not isinstance(row["enabled"], bool) or \
+            not isinstance(row["email"], bool):
+        raise ConfigError(f"{TEMPLATE[rid][2]}: enabled and email are "
+                          "true or false")
+    if row["priority"] not in PRIORITIES:
+        raise ConfigError(f"{TEMPLATE[rid][2]}: no such priority")
+    here_tpl = (s.get("templates") or {}).get(rid) or {}
+    tpl = {f: n[f] for f in FILE_TEMPLATE_FIELDS if f in n}
+    if tpl.get("camera") and tpl["camera"] not in cams:
+        tpl["camera"] = here_tpl.get("camera", "")
+    if here_tpl.get("topic"):
+        tpl["topic"] = here_tpl["topic"]
+    data: Dict[str, Any] = {"rows": {rid: row}, "templates": {rid: tpl}}
+    for opt in ROW_OPTIONS.get(rid, ()):
+        data[opt] = n.get(opt, fresh[opt])
+    base = json.loads(json.dumps(s))
+    base.setdefault("templates", {}).pop(rid, None)
+    checked = validate(data, base, env)
+    return {"row": checked["rows"][rid],
+            "template": (checked.get("templates") or {}).get(rid) or None,
+            "options": {o: checked[o] for o in ROW_OPTIONS.get(rid, ())}}
+
+
+def notification_export(values: Dict[str, Any], kind: str, ident: str,
+                        version: str, model: str) -> Dict[str, Any]:
+    """The file for one notification, from notification_values' result:
+    complete, every setting written out even when it equals today's
+    default (a default can change in a later version); no addresses,
+    tokens or server settings (and no topic)."""
+    if kind == "custom":
+        c = values["custom"]
+        n = {k: c[k] for k in FILE_CUSTOM_FIELDS if k in c}
+        head: Dict[str, Any] = {"kind": "custom", "name": c["name"]}
+    else:
+        n = dict(values["row"])
+        tpl = dict(template_default(ident), **(values["template"] or {}))
+        n.update({k: tpl[k] for k in FILE_TEMPLATE_FIELDS})
+        n.update(values["options"])
+        head = {"kind": "stock", "id": ident}
+    return dict({"pushraker_notification": NOTIFICATION_FORMAT,
+                 "from": {"pushraker": version, "printer": model}},
+                **head, notification=n)
+
+
+def import_notes(data: Any, version: str, model: str) -> List[str]:
+    """The Import dialog's lines about where a file is from (only when it
+    says, and it differs from here)."""
+    out: List[str] = []
+    frm = data.get("from") if isinstance(data, dict) else None
+    if not isinstance(frm, dict):
+        return out
+    theirs = str(frm.get("pushraker") or "")
+    a, b = _version_key(theirs), _version_key(version)
+    if theirs and a != b:
+        out.append(IMPORT_NOTES["older" if a < b else "newer"]
+                   .format(version=theirs.split("+")[0]))
+    other = str(frm.get("printer") or "").strip()
+    if other and model and other.lower() != model.lower():
+        out.append(IMPORT_NOTES["model"].format(
+            model=other, article="an" if other[:1].lower() in "aeiou"
+            else "a"))
+    return out
+
+
+def backup_name(s: Dict[str, Any], day: str) -> str:
+    """The same name with or without tokens and passwords in it: a name
+    that says so marks the file worth taking."""
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", s.get("name") or "Printer")
+    return f"pushraker-backup-{name.strip('-') or 'Printer'}-{day}.json"
+
+
+def backup_secrets(data: Any) -> Dict[str, str]:
+    """The tokens and passwords a backup file was saved with (none in
+    most): each a line of text, as if typed into the page."""
+    found = data.get("secrets") if isinstance(data, dict) else None
+    out = {}
+    for key in SECRET_FIELDS:
+        value = found.get(key) if isinstance(found, dict) else None
+        if isinstance(value, str) and value.strip() and \
+                len(value) <= 2000 and "\n" not in value:
+            out[key] = value.strip()
+    return out
+
+
+def backup_targets(s: Dict[str, Any]) -> Dict[str, Any]:
+    """Where a backup can be sent with the saved settings, even with
+    notifications off: the push service (or why not), and email."""
+    on = dict(s, enabled=True, push_enabled=True, email_enabled=True)
+    label = PROVIDER_LABELS.get(s["provider"], s["provider"])
+    if not push_configured(on):
+        push = "Set up a push service first"
+    else:
+        push = BACKUP_PUSH.get(s["provider"], "This service can't send files")
+    email = "" if on["email_host"] and on["email_from"] else \
+        "Set up email first"
+    return {"push": push, "push_label": label, "email": email,
+            "email_to": (recipients(s) or [""])[0]}
+
+
+# Before backups said where they were made ("from"), pushraker ran only on
+# the Snapmaker U1: a backup without it is a U1's
+OLD_BACKUP_MODEL = "Snapmaker U1"
+
+
+def backup_model(data: Any) -> str:
+    """The printer model a backup file was made on ("" when it says
+    nothing about the printer)."""
+    if not isinstance(data, dict):
+        return ""
+    frm = data.get("from")
+    if not isinstance(frm, dict):
+        return OLD_BACKUP_MODEL
+    return str(frm.get("printer") or "").strip()
+
+
+def other_model(data: Any, model: str) -> bool:
+    """Whether a backup is from another printer model than `model`: its
+    Printer URL (that printer's address) is then left out, the one here
+    kept."""
+    theirs = backup_model(data)
+    return bool(theirs and model and theirs.lower() != model.lower())
+
+
+def backup_settings(data: Any) -> Dict[str, Any]:
+    """A backup file's settings, checked enough for the page to load
+    them (Save & Apply validates them as any other)."""
+    if not isinstance(data, dict) or "pushraker_backup" not in data:
+        raise ConfigError("Not a pushraker backup")
+    if not isinstance(data.get("settings"), dict):
+        raise ConfigError("The backup has no settings")
+    try:
+        fmt = int(data["pushraker_backup"])
+    except (TypeError, ValueError):
+        raise ConfigError("Not a pushraker backup")
+    if fmt > BACKUP_FORMAT:
+        raise ConfigError("The backup is from a newer pushraker; "
+                          "update this one first")
+    return data["settings"]
 
 
 def available_rows(env: Env) -> List[str]:
@@ -1465,6 +2020,8 @@ def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
         out["filament_change_events"] = s["filament_change_events"]
     if "driver_hot" in rows:
         out["driver_temp"] = str(s["driver_temp"])
+    if "bed_cooled" in rows:
+        out["bed_cool_temp"] = str(s["bed_cool_temp"])
     if "status_report" in rows:
         out["report_interval"] = str(s["report_interval"])
     tz = time_zone(s)
@@ -1682,14 +2239,19 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
     out.pop("email_password_for", None)
     out["meta"] = {
         "version": version,
+        # A stock notification's own settings, for its file (Export)
+        "row_options": {k: list(v) for k, v in ROW_OPTIONS.items()},
         "rows": [{"id": r[0], "label": r[1], "icon": r[2],
                   "image": r[5], "group": r[6],
-                  "available": r[0] not in env.rows_unavailable,
-                  # Left off the page only when the printer can't produce
-                  # it and it is off: one turned on in pushraker.conf shows
-                  "hidden": r[0] in env.rows_unavailable
-                  and not s["rows"][r[0]]["enabled"]
-                  and not s["rows"][r[0]]["email"]}
+                  "available": r[0] not in env.rows_unavailable
+                  and r[0] not in env.rows_missing,
+                  # Left off the page when the hardware isn't there, or
+                  # when the printer can't produce it and it is off: one
+                  # turned on in pushraker.conf shows
+                  "hidden": r[0] in env.rows_missing
+                  or (r[0] in env.rows_unavailable
+                      and not s["rows"][r[0]]["enabled"]
+                      and not s["rows"][r[0]]["email"])}
                  for r in ROWS],
         "email_presets": EMAIL_PRESETS,
         "spoolman": bool(env.spoolman_url),
@@ -1703,6 +2265,7 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
                       for t in TEMPLATES],
         "title_max": TITLE_MAX, "contents_max": CONTENTS_MAX,
         "custom_default": CUSTOM_DEFAULT, "custom_max": CUSTOM_MAX,
+        "backup": backup_targets(s),
         "priorities": PRIORITIES,
         "providers": PROVIDERS,
         "cameras": {name: {"snapshot": bool(c.get("snapshot")),
@@ -1711,6 +2274,7 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
         "busy": busy,
         "default_name": env.name,
         "stored_error": stored_error(s, env),
+        "stored_problem": stored_problem(s, env),
         "summary": summary(s, env),
     }
     return out

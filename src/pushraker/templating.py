@@ -219,6 +219,9 @@ def fmt_value(value: Any, fmt: str) -> str:
         clock = value.at.hour * 60 + value.at.minute
         text = apply_pattern(fmt, clock, units_total=False) \
             if fmt and is_pattern(fmt) else value.at.strftime("%H:%M")
+        # Another day: +1d ahead; the date when it's past
+        if value.days < 0:
+            return value.at.strftime("%Y-%m-%d ") + text
         return (f"+{value.days}d " if value.days > 0 else "") + text
     if isinstance(value, (list, tuple)):
         sep = "\n" if low == "line" else ", "

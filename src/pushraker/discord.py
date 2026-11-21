@@ -5,7 +5,7 @@
 # Discord senders for pushraker, registered as Apprise plugins so
 # they get the same queues, retries and fallbacks as the other services:
 #
-#   discordhook://<webhook id>/<webhook token>?name=U1&ping=<mention>
+#   discordwh://<webhook id>/<webhook token>?name=U1&ping=<mention>
 #       A server channel, through a channel webhook.
 #   discorddm://<bot token>@<user id>
 #
@@ -78,7 +78,8 @@ def _error(r: requests.Response) -> Tuple[int, str]:
 
 def _post(url: str, headers: Dict[str, str], payload: Dict[str, Any],
           attach: Any) -> requests.Response:
-    """Post a message, with the first attachment shown inside the embed."""
+    """Post a message, with the first attachment shown inside the embed
+    (a picture) or under it (a file)."""
     path = None
     for a in attach or []:
         path = a.path if hasattr(a, "path") else str(a)
@@ -89,14 +90,19 @@ def _post(url: str, headers: Dict[str, str], payload: Dict[str, Any],
     if not path:
         return requests.post(url, headers=headers, json=payload,
                              timeout=TIMEOUT)
-    name = "image" + (os.path.splitext(path)[1].lower() or ".jpg")
-    payload["embeds"][0]["image"] = {"url": f"attachment://{name}"}
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".json", ".txt"):
+        # A file (a settings backup), under its own name, not in the embed
+        name, mime = os.path.basename(path), "application/json"
+    else:
+        name, mime = "image" + (ext or ".jpg"), "image/jpeg"
+        payload["embeds"][0]["image"] = {"url": f"attachment://{name}"}
     payload["attachments"] = [{"id": 0, "filename": name}]
     with open(path, "rb") as f:
         return requests.post(
             url, headers=headers, timeout=TIMEOUT,
             data={"payload_json": json.dumps(payload)},
-            files={"files[0]": (name, f, "image/jpeg")})
+            files={"files[0]": (name, f, mime)})
 
 
 def _payload(body: str, title: str, notify_type: Any, qsd: Dict[str, str],
@@ -127,7 +133,9 @@ def mention(value: str) -> str:
     return f"<@{v}>" if v else ""
 
 
-@notify(on="discordhook", name="Discord channel")
+# Older Apprise takes custom schema names of 2 to 9 characters only
+# (the Creality Hi has 1.2.0)
+@notify(on="discordwh", name="Discord channel")
 def send_webhook(body: str, title: str, notify_type: Any, attach: Any,
                  meta: Dict[str, Any], *args: Any, **kwargs: Any) -> bool:
     hook_id = meta.get("host") or ""
