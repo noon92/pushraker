@@ -77,7 +77,7 @@ Untested, reports welcome (what is known, not a promise):
 
 Full chart: [guide](docs/guide.md#features-by-printer).
 
-**Status: 0.3.** The component has been in use on the Snapmaker U1 for a
+**Status: 0.4.** The component has been in use on the Snapmaker U1 for a
 while; the page, the settings file, the installer and the multi-printer
 support are new. Notifications a printer can't produce start off and are
 left off the page; turn one on in `pushraker.conf` and it shows on the
