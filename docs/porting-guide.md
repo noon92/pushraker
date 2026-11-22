@@ -33,7 +33,7 @@ Placeholders look like `<this>`.
   - the settings: `<data_path>/config/pushraker.conf` and `<data_path>/pushraker.secrets`.
 - **A printer profile** (`src/pushraker/printers/<vendor>.py`) only for what can't be detected: a vendor camera, vendor objects that carry standard values (e.g. layers), the model name, the web UI address, vendor faults or calibrations.
 - **Not a port:** changing templates or the `job.*` / `pushraker.*` values per printer (they stay universal; only where a value comes from differs), editing the vendor's nginx or macros, replacing the vendor's Moonraker or Python packages.
-- Many printers need **no profile at all**: the generic `Printer` covers stock Klipper.
+- A printer may need **no profile at all**: the generic `Printer` is written for stock Klipper. It hasn't been tested on a printer yet (tested: the Snapmaker U1 and the Creality Hi, both with profiles), so verify it as in §6.
 
 ## 2. Ground rules
 
@@ -172,7 +172,7 @@ Apprise 1.2.x works, with two quirks pushraker handles (§8). Verify with `check
 
 | Found | Then |
 |---|---|
-| any printer | the page is served by Moonraker: `http://<printer>:7125/server/pushraker/page`. Nothing to build |
+| any printer | the page is served by Moonraker: `http://<printer>:<Moonraker's port>/server/pushraker/page` (7125 unless `moonraker.conf` sets another; install.py prints it). Nothing to build |
 | nginx serving Fluidd/Mainsail, and you may edit its config (your own setup) | optionally `location /notifications/ { alias <…>/pushraker/web/; }` (README) |
 | vendor nginx in the firmware | don't edit it; use Moonraker's route |
 | the web UI's address is fixed for the model | profile: `web_page` + `web_page_name` (§5.6). It becomes the Printer URL's default and first Fill-in choice |

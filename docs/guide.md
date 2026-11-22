@@ -11,8 +11,12 @@ server), and/or to a webhook for home automation.
 **Contents:** [What it provides](#what-it-provides) ·
 [Choosing a service](#choosing-a-service) ([Gotify](#gotify),
 [Telegram](#telegram), [Webhook](#webhook), [Discord](#discord),
-[Email](#email)) · [Requirements](#requirements) · [Setup](#setup) ·
-[Self-hosting a push server](#self-hosting-a-push-server) · [Notifications from macros](#notifications-from-macros-and-g-code)
+[Email](#email)) · [Templates](#templates) ·
+[Custom notifications](#custom-notifications) · [Backup](#backup) ·
+[Requirements](#requirements) · [Setup](#setup) ·
+[Features by printer](#features-by-printer) · [Creality Hi](#creality-hi) ·
+[Notifications from macros](#notifications-from-macros-and-g-code) ·
+[Self-hosting a push server](#self-hosting-a-push-server)
 ([ntfy](#ntfy-server), [Gotify](#gotify-server)) · [Security](#security) ·
 [Configuration file](#configuration-file) · [Troubleshooting](#troubleshooting)
 
@@ -820,17 +824,19 @@ Save & Apply.
 ## Setup
 
 Push notifications are [pushraker](https://github.com/noon92/pushraker), a
-Moonraker component that works on any Moonraker printer. The Snapmaker U1
-Extended Firmware includes it (each firmware release brings the pushraker
-release it was built with); on other printers, install it as in the
-[README](../README.md) (the [Creality Hi](#creality-hi): one command over
-SSH). Nothing is sent until you set it up:
+Moonraker component, tested on the Snapmaker U1 and the Creality Hi. The
+Snapmaker U1 Extended Firmware includes it (each firmware release brings
+the pushraker release it was built with); on the Creality Hi, install it
+with one command over SSH ([Creality Hi](#creality-hi)). Other printers
+are untested (see the [README](../README.md#supported-printers)). Nothing
+is sent until you set it up:
 
 1. Open the settings page: on the U1 firmware, **Push Notifications** from
    the Links list at the top of
    [Firmware Config](https://snapmakeru1-extended-firmware.pages.dev/firmware_config) (`http://<printer>/notifications/`);
-   on any other printer, `http://<printer>:7125/server/pushraker/page`
-   (or your own nginx alias, see the README).
+   on the Creality Hi, `http://<printer>:7125/server/pushraker/page`.
+   (Elsewhere: `/server/pushraker/page` on Moonraker's port, or your own
+   nginx alias; see the README.)
    Check **Enable notifications**. Push, email and the webhook each have
    their own checkbox; at least one must be on. For push, choose the
    **Push service**:
@@ -859,8 +865,8 @@ SSH). Nothing is sent until you set it up:
    U1, the Creality Hi) have their web page built in: it is the field's
    placeholder, the first **Fill in** choice (e.g. **Fluidd**:
    `192.168.0.220:4408` on the Hi), and filled in on first setup and after
-   restoring another model's backup. On other printers, when the page is
-   opened from Moonraker's own port (`:7125`), **Fill in** offers the web
+   restoring another model's backup. On other printers (untested), when the
+   page is opened from Moonraker's own port, **Fill in** offers the web
    pages it found on the printer instead, e.g. **Fluidd (port 4408)**: the
    **Web UI** button should open the web UI, not Moonraker. The buttons work wherever your phone can
    reach that address: a LAN address only on the same network, a VPN address
@@ -881,13 +887,15 @@ command again (install.py), or `pip install -U pushraker`.
 
 ## Features by printer
 
-From the code: what each printer profile gives. ✅ yes, ➖ partly or when
-the printer has it (see the notes), ❌ no. "Other" is any Klipper printer
-with Moonraker and no profile of its own (the generic profile).
+What each printer profile gives. ✅ yes, ➖ partly or when the printer
+has it (see the notes), ❌ no. The Snapmaker U1 and Creality Hi columns
+are tested. **"Other (untested)"** is what the code's generic profile, for
+a Klipper printer with no profile of its own, is written to do; it hasn't
+been tested on any printer.
 
 **Notifications**
 
-| Notification | Snapmaker U1 | Creality Hi | Other |
+| Notification | Snapmaker U1 | Creality Hi | Other (untested) |
 |---|---|---|---|
 | Print started | ✅ with the calibrations chosen | ✅ | ✅ |
 | Pre-print calibrations complete | ✅ | ✅ bed mesh | ➖ ¹ |
@@ -910,7 +918,7 @@ with Moonraker and no profile of its own (the generic profile).
 
 **Everything else**
 
-| Feature | Snapmaker U1 | Creality Hi | Other |
+| Feature | Snapmaker U1 | Creality Hi | Other (untested) |
 |---|---|---|---|
 | Camera picture | ✅ Moonraker webcam | ✅ the camera's live stream | ➖ ⁵ |
 | Live Camera link | ✅ | ✅ the Hi's live page (:8000) | ➖ ⁵ |
@@ -921,8 +929,8 @@ with Moonraker and no profile of its own (the generic profile).
 | Excluded and per-object notifications | ✅ | ✅ | ✅ |
 | Toolheads, filament and spools in templates | ✅ | ➖ Klipper's values only | ➖ Klipper's values only |
 | Printer URL default and Fill in | ✅ `http://<host>/` | ✅ Fluidd `http://<host>:4408/` | ➖ ⁷ |
-| Settings page | `http://<printer>/notifications/` | `http://<printer>:7125/server/pushraker/page` | the same, or an nginx alias |
-| Install | built into the Extended Firmware | SSH one-liner (`install.py`) | SSH one-liner or pip |
+| Settings page | `http://<printer>/notifications/` | `http://<printer>:7125/server/pushraker/page` | `/server/pushraker/page` on Moonraker's port, or an nginx alias |
+| Install | built into the Extended Firmware | SSH one-liner (`install.py`) | SSH one-liner or pip (both untested there) |
 
 ¹ Bed mesh, Z tilt and quad gantry level, from stock Klipper's messages, when the printer has them; reported at the first layer with how long each took.
 ² When the file sets them with `SET_PRINT_STATS_INFO` (the slicer's start and layer-change G-code), or the printer's Klipper counts layers itself.
@@ -1151,7 +1159,8 @@ notifications are text only (see [Gotify](#gotify)).
 - Tokens, passwords and the webhook address are kept in
   `printer_data/pushraker.secrets` (`/home/lava/…` on the U1,
   `/mnt/UDISK/…` on the Creality Hi; mode 0600, readable by
-  Moonraker only), never in `pushraker.conf`, and the settings page never
+  Moonraker only), never in `pushraker.conf`, a backup or an exported
+  notification, and the settings page never
   receives them back (only whether one is saved). Moonraker does not serve
   files outside its config folder. The page talks to Moonraker, so
   Moonraker's own authorization applies: anyone who can reach Fluidd can

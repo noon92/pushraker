@@ -1,143 +1,133 @@
 # pushraker
 
-Push notifications for Klipper printers, as a Moonraker component: print
-started, paused, resumed, complete, cancelled, progress, first layer, faults
-and shutdowns, power-loss recovery, chamber temperature, filament (Spoolman,
-backup spools, MMUs), with pictures (camera snapshot, model preview, spool
-drawings). Every notification's title, contents and image can be edited
-on the page, as Jinja templates over Klipper's values and pushraker's own
-(print job, toolheads, filament, queue). Sent through [Apprise](https://github.com/caronc/apprise): ntfy,
+Push notifications for 3D printers running Klipper and Moonraker: print
+started, paused, resumed, complete, cancelled, progress, first layer,
+errors and shutdowns, with pictures (camera snapshot, model preview), and
+on the Snapmaker U1 also power-loss recovery, chamber temperature and
+filament (Spoolman, backup spools, MMUs). Every notification's title,
+contents and image can be edited on the settings page, as Jinja templates
+over Klipper's values and pushraker's own (print job, toolheads, filament,
+queue). Sent through [Apprise](https://github.com/caronc/apprise): ntfy,
 Pushover, Gotify, Telegram, Discord, a webhook, email. Configured from its
-own web page, live, with no Moonraker or Klipper restart.
+own web page; changes apply at once, with no Moonraker or Klipper restart.
 
 It grew out of the Push Notifications feature of the
 [Snapmaker U1 Extended Firmware](https://github.com/paxx12-snapmaker-u1/SnapmakerU1-Extended-Firmware),
-where it is built in. User documentation: the
-[Push Notifications guide](docs/guide.md). Every template value:
-[values](docs/values.md) ([by printer](docs/values-by-printer.md)). One
-notification in a file, to share or to have an AI assistant write (with a
-[prompt to paste](docs/notification-files.md#writing-one-with-an-ai-assistant)):
-[notification files](docs/notification-files.md). Bringing it to another
-printer: the [porting guide](docs/porting-guide.md).
+where it is built in.
 
-## One package, many printers
+**Documentation:**
+- [User guide](docs/guide.md): setting it up, every notification, templates, backups.
+- [Template values](docs/values.md), and [which printer has which](docs/values-by-printer.md).
+- [Notification files](docs/notification-files.md): one notification in a
+  file, to share or import, with a
+  [prompt to paste into an AI assistant](docs/notification-files.md#writing-one-with-an-ai-assistant)
+  so it writes one for you.
+- [Porting guide](docs/porting-guide.md): bringing pushraker to another printer.
 
-- **Detection over configuration.** The same package runs on every
-  printer and works out what it can at start-up: Klipper's objects,
-  Moonraker's version and features, cameras (Moonraker's webcams and
-  camera servers it doesn't list), the printer's web pages, and what the
-  G-code files themselves say (render, estimate, layers, filament).
-- **Printer profiles only where needed** (`src/pushraker/printers/`): for
-  what can't be detected, such as a vendor camera with no snapshot address,
-  the vendor's own fault codes and calibrations, the model name and the
-  web UI's address. Printers without a profile get the generic one.
-- **Two install routes:** built into the Snapmaker U1 Extended Firmware;
-  or, on any Klipper printer with Moonraker, one command over SSH that
-  leaves the vendor's packages alone (below). pip works too.
+## Supported printers
 
-### Compatibility
+pushraker has been tested on two printers:
 
-| | |
-|---|---|
-| **Tested** | Snapmaker U1 (Extended Firmware, built in); Creality Hi (stock firmware, SSH install) |
-| **Expected to work, untested** | any Klipper + Moonraker printer whose Moonraker has the `job_state` component (Nov 2021 on), with Python 3.7+, apprise 1.2+, Jinja2 3.0+ and requests: what the generic profile gives (chart below) |
-| **Not supported** | Moonraker without `job_state`; firmware without Moonraker |
+| Printer | How it's installed | Settings page |
+|---|---|---|
+| Snapmaker U1 | Built into the [Snapmaker U1 Extended Firmware](https://github.com/paxx12-snapmaker-u1/SnapmakerU1-Extended-Firmware) | `http://<printer>/notifications/` |
+| Creality Hi | Stock firmware; one command over SSH ([below](#install-on-the-creality-hi)) | `http://<printer>:7125/server/pushraker/page` |
 
-Untested, reports welcome (what is known, not a promise):
-- Creality K1 / K1 Max / older K1C: camera at `:8080/?action=snapshot`, found by discovery. K1C (2025 firmware) and K2: WebRTC only, like the Hi.
-- Sovol SV08, QIDI Q1 Pro, Flashforge AD5M with Klipper Mod: a camera server on 8080 that Moonraker doesn't list, found by discovery.
-- Elegoo Neptune 4: mjpg-streamer once set up (`/webcam/?action=snapshot`).
+**Other printers are untested.** The same package runs on every printer;
+what differs between printers is kept in a printer profile
+(`src/pushraker/printers/`). A printer without a profile gets the generic
+one, written for stock Klipper but not yet tested on any printer. To bring
+pushraker to another printer, see the [porting guide](docs/porting-guide.md).
 
 ### Features by printer
 
-| Feature | Snapmaker U1 | Creality Hi | Other Klipper printers |
-|---|---|---|---|
-| Print started/paused/resumed/complete/cancelled, progress, status reports, errors, Klipper shutdown, macros | ✅ | ✅ | ✅ |
-| Camera picture | ✅ | ✅ live stream | ➖ ¹ |
-| Live Camera link | ✅ | ✅ | ➖ ¹ |
-| Render, time left and ETA | ✅ | ✅ | ✅ |
-| Layers (first layer, layer complete) | ✅ | ✅ | ➖ ² |
-| Pre-print calibrations | ✅ listed in Started, reported when done | ✅ reported when done | ➖ reported when done ³ |
-| Bed cooled | ✅ | ✅ | ✅ (heated bed) |
-| Chamber temperature, driver temperature | ✅ | ❌ no such hardware | ➖ ⁴ |
-| Filament: toolhead map, backup spools, MMU slots | ✅ | ❌ | ❌ |
-| Filament: Spoolman (not enough, running low) | ✅ | ➖ with Spoolman | ➖ with Spoolman |
-| Coded warnings, touchscreen calibrations, power-loss recovery | ✅ | ❌ | ❌ |
-| Print-end and cancel snapshots (print hooks) | ✅ | ❌ ⁵ | ➖ ⁵ |
-| Excluded objects | ✅ | ✅ | ✅ |
-| Printer URL default (web UI) | ✅ | ✅ Fluidd :4408 | ➖ ⁶ |
-| Settings page | `/notifications/` | `:7125/server/pushraker/page` | `:7125/server/pushraker/page`, or an nginx alias |
+| Feature | Snapmaker U1 | Creality Hi |
+|---|---|---|
+| Print started/paused/resumed/complete/cancelled, progress, status reports, errors, Klipper shutdown, notifications from macros | ✅ | ✅ |
+| Camera picture | ✅ | ✅ from the printer's own camera |
+| Live Camera link | ✅ | ✅ |
+| Model preview, time left and ETA | ✅ | ✅ |
+| Layers (first layer, layer complete) | ✅ | ✅ |
+| Pre-print calibrations | ✅ listed in *Print started*, reported when done | ✅ reported when done |
+| Bed cooled | ✅ | ✅ |
+| Chamber temperature, driver temperature | ✅ | ❌ no such hardware |
+| Filament: toolhead map, backup spools, MMU slots | ✅ | ❌ |
+| Filament: Spoolman (not enough, running low) | ✅ | ➖ with Spoolman |
+| Coded warnings, touchscreen calibrations, power-loss recovery | ✅ | ❌ |
+| Print-end and cancel snapshots | ✅ | ❌ ¹ |
+| Per-object notifications, excluded objects | ✅ | ✅ |
+| Printer URL filled in on first setup | ✅ its web UI | ✅ Fluidd (port 4408) |
 
-¹ A Moonraker webcam with a snapshot, or a camera server discovery finds (8080/8081, `/webcam/`); none for WebRTC-only cameras without a profile.
-² When the slicer writes `SET_PRINT_STATS_INFO`, or the Klipper fork counts layers (Creality's `virtual_sdcard.layer`).
-³ Bed mesh, Z tilt, quad gantry level from stock Klipper's messages, when the printer has them.
-⁴ Chamber: any `heater_generic`, a DragonBreath. Driver: TMC2240/TMC5160 on X/Y.
-⁵ *Print complete* and *Cancelled* are sent from the print's end event; the hooks need `_PRINT_END_NTFY`/`_CANCEL_PRINT_NTFY` called from your macros.
-⁶ Fill in offers the web pages found on the printer.
+¹ *Print complete* and *Print cancelled* are still sent; the picture is
+taken after the printer has parked, not before.
 
-Full chart: [guide](docs/guide.md#features-by-printer).
+Full chart: [Features by printer](docs/guide.md#features-by-printer) in the guide.
 
-**Status: 0.4.** The component has been in use on the Snapmaker U1 for a
-while; the page, the settings file, the installer and the multi-printer
-support are new. Notifications a printer can't produce start off and are
-left off the page; turn one on in `pushraker.conf` and it shows on the
-page and is sent like any other.
+**Status: 0.4.** pushraker has been in use on the Snapmaker U1 since its
+first release; Creality Hi support is new in 0.4. Notifications a printer
+can't send are off and left off its settings page; one can still be
+turned on in `pushraker.conf`.
 
 ## Requirements
 
-- Moonraker with its `job_state` component (upstream since November 2021;
-  the older flat `moonraker.py` layout is fine, as on the Creality Hi).
-- The Python Moonraker runs with: 3.7 or newer with install.py (3.9 or
-  newer for `pip install`), with apprise 1.2 or newer, Jinja2 3.0 or newer
-  and requests. Pillow (8.2 or newer) is optional with install.py (pip
-  installs it): without it notifications go without spool pictures and
-  preview images.
+What pushraker needs from the printer (the installer checks these):
 
-## Install on a printer whose Moonraker came with its firmware (over SSH)
+- Moonraker with its `job_state` component (in Moonraker since November
+  2021). The Creality Hi's Moonraker, from 2022–23, has it.
+- The Python Moonraker runs with: 3.7 or newer (3.9 or newer for
+  `pip install`), with apprise 1.2 or newer, Jinja2 3.0 or newer and
+  requests. Pillow 8.2 or newer is optional with the SSH installer (pip
+  installs it); without it notifications go without spool pictures and
+  model previews.
 
-For printers like the Creality Hi, where Moonraker, its Python and nginx
-belong to the firmware: log in over SSH and run
+## Install on the Creality Hi
+
+Turn on root access in the printer's settings, log in over SSH as `root`,
+and run:
 
 ```sh
 python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubusercontent.com/noon92/pushraker/main/install.py').read())"
 ```
 
-It finds the running Moonraker, checks the requirements above (it never
-adds, upgrades or removes a package of Moonraker's Python), downloads
-pushraker from PyPI (sha256-checked), unpacks it next to Moonraker's data
-folder (on the Hi: `/mnt/UDISK/pushraker-install`, marked as install.py's
-own: it never deletes a folder it didn't make), adds one component file to
-Moonraker's components folder and `[pushraker]` to `moonraker.conf`
-(backed up first as `moonraker.conf.bak-pushraker`), restarts Moonraker
-(never while printing), checks it loaded, and prints the settings page's
-address: `http://<printer>:7125/server/pushraker/page`, served by Moonraker
-itself, so no web server change is needed (through the printer's own web
-interface's port only where its web server is set up for it, as below). Klipper's config is left alone
-(`--klipper` adds the print-end snapshot macros).
+The installer (`install.py`):
 
-Run the same command again to update, or after a firmware update removed
-it: the settings are kept. Options go after the command
-(`python3 -c "..." --uninstall`): `--uninstall` (also when Moonraker no
-longer starts; `--purge` also removes the settings), `--version X`, `--wheel FILE`, `--name`, `--no-restart`;
-`python3 install.py --help` lists them all.
+- finds the running Moonraker and checks the requirements above;
+- never adds, upgrades or removes any of the printer's own Python packages;
+- downloads pushraker from PyPI (checked against its sha256) into
+  `/mnt/UDISK/pushraker-install` (it never deletes a folder it didn't make);
+- adds one file, `/usr/share/moonraker/components/pushraker.py`, and a
+  `[pushraker]` section to `/usr/share/moonraker/moonraker.conf` (backed up
+  first as `moonraker.conf.bak-pushraker`);
+- restarts Moonraker, never while printing, and checks pushraker loaded;
+- prints the settings page's address,
+  `http://<printer>:7125/server/pushraker/page`, served by Moonraker
+  itself: no web server change is needed.
 
-### On the Creality Hi
+Settings are kept in `/mnt/UDISK/printer_data/config/pushraker.conf`.
+Klipper's configuration and Creality's macros are left alone.
 
-The command above, over SSH as root. It puts one file in
-`/usr/share/moonraker/components/` and `[pushraker]` in
-`/usr/share/moonraker/moonraker.conf` (backed up first); pushraker itself
-goes in `/mnt/UDISK/pushraker-install`, the settings in
-`/mnt/UDISK/printer_data/config/pushraker.conf`. Settings page:
-`http://<printer>:7125/server/pushraker/page`.
+**After a firmware update**, or **to update pushraker**, run the same
+command again; the settings are kept.
 
-A firmware update removes the first two: run the command again; the
-settings stay. On the Hi, pushraker works with Creality's older Moonraker
-and Apprise, reads the render, estimate and filament from the G-code
-files themselves, takes layers from Creality's own count, and takes
-camera pictures from the Hi's camera through the firmware's ffmpeg. See
-the [guide](docs/guide.md#creality-hi).
+**Options** go after the command (`python3 -c "..." --uninstall`):
+`--uninstall` removes pushraker (also when Moonraker no longer starts;
+`--purge` also removes the settings), `--version X`, `--wheel FILE`,
+`--name`, `--no-restart`. `python3 install.py --help` lists them all.
 
-## Install (any Moonraker printer)
+On the Hi, pushraker works with Creality's older Moonraker and Apprise,
+reads the model preview, estimate and filament from the G-code files
+themselves, takes layers from Creality's own count, and takes camera
+pictures from the Hi's camera through the firmware's ffmpeg. See
+[Creality Hi](docs/guide.md#creality-hi) in the guide.
+
+The installer is written to find Moonraker on other printers whose
+Moonraker came with the firmware too, but it has only been tested on the
+Creality Hi.
+
+## Install with pip (untested)
+
+Not yet tested on a printer. For a printer where you installed Moonraker
+yourself:
 
 ```sh
 pip install pushraker            # into the Python Moonraker runs with
@@ -148,10 +138,12 @@ python -m pushraker install      # ~/moonraker and ~/printer_data by default
 `[pushraker]` to `moonraker.conf`, and includes the Klipper macro file
 from `printer.cfg` (`--no-klipper` skips it). Restart Moonraker and
 Klipper; pushraker writes `printer_data/config/pushraker.conf` at its
-first start. Open `http://<printer>:7125/server/pushraker/page`.
-Optionally, serve the page from the nginx that serves Fluidd or Mainsail
-too (`src/pushraker/web/index.html`, or `python -c "import pushraker, os;
-print(os.path.dirname(pushraker.__file__) + '/web')"`), e.g.
+first start. The settings page is served by Moonraker at
+`/server/pushraker/page` on Moonraker's port (7125 unless `moonraker.conf`
+sets another). Optionally, serve the page from the nginx that serves
+Fluidd or Mainsail too (`src/pushraker/web/index.html`, or `python -c
+"import pushraker, os; print(os.path.dirname(pushraker.__file__) +
+'/web')"`), e.g.
 
 ```nginx
 location /notifications/ {

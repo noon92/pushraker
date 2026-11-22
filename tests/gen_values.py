@@ -32,7 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PRINTERS = (("snapmaker_u1", "Snapmaker U1", "objects-snapmaker-u1.json"),
             ("creality", "Creality Hi", "objects-creality-hi.json"),
-            ("generic", "Other Klipper printers", "objects-generic.json"))
+            ("generic", "Other (untested)", "objects-generic.json"))
 SHORT = {"snapmaker_u1": "U1", "creality": "Hi", "generic": "Other"}
 CATEGORIES = (
     ("job", "Print job (`job.*`)",
@@ -233,10 +233,13 @@ def write_by_printer_md(vals, rows, cfg) -> str:
            "",
            "Which notifications a printer can send, and which template "
            "values have data on it: ✅ yes, ➖ only with Spoolman, ❌ no "
-           "(the value reads `n/a`). *Other* is any Klipper printer with "
-           "Moonraker and no profile of its own; its values depend on its "
-           "hardware (shown: a single-extruder printer with a heated bed, "
-           "a bed mesh and Z tilt). `printer.*` values are Klipper's own "
+           "(the value reads `n/a`). The Snapmaker U1 and Creality Hi "
+           "columns are tested printers. *Other (untested)* is what the "
+           "generic profile, for a Klipper printer with no profile of its "
+           "own, is written to give; it hasn't been tested on a printer, "
+           "and its values depend on the hardware (shown: a "
+           "single-extruder printer with a heated bed, a bed mesh and Z "
+           "tilt). `printer.*` values are Klipper's own "
            "and exist wherever the printer has that object.", "",
            "## Notifications", "",
            "| Notification | " + " | ".join(p[1] for p in PRINTERS) + " |",
