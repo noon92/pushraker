@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, \
 
 import jinja2
 from jinja2 import nodes
-from jinja2.sandbox import ImmutableSandboxedEnvironment
+from jinja2.sandbox import SandboxedEnvironment
 from jinja2.utils import Namespace
 
 from . import templating as tp
@@ -300,8 +300,9 @@ def _limit(text: str) -> jinja2.exceptions.SecurityError:
 
 
 def _sized(value: Any) -> Any:
-    """A string or list no longer than MAX_SIZE."""
-    if isinstance(value, (str, list, tuple)) and len(value) > MAX_SIZE:
+    """A string, list or dict no longer than MAX_SIZE."""
+    if isinstance(value, (str, list, tuple, dict, set)) and \
+            len(value) > MAX_SIZE:
         raise _limit(f"a text or list is limited to {MAX_SIZE} "
                      "characters or items")
     if isinstance(value, int) and not isinstance(value, bool) and \
@@ -313,8 +314,53 @@ def _sized(value: Any) -> Any:
 def _arg(value: Any) -> None:
     if isinstance(value, (int, float)) and not isinstance(value, bool) \
             and abs(value) > MAX_ARG:
-        raise _limit(f"a number given to a filter or method is limited to "
+        raise _limit(f"a size given to a filter or method is limited to "
                      f"{MAX_ARG}")
+
+
+# What makes its result as big as a number it's given
+SIZE_METHODS = ("ljust", "rjust", "center", "zfill", "expandtabs")
+SIZE_FILTERS = ("center", "indent", "tojson", "slice", "batch")
+
+
+def _replace_ok(text: Any, old: Any, new: Any) -> None:
+    if isinstance(text, str) and isinstance(old, str) and \
+            isinstance(new, str):
+        n = text.count(old) if old else len(text) + 1
+        if len(text) + n * max(0, len(new) - len(old)) > MAX_SIZE:
+            raise _limit(f"a text or list is limited to {MAX_SIZE} "
+                         "characters or items")
+
+
+def _join_ok(sep: Any, items: Any) -> None:
+    if isinstance(items, (list, tuple)) and sum(
+            len(i) if isinstance(i, str) else 1 for i in items) + \
+            len(str(sep)) * len(items) > MAX_SIZE:
+        raise _limit(f"a text or list is limited to {MAX_SIZE} "
+                     "characters or items")
+
+
+def _call_ok(obj: Any, args: List[Any], kwargs: List[Any]) -> None:
+    """Only what can blow up is bounded: not every number passed."""
+    name = getattr(obj, "__name__", "")
+    owner = getattr(obj, "__self__", None)
+    if isinstance(owner, str):
+        if name in SIZE_METHODS:
+            for v in args + kwargs:
+                _arg(v)
+        elif name == "replace" and len(args) >= 2:
+            _replace_ok(owner, args[0], args[1])
+        elif name == "join" and args:
+            _join_ok(owner, args[0])
+    elif isinstance(owner, (list, dict, set)) and args and \
+            name in ("extend", "update"):
+        try:
+            more = len(args[0])
+        except TypeError:
+            return
+        if len(owner) + more > MAX_SIZE:
+            raise _limit(f"a text or list is limited to {MAX_SIZE} "
+                         "characters or items")
 
 
 # A width or precision in "%9999d" or "{:9999}"
@@ -338,12 +384,13 @@ class _Namespace(Namespace):
         super().__setitem__(name, _sized(value))
 
 
-class _Sandbox(ImmutableSandboxedEnvironment):
+class _Sandbox(SandboxedEnvironment):
     """Jinja's sandbox (no _attributes, no unsafe callables, str.format
-    checked; lists and dicts can't be changed), with limits on what a
-    template can make: range() up to MAX_RANGE, ** up to MAX_POWER,
-    strings and lists up to MAX_SIZE, integers up to MAX_BITS, numbers
-    given to methods up to MAX_ARG, format widths up to MAX_WIDTH."""
+    checked), with limits on what a template can make: range() up to
+    MAX_RANGE, ** up to MAX_POWER, strings, lists and dicts up to MAX_SIZE
+    (also as a template adds to them), integers up to MAX_BITS, sizes
+    given to what pads or repeats up to MAX_ARG, format widths up to
+    MAX_WIDTH. Other numbers passed to a call are free (a timestamp)."""
     intercepted_binops = frozenset(["**", "*", "%"])
 
     def call_binop(self, context: Any, operator: str, left: Any,
@@ -376,9 +423,13 @@ class _Sandbox(ImmutableSandboxedEnvironment):
 
     def call(__self, __context: Any, __obj: Any, *args: Any,
              **kwargs: Any) -> Any:
-        for v in list(args) + list(kwargs.values()):
-            _arg(raw(v))
-        return super().call(__context, __obj, *args, **kwargs)
+        _call_ok(__obj, [raw(v) for v in args],
+                 [raw(v) for v in kwargs.values()])
+        out = super().call(__context, __obj, *args, **kwargs)
+        owner = getattr(__obj, "__self__", None)
+        if isinstance(owner, (list, dict, set)):
+            _sized(owner)       # what a loop adds to it
+        return _sized(out)
 
     def wrap_str_format(self, value: Any) -> Any:
         """"{:9999}".format(): its widths checked when it's read."""
@@ -402,17 +453,25 @@ ENV.globals["namespace"] = _Namespace
 ENV.globals.pop("lipsum", None)
 
 
-def _guarded(f: Callable[..., Any]) -> Callable[..., Any]:
-    """A filter whose numbers (not the value it filters) are within
-    MAX_ARG, and whose format string's widths within MAX_WIDTH."""
+def _guarded(name: str, f: Callable[..., Any]) -> Callable[..., Any]:
+    """A filter that can't blow up: the sizes of those that pad or split
+    within MAX_ARG, what replace and join make within MAX_SIZE, a format
+    string's widths within MAX_WIDTH."""
     skip = 2 if getattr(f, "jinja_pass_arg", None) else 1
 
     @functools.wraps(f)
     def run(*args: Any, **kwargs: Any) -> Any:
-        for v in list(args[skip:]) + list(kwargs.values()):
-            _arg(raw(v))
-        if f.__name__ == "do_format" and len(args) >= skip:
-            _format_ok(args[skip - 1])
+        rest = [raw(v) for v in args[skip:]]
+        if name in SIZE_FILTERS:
+            for v in rest + [raw(v) for v in kwargs.values()]:
+                _arg(v)
+        value = raw(args[skip - 1]) if len(args) >= skip else None
+        if name == "format":
+            _format_ok(value)
+        elif name == "replace" and len(rest) >= 2:
+            _replace_ok(str(value), rest[0], rest[1])
+        elif name == "join":
+            _join_ok(rest[0] if rest else kwargs.get("d", ""), value)
         return f(*args, **kwargs)
     return run
 
@@ -457,7 +516,7 @@ def _tag_lines(text: str) -> str:
     return "".join(out)
 ENV.filters.update(FILTERS)
 for _name in list(ENV.filters):
-    ENV.filters[_name] = _guarded(ENV.filters[_name])
+    ENV.filters[_name] = _guarded(_name, ENV.filters[_name])
 
 
 class TemplateError(Exception):
@@ -512,6 +571,14 @@ def _deadline_tracer(deadline: float) -> Callable[..., Any]:
     return call
 
 
+def _own(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _own(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_own(v) for v in value]
+    return value
+
+
 def render_vars(text: str, context: Dict[str, Any],
                 seconds: float = RENDER_SECONDS
                 ) -> Tuple[str, Dict[str, Any]]:
@@ -519,7 +586,8 @@ def render_vars(text: str, context: Dict[str, Any],
     ({% set priority = "max" %}, also inside an if). Raises TemplateError
     on a mistake; TemplateTimeout when it runs past `seconds`."""
     tpl = compile_template(text)
-    ctx = tpl.new_context(dict(context))
+    # A template can change lists and dicts: its own copy of the values
+    ctx = tpl.new_context({k: _own(v) for k, v in context.items()})
     before = sys.gettrace()
     sys.settrace(_deadline_tracer(time.monotonic() + seconds))
     try:

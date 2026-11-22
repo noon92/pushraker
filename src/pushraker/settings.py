@@ -378,7 +378,10 @@ def _defaults(name: str) -> Dict[str, Any]:
         "secret_for": "",       # the service the push secret belongs to
         "email_password_for": "",   # the SMTP server and account it's for
         "printer_url": "",
-        "camera": "",           # a Moonraker webcam name, "" for none
+        "camera": "",           # a camera's name; "": see camera_none
+        # "" chosen on purpose (in the file: camera: none); otherwise an
+        # empty camera is the printer's own, if it has one
+        "camera_none": False,
         "name": name,
         # "browser": the time zone of the browser the page was last saved
         # from (browser_timezone); or a time zone of its own
@@ -437,7 +440,7 @@ SECTION = "pushraker"
 CUSTOM_SECTION = "pushraker custom "
 
 # Custom notifications: a name (letters, digits, _; it's how G-code fires
-# one: RESPOND PREFIX=notify_custom MSG=<name>), a condition (a Jinja
+# one: RESPOND PREFIX=notify_custom MSG=pushraker.<name>), a condition (a Jinja
 # expression, evaluated every few seconds: sent when it turns true; or at
 # each layer change, tool change... : sent when true), and a template like
 # the built-in ones
@@ -631,7 +634,8 @@ def section_lines(s: Dict[str, Any]) -> List[str]:
     for key in BOOL_FIELDS:
         lines.append(f"{key}: {'true' if s[key] else 'false'}")
     for key in STRING_FIELDS:
-        lines.append(f"{key}: {s[key]}")
+        none = key == "camera" and s.get("camera_none") and not s[key]
+        lines.append(f"{key}: {'none' if none else s[key]}")
     for key in INT_FIELDS:
         lines.append(f"{key}: {s[key]}")
     lines.append("# <notification>: on|off (push), <priority>, "
@@ -669,6 +673,8 @@ def parse_section(sec: Any, s: Dict[str, Any]) -> Dict[str, Any]:
     for key in STRING_FIELDS + SECRET_FIELDS:
         if key in sec:
             s[key] = sec.get(key).strip()
+    if s["camera"] == "none":
+        s["camera"], s["camera_none"] = "", True
     if s["provider"] == "none":
         s["push_enabled"] = False    # older settings: no push service
         s["provider"] = "ntfy"
@@ -804,8 +810,12 @@ class Store:
                 s[key] = str(secrets[key])
         # Settings from before the secrets were scoped: the secrets belong
         # to the service and server they were saved with
-        if s["secret"] and not s["secret_for"]:
-            s["secret_for"] = secret_scope(s)
+        if s["secret"] and not stored_scope(s["secret_for"]):
+            if s["secret_for"].split("|")[0] in ("", s["provider"]):
+                s["secret_for"] = secret_scope(s)
+        # The server changed by hand: the token isn't sent to the new host
+        if s["secret"] and stored_scope(s["secret_for"]) != secret_scope(s):
+            s["secret"] = s["secret_for"] = ""
         if s["email_password"] and not s["email_password_for"]:
             s["email_password_for"] = email_scope(s)
         self._stamp = self.stamp()
@@ -938,6 +948,9 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     for key in STRING_FIELDS:
         if key in data:
             s[key] = str(data[key] or "").strip()
+    if "camera" in data:
+        s["camera_none"] = not s["camera"] and bool(
+            data.get("camera_none", True))
     for key in SECRET_FIELDS:
         if data.get(key):
             s[key] = str(data[key])
@@ -1034,18 +1047,21 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
     s["email_password"] = s["email_password"].strip()
     # The push secret is one field for every service (ntfy token or
     # password, Pushover app token, Telegram bot token, Discord token or
-    # webhook). A stored one is only reused for the service it was entered
-    # for: switching services means entering the new one. (Settings from
-    # before kept the server too: "ntfy|token|https://…|"; the service is
-    # the part that counts.)
+    # webhook). A stored one is only reused for the service, and for ntfy
+    # and Gotify the host, it was entered for: never sent anywhere else.
+    # (The port, scheme, path or auth mode can change.)
     scope = secret_scope(s)
-    if s["secret"] and s.get("secret_for", "").split("|")[0] \
-            not in ("", scope):
+    was = s.get("secret_for", "")
+    if was:
+        was = stored_scope(was) or (
+            secret_scope(current) if current.get("provider") == was
+            else was)
+    if s["secret"] and was not in ("", scope):
         s["secret"] = ""
         if s["push_enabled"]:
             raise ConfigError(
                 "The saved token or password was entered for another "
-                "service. Enter the one for this one.")
+                "service or server. Enter the one for this one.")
     s["secret_for"] = scope if s["secret"] else ""
     if s["provider"] not in PROVIDERS:
         raise ConfigError("Invalid notification service")
@@ -1317,8 +1333,34 @@ def email_scope(s: Dict[str, Any]) -> str:
 
 def secret_scope(s: Dict[str, Any]) -> str:
     """What a stored push secret is bound to: the service it was entered
-    for (fixing the server's address keeps it)."""
+    for and, where the user picks the server, its host. Fixing the port,
+    scheme or path keeps it; another host doesn't."""
+    if s["provider"] == "ntfy":
+        return f"ntfy|{_hostname(s.get('server'))}"
+    if s["provider"] == "gotify":
+        return f"gotify|{_hostname(s.get('gotify_server'))}"
     return s["provider"]
+
+
+def _hostname(url: Any) -> str:
+    try:
+        return (urlparse(str(url or "")).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def stored_scope(stored: str) -> str:
+    """A saved secret_for as secret_scope writes it. Older ones: "ntfy|
+    token|https://host|" has its host; "ntfy" alone has none: "" (it
+    belongs to the server saved with it)."""
+    parts = str(stored or "").split("|")
+    if parts[0] not in ("ntfy", "gotify"):
+        return parts[0]
+    if len(parts) == 1:
+        return ""
+    if len(parts) == 2:
+        return f"{parts[0]}|{parts[1].lower()}"
+    return f"{parts[0]}|{_hostname(parts[2])}"
 
 
 def push_configured(s: Dict[str, Any]) -> bool:
@@ -1604,21 +1646,20 @@ BACKUP_PUSH = {"ntfy": "", "telegram": "", "discord": "", "discord_dm": "",
 
 
 def backup(s: Dict[str, Any], version: str, created: str,
-           secrets: bool = False, model: str = "") -> Dict[str, Any]:
-    """The saved settings as a backup: no tokens, passwords or webhook
-    URL (the secrets), nothing about which service they were for.
-    secrets (a download the user asked to have them in): those that are
-    set, apart from the settings, under "secrets". "from": the pushraker
-    and the printer model it was made on (what Restore compares)."""
+           model: str = "") -> Dict[str, Any]:
+    """The saved settings as a backup: never tokens, passwords or the
+    webhook URL (the secrets), nothing about which service they were for.
+    "from": the pushraker and the printer model it was made on (what
+    Restore compares)."""
     out = json.loads(json.dumps(s))
     for key in SECRET_FIELDS + ("secret_for", "email_password_for"):
         out.pop(key, None)
+    if not out.get("camera_none"):
+        out.pop("camera_none", None)
     data = {"pushraker_backup": BACKUP_FORMAT, "version": version,
             "printer": s.get("name") or "Printer", "created": created,
             "from": {"pushraker": version, "printer": model},
             "settings": out}
-    if secrets:
-        data["secrets"] = {k: str(s[k]) for k in SECRET_FIELDS if s.get(k)}
     return data
 
 
@@ -1633,6 +1674,7 @@ RESTORE_NOTES = {
              "here.",
     "hidden": "Not available on this printer: {rows}.",
     "unused": "Not used by this version: {keys}.",
+    "secrets": "Not used by this version: tokens and passwords.",
 }
 
 
@@ -1664,6 +1706,8 @@ def restore_notes(data: Any, version: str, model: str,
             out.append(RESTORE_NOTES["model"].format(
                 model=other, article="an" if other[:1].lower() in "aeiou"
                 else "a"))
+    if "secrets" in data:
+        out.append(RESTORE_NOTES["secrets"])    # from an earlier build
     settings = data.get("settings")
     if not isinstance(settings, dict):
         return out
@@ -1863,19 +1907,6 @@ def backup_name(s: Dict[str, Any], day: str) -> str:
     that says so marks the file worth taking."""
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", s.get("name") or "Printer")
     return f"pushraker-backup-{name.strip('-') or 'Printer'}-{day}.json"
-
-
-def backup_secrets(data: Any) -> Dict[str, str]:
-    """The tokens and passwords a backup file was saved with (none in
-    most): each a line of text, as if typed into the page."""
-    found = data.get("secrets") if isinstance(data, dict) else None
-    out = {}
-    for key in SECRET_FIELDS:
-        value = found.get(key) if isinstance(found, dict) else None
-        if isinstance(value, str) and value.strip() and \
-                len(value) <= 2000 and "\n" not in value:
-            out[key] = value.strip()
-    return out
 
 
 def backup_targets(s: Dict[str, Any]) -> Dict[str, Any]:
@@ -2237,6 +2268,7 @@ def public_view(s: Dict[str, Any], env: Env, busy: bool,
         out[key] = ""
     out.pop("secret_for", None)
     out.pop("email_password_for", None)
+    out.pop("camera_none", None)
     out["meta"] = {
         "version": version,
         # A stock notification's own settings, for its file (Export)

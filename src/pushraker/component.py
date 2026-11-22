@@ -312,9 +312,9 @@ ACE_FIELDS = ["head_source", "aces", "mode", "head_ace",
               "quad_replenish", "quad_first", "swap_in_progress"]
 ACE_REFILL_WAIT = 180.
 MACRO_PREFIX = "notify "
-# RESPOND PREFIX=notify_custom MSG=<name>: send a custom notification
+# RESPOND PREFIX=notify_custom MSG=pushraker.<name>: send a custom
+# notification; MSG="pushraker.<name> <Jinja added at the end>"
 CUSTOM_PREFIX = "notify_custom "
-# RESPOND PREFIX=notify_custom MSG="pushraker.<name> <Jinja added at the end>"
 # (the pushraker. keeps a plain word from setting one off by chance)
 CUSTOM_CALL = "pushraker."
 RX_CUSTOM_CALL = re.compile(r"pushraker\.([A-Za-z0-9_]+)(?:\s+(.*))?",
@@ -784,6 +784,40 @@ def short_cause(messages: List[str]) -> str:
     if "connect" in low:
         return "could not connect"
     return "failed"
+
+
+def jpeg_end(data: bytes, start: int) -> Optional[int]:
+    """Where the JPEG at `start` really ends, walking its segments: an
+    EXIF thumbnail inside APP1 has an end marker of its own. None while
+    it's incomplete; a stream that isn't well formed: its first end
+    marker, if any."""
+    i, n = start + 2, len(data)
+    while i + 1 < n:
+        if data[i] != 0xFF:
+            end = data.find(b"\xff\xd9", i)
+            return end + 2 if end >= 0 else None
+        m = data[i + 1]
+        if m == 0xFF:
+            i += 1
+        elif m == 0xD9:
+            return i + 2
+        elif m == 0x01 or 0xD0 <= m <= 0xD8:
+            i += 2
+        else:
+            if i + 3 >= n:
+                return None
+            i += 2 + int.from_bytes(data[i + 2:i + 4], "big")
+            if m == 0xDA:       # the image data, up to the next marker
+                while True:
+                    i = data.find(b"\xff", i)
+                    if i < 0 or i + 1 >= n:
+                        return None
+                    b = data[i + 1]
+                    if b == 0 or 0xD0 <= b <= 0xD7:
+                        i += 2
+                    else:
+                        break
+    return None
 
 
 class SnapshotProblem(str):
@@ -1584,11 +1618,11 @@ class PushNotifications:
             self.env = await self._env()
 
     def _own_camera(self, s: Dict[str, Any]) -> Dict[str, Any]:
-        """No camera set: the printer's own (its profile's cameras(), e.g.
-        the Creality Hi's "Printer camera"), on a fresh install and
-        whenever it is empty. A camera found on a port is never chosen
-        for the user."""
-        if s and not s.get("camera"):
+        """No camera ever set: the printer's own (its profile's cameras(),
+        e.g. the Creality Hi's "Printer camera"). "None" chosen on the page
+        stays none. A camera found on a port is never chosen for the
+        user."""
+        if s and not s.get("camera") and not s.get("camera_none"):
             try:
                 own = list(self.printer.cameras())
             except Exception:
@@ -1682,20 +1716,12 @@ class PushNotifications:
         how = str(args.get("how") or "download")
         s = self.settings
         now = datetime.datetime.now(self.tz)
-        # Tokens and passwords: only in a download that asks for them,
-        # never in one sent by push or email
-        secrets = how == "download" and args.get("secrets") is True
+        # Never tokens or passwords: no endpoint hands them out
         data = cfgmod.backup(s, __version__,
-                             now.isoformat(timespec="seconds"), secrets,
+                             now.isoformat(timespec="seconds"),
                              model=self.printer.model(self._hostname))
         name = cfgmod.backup_name(s, now.strftime("%Y-%m-%d"))
         if how == "download":
-            if secrets:
-                # They don't otherwise leave the printer: on the record
-                logging.warning("[pushraker] ⚠️ a backup with tokens and "
-                                "passwords was downloaded")
-                self._console("⚠️ pushraker: a backup with tokens and "
-                              "passwords was downloaded")
             return {"name": name, "backup": data}
         if how == "restore":
             return await self._restore_view(args.get("backup"))
@@ -1715,8 +1741,8 @@ class PushNotifications:
                                                  args.get("sections"))
             except cfgmod.ConfigError as e:
                 raise self.server.error(str(e), 400)
-            view = cfgmod.public_view(out, self.env, self._busy(),
-                                      __version__)
+            view = cfgmod.public_view(self._own_camera(out), self.env,
+                                      self._busy(), __version__)
             view["meta"]["sending"] = (await self._view())["meta"]["sending"]
             # keys: the page keeps what else was changed on it and unsaved
             return {"view": view, "forget": forget, "keys": keys}
@@ -1845,7 +1871,8 @@ class PushNotifications:
         """A backup file's settings for the page to load (and save with
         Save & Apply): validated like a save, so nothing in a file gets
         onto the page unchecked; the tokens and passwords stay the ones
-        stored here. A backup that needs a token this printer doesn't
+        stored here (a "secrets" block in a file from an earlier build is
+        ignored). A backup that needs a token this printer doesn't
         have (none, or one for another service) loads all the same,
         switched off for the check: saving asks for the token."""
         try:
@@ -1857,8 +1884,16 @@ class PushNotifications:
             # Cameras this printer doesn't have (the backup is from another
             # one): the camera chosen here stays, default and per row
             cams = set(self.env.cameras)
-            if data.get("camera") and data["camera"] not in cams:
+            try:
+                own = bool(self.printer.cameras())
+            except Exception:
+                own = False
+            if (data.get("camera") and data["camera"] not in cams) or (
+                    own and not data.get("camera")
+                    and not data.get("camera_none")):
+                # (Empty and not chosen as none: nothing to restore)
                 data["camera"] = self.settings.get("camera", "")
+                data["camera_none"] = bool(self.settings.get("camera_none"))
             here_tpl = self.settings.get("templates") or {}
             for key, tpl in (data.get("templates") or {}).items():
                 if isinstance(tpl, dict) and tpl.get("camera") \
@@ -1872,23 +1907,25 @@ class PushNotifications:
                                        self.printer.model(self._hostname))
             if other:
                 data["printer_url"] = self.settings.get("printer_url", "")
-            # Tokens and passwords the file has: as if typed into the page
-            secrets = cfgmod.backup_secrets(backup)
-            data.update(secrets)
             off = dict(data, enabled=False)
             bare = dict(self.settings, secret_for="", email_password_for="",
                         **{k: "" for k in cfgmod.SECRET_FIELDS})
             s = None
+            # Last: its push service without a token here (none, or the
+            # one here is for another host): the page asks for it on saving
             for d, cur in ((data, self.settings), (off, self.settings),
-                           (off, bare)):
+                           (off, bare),
+                           (dict(off, push_enabled=False), bare)):
                 try:
                     s = cfgmod.validate(d, cur, self.env)
                     break
                 except cfgmod.ConfigError:
-                    if cur is bare:
+                    if d.get("push_enabled", True) is False and cur is bare:
                         raise
             assert s is not None
             s["enabled"] = bool(data.get("enabled", s["enabled"]))
+            s["push_enabled"] = bool(data.get("push_enabled",
+                                              s["push_enabled"]))
         except cfgmod.ConfigError as e:
             raise self.server.error(f"Can't restore this backup: {e}", 400)
         out = cfgmod.public_view(s, self.env, self._busy(), __version__)
@@ -1897,8 +1934,7 @@ class PushNotifications:
         # Another model's backup and no Printer URL here: the page fills in
         # this printer's own web page (Printer.web_page)
         out["meta"]["other_model"] = bool(other)
-        # The page puts them in its fields: Save & Apply stores them
-        return {"view": out, "secrets": secrets}
+        return {"view": out}
 
     async def _ep_test(self, web_request: Any) -> Dict[str, Any]:
         """Send a test notification with the settings the page holds (not
@@ -3860,9 +3896,9 @@ class PushNotifications:
                     buf += chunk
                     start = buf.find(b"\xff\xd8")
                     if start >= 0:
-                        end = buf.find(b"\xff\xd9", start + 2)
-                        if end >= 0:
-                            return buf[start:end + 2], ""
+                        end = jpeg_end(buf, start)
+                        if end:
+                            return buf[start:end], ""
         except Exception as e:
             return None, f"the camera didn't answer ({e})"
         if len(buf) > SNAPSHOT_MAX:
@@ -8249,6 +8285,13 @@ class PushNotifications:
                 for key, (t, b, rows) in keyed:
                     path = await shared(d_kind) if d_kind in (
                         "render", "snapshot") else None
+                    # A camera that gave no picture, or an old one: the
+                    # text says so; no picture ("") is never attached
+                    b = with_camera_error(b, path)
+                    if getattr(path, "why", "") and self._job_active \
+                            and self._job_filename:
+                        path = self._thumbnail(self._job_filename)
+                    path = path or None
                     if d_kind == "spool":
                         if key not in paths:
                             if not remaining:
@@ -8273,6 +8316,8 @@ class PushNotifications:
                 for d, t, msgs in zip(sent_to, tickets, per_dest)),
                 return_exceptions=True))
             self._console_report(report)
+            if dests:
+                self._mark_sent(rid, time.time(), all(results))
         finally:
             for t in tickets:
                 await t.gate.done(t.ticket)

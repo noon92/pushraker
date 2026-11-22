@@ -265,7 +265,7 @@ def run_settings_tests():
           cfg_text[:300])
     back = store.load()
     check("everything comes back", back["secret"] == "tk_secret123"
-          and back["secret_for"] == "ntfy"
+          and back["secret_for"] == "ntfy|ntfy.example.com"
           and back["server"] == "https://ntfy.example.com"
           and back["rows"] == tok["rows"] and back["auth"] == "token",
           (back["secret_for"], back["auth"]))
@@ -323,13 +323,64 @@ def run_settings_tests():
     except st.ConfigError as e:
         check("...and asks for the new service's own token",
               "another service" in str(e), str(e))
-    moved = st.validate(dict(server="https://other.example.com"), back, ENV)
-    check("fixing the server's address keeps it",
-          moved["secret"] == "tk_secret123")
-    old = st.validate({}, dict(back, secret_for="ntfy|token|https://a.example|"),
-                      ENV)
+    moved = st.validate(dict(server="http://NTFY.example.com:8080",
+                             auth="basic", username="me"), back, ENV)
+    check("the same host (port, scheme, path, auth mode changed) keeps it",
+          moved["secret"] == "tk_secret123", moved["secret_for"])
+    try:
+        st.validate(dict(server="https://evil.example.net"), back, ENV)
+        check("another host: refused, the token is never sent there", False)
+    except st.ConfigError as e:
+        check("another host: refused, the token is never sent there",
+              "another service or server" in str(e), str(e))
+    off = st.validate(dict(server="https://evil.example.net",
+                           enabled=False, push_enabled=False), back, ENV)
+    check("...with push off: saved, the token dropped",
+          off["secret"] == "" and not off["secret_for"])
+    typed = st.validate(dict(server="https://new.example.net",
+                             secret="tk_new"), back, ENV)
+    check("...a token typed for the new host is kept", typed["secret"] ==
+          "tk_new" and typed["secret_for"] == "ntfy|new.example.net")
+    old = st.validate({}, dict(back, secret_for="ntfy|token|https://"
+                               "ntfy.example.com|"), ENV)
     check("...also as saved before (the service with its server)",
-          old["secret"] == "tk_secret123" and old["secret_for"] == "ntfy")
+          old["secret"] == "tk_secret123"
+          and old["secret_for"] == "ntfy|ntfy.example.com")
+    bare = st.validate({}, dict(back, secret_for="ntfy"), ENV)
+    check("...and as saved by 0.3.x (the service alone): bound to the "
+          "server saved with it", bare["secret_for"] ==
+          "ntfy|ntfy.example.com", bare["secret_for"])
+    try:
+        st.validate(dict(server="https://evil.example.net"),
+                    dict(back, secret_for="ntfy"), ENV)
+        check("...which then can't move to another host", False)
+    except st.ConfigError as e:
+        check("...which then can't move to another host",
+              "another service or server" in str(e), str(e))
+    try:
+        st.validate({}, dict(back, secret_for="ntfy|token|https://a.example|"),
+                    ENV)
+        check("...an old scope for another host isn't carried over", False)
+    except st.ConfigError:
+        check("...an old scope for another host isn't carried over", True)
+    gt = st.validate(dict(provider="gotify", gotify_server="https://g.example",
+                          secret="AbCdEf123456789"), back, ENV)
+    try:
+        st.validate(dict(gotify_server="https://h.example"), gt, ENV)
+        check("Gotify: the same", False)
+    except st.ConfigError as e:
+        check("Gotify: the same", "another service or server" in str(e))
+    saved_conf = open(store.settings_path).read()
+    with open(store.settings_path, "w") as f:
+        f.write(saved_conf.replace("server: https://ntfy.example.com",
+                                   "server: https://evil.example.net"))
+    by_hand = store.load()
+    with open(store.settings_path, "w") as f:
+        f.write(saved_conf)
+    check("the server changed by hand in the file: the token isn't used "
+          "for it", by_hand["server"] == "https://evil.example.net"
+          and by_hand["secret"] == "", by_hand["secret_for"])
+    store.load()
     check("a notification's own topic also on pushraker's ntfy sender "
           "(pntfy://, old Apprise)", st.with_topic(
               "pntfy://ntfy.example.com/main?priority=high", "other")

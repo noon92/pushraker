@@ -105,7 +105,6 @@
     .rs-list small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
     .rs-list .rs-all { border-top: 1px solid #444; padding-top: 10px; }
     .rs-list label.rs-off { opacity: 0.45; cursor: default; }
-    .bk-secrets { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; font-size: 14px; cursor: pointer; }
     .bk-to { margin: 4px 0 8px; }
     .bk-to label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
     .nt-section { font-size: 16px; color: #fff; font-weight: 600; margin: 8px 0 10px; }
@@ -709,8 +708,6 @@
         <h3 id="bk-out-title">Back up settings</h3>
         <div class="bk-file" id="bk-out-file"></div>
         <ul class="bk-list" id="bk-out-list"></ul>
-        <label class="bk-secrets" id="bk-secrets-wrap"><input type="checkbox" id="bk-secrets"> Include tokens, passwords and the webhook URL</label>
-        <p class="bk-red" id="bk-out-red"></p>
         <p class="bk-note" id="bk-out-never"></p>
         <p class="bk-note">The last saved settings: Save &amp; Apply first to include changes on this page.</p>
         <div class="bk-to" id="bk-to-wrap">
@@ -2936,10 +2933,7 @@
         el('bk-out-title').textContent = bkHow === 'download' ? 'Download a backup' :
             bkHow === 'push' ? `Send a backup by push (${t.push_label})` : 'Send a backup by email';
         el('bk-out-list').innerHTML = bkContents(state);
-        el('bk-secrets').checked = false;
-        el('bk-secrets-wrap').style.display = bkHow === 'download' ? '' : 'none';
-        bkCountStop();
-        bkSecrets();
+        bkFile();
         el('bk-go').textContent = bkHow === 'download' ? 'Download' : 'Send';
         el('bk-go').disabled = false;
         el('bk-to-wrap').style.display = bkHow === 'email' ? '' : 'none';
@@ -2948,36 +2942,14 @@
         el('bk-out').classList.add('open');
         if (bkHow === 'email') el('bk-to').focus();
     };
-    // Include tokens, passwords and the webhook URL: a download only
-    function bkSecrets() {
-        const on = bkHow === 'download' && el('bk-secrets').checked;
+    function bkFile() {
         const day = new Date().toISOString().slice(0, 10);
         el('bk-out-file').textContent = `📄 pushraker-backup-${(state.name || 'Printer').replace(/[^A-Za-z0-9._-]+/g, '-')}-${day}.json`;
-        el('bk-out-red').textContent = on
-            ? '⚠️ This file contains your tokens and passwords. Anyone who has it can send notifications as you and use your email account\'s SMTP login. Keep it somewhere safe.'
-            : '';
-        el('bk-out-red').style.display = on ? '' : 'none';
-        el('bk-out-never').style.display = bkHow === 'download' ? 'none' : '';
-        el('bk-out-never').textContent = `Tokens, passwords and the webhook URL cannot be sent via ${bkHow === 'email' ? 'email' : 'push'}.`;
+        el('bk-out-never').textContent = 'Not included: tokens, passwords and the webhook URL.';
     }
-    // Ticking it: Download works 5 seconds later
-    let bkLeft = 0, bkTimer = null;
-    function bkCount() {
-        const go = el('bk-go');
-        go.disabled = bkLeft > 0;
-        go.textContent = bkHow === 'download' ? (bkLeft > 0 ? `Download (${bkLeft})` : 'Download') : 'Send';
-        if (bkLeft > 0) bkTimer = setTimeout(() => { bkLeft--; bkCount(); }, 1000);
-    }
-    function bkCountStop() { clearTimeout(bkTimer); bkLeft = 0; }
-    el('bk-secrets').onchange = () => {
-        bkSecrets();
-        bkCountStop();
-        if (el('bk-secrets').checked) bkLeft = 5;
-        bkCount();
-    };
-    el('bk-cancel').onclick = () => { bkCountStop(); el('bk-out').classList.remove('open'); };
+    el('bk-cancel').onclick = () => el('bk-out').classList.remove('open');
     el('bk-go').onclick = async () => {
-        if (el('bk-go').disabled || bkLeft > 0) return;
+        if (el('bk-go').disabled) return;
         const go = el('bk-go'), label = go.textContent;
         el('bk-err').style.display = 'none';
         go.disabled = true;
@@ -2985,7 +2957,7 @@
         try {
             const data = await api('/server/pushraker/backup', 'POST',
                 bkHow === 'email' ? { how: 'email', to: el('bk-to').value.trim() }
-                    : bkHow === 'download' ? { how: bkHow, secrets: el('bk-secrets').checked } : { how: bkHow });
+                    : { how: bkHow });
             if (bkHow === 'download') {
                 const url = URL.createObjectURL(new Blob([JSON.stringify(data.backup, null, 2)], { type: 'application/json' }));
                 const a = document.createElement('a');
@@ -3095,13 +3067,8 @@
         try { when = new Date(data.created).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); } catch (e) { when = ''; }
         el('bk-in-file').textContent = '📄 ' + f.name;
         el('bk-in-list').innerHTML = `<li>From <b>${esc(data.printer || '?')}</b>${when ? ', ' + esc(when) : ''}${data.version ? ', pushraker ' + esc(data.version) : ''}</li>` + bkContents(data.settings);
-        const has = !!(data.secrets && typeof data.secrets === 'object');
-        el('bk-in-red').textContent = has
-            ? '⚠️ All settings will be replaced by the backup, including tokens, passwords and the webhook URL.'
-            : '⚠️ All settings will be replaced by the backup (excluding tokens, passwords, webhook URLs).';
-        el('bk-in-note').textContent = (has
-            ? 'This file contains tokens and passwords. '
-            : 'Tokens, passwords and webhook URLs stay as they are. ') + 'Nothing is saved until you click Save & Apply.';
+        el('bk-in-red').textContent = '⚠️ All settings will be replaced by the backup (excluding tokens, passwords, webhook URLs).';
+        el('bk-in-note').textContent = 'Tokens, passwords and webhook URLs stay as they are. Nothing is saved until you click Save & Apply.';
         // What doesn't fit this printer or this pushraker (pushraker's
         // wording, settings.RESTORE_NOTES): only the lines that apply
         el('bk-in-fit').innerHTML = '';
@@ -3122,14 +3089,6 @@
             // onto the page as it came; the secrets stay the ones here
             const res = await api('/server/pushraker/backup', 'POST', { how: 'restore', backup: data });
             render(res.view);
-            // Tokens and passwords the file has: into their fields, as if
-            // typed (Save & Apply stores them)
-            const sec = res.secrets || {};
-            const box = { ntfy: 'nt-secret', pushover: 'nt-po-token', gotify: 'nt-gt-token', telegram: 'nt-tg-token',
-                discord: 'nt-dc-hook', discord_dm: 'nt-dc-token' }[res.view.provider];
-            if (sec.secret && box) el(box).value = sec.secret;
-            if (sec.email_password) el('nt-email-password').value = sec.email_password;
-            if (sec.webhook_url) el('nt-wh-url').value = sec.webhook_url;
         } catch (e) {
             bkSay('⚠️ ' + (/^Can't restore/.test(e.message) ? e.message : 'Can\'t restore this backup: ' + e.message));
             return;

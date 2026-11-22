@@ -751,14 +751,10 @@ changes on the page.
   address to start with), with the email settings, even with email
   notifications off.
 
-Not in a backup: tokens, passwords and the webhook URL (what
-`pushraker.secrets` holds; a webhook URL usually has a token in it).
-Restoring on another printer, or after a reset, needs them entered again,
-unless you tick **Include tokens, passwords and the webhook URL** when
-downloading (Download then waits 5 seconds). ⚠️ Anyone who
-has that file can send notifications as you and use your email account's
-SMTP login; it isn't encrypted. A backup sent by push or email never has
-them.
+Never in a backup: tokens, passwords and the webhook URL (what
+`pushraker.secrets` holds; a webhook URL usually has a token in it). They
+never leave the printer. Restoring on another printer, or after a reset,
+needs them entered again.
 A topic on the public ntfy.sh server is in it: anyone with the file can
 read that topic.
 
@@ -787,7 +783,8 @@ so it writes one for you.
 
 **Restore…** loads a backup file onto the page. ⚠️ All settings are
 replaced by the backup's (excluding tokens, passwords and the webhook URL,
-which stay as they are, unless the file has them). Cameras this printer
+which stay as they are; a saved token isn't kept for a backup whose ntfy or
+Gotify server is on another host). Cameras this printer
 doesn't have (the default, or a notification's) are replaced by the ones
 set here. A backup from another printer model (backups record the model
 they were made on; one without counts as a Snapmaker U1's) also keeps this
@@ -994,7 +991,8 @@ python3 -c "import urllib.request as u; exec(u.urlopen('https://raw.githubuserco
 - **Printer URL**: Fluidd's address, `http://<the Hi's IP>:4408/`, filled
   in on first setup and the first **Fill in** choice. The Hi's port 80 is
   Creality's own service, not a web page.
-- **Camera**: **Printer camera**, the Hi's own, selected by default. The
+- **Camera**: **Printer camera**, the Hi's own, selected by default (choose
+  *None* for no pictures: it stays). The
   picture comes from the Hi's own camera, through the firmware's own ffmpeg. With a Printer URL set,
   notifications get a **Live Camera** link to the Hi's own live view
   (port 8000), which plays in any browser.
@@ -1188,7 +1186,7 @@ telegram_chat:
 discord_user:
 discord_mention:
 printer_url: http://100.64.0.10
-camera: case                 # a camera name from the page; empty: the printer's own, if it has one
+camera: case                 # a camera name from the page; none: no camera; empty: the printer's own, if it has one
 name: U1
 layers_complete: 2
 driver_temp: 105             # °C, X or Y stepper driver

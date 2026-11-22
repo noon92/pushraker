@@ -1459,25 +1459,24 @@ async def test_file_mode():
                 pass
         full = await server.endpoints["/server/pushraker/backup"](
             WebRequest("POST", {"how": "download", "secrets": True}))
-        check("backup with secrets, when a download asks: apart from the "
-              "settings, under the same file name",
-              full["backup"]["secrets"] == {
-                  "secret": "tok123", "email_password": "pw456",
-                  "webhook_url": "https://hook.example.com/abc789"}
-              and "tok123" not in json.dumps(full["backup"]["settings"])
-              and full["name"] == bk["name"], full["name"])
+        check("a request for the secrets gets none: no endpoint hands them "
+              "out", "secrets" not in full["backup"] and not any(
+                  x in json.dumps(full) for x in ("tok123", "pw456",
+                                                  "abc789")), full.keys())
+        oldfile = json.loads(json.dumps(full["backup"]))
+        oldfile["secrets"] = {"secret": "filetoken", "email_password": "filepw",
+                              "webhook_url": "https://hook.example.com/file"}
         got = await server.endpoints["/server/pushraker/backup"](
-            WebRequest("POST", {"how": "restore", "backup": full["backup"]}))
-        check("restore hands the file's secrets to the page",
-              got["secrets"] == full["backup"]["secrets"]
-              and not any(x in json.dumps(got["view"]) for x in
-                          ("tok123", "pw456", "abc789")), got["secrets"])
-        check("secrets that aren't a line of text are left out",
-              pn.cfgmod.backup_secrets(
-                  {"secrets": {"secret": ["x"], "email_password": "a\nb",
-                               "webhook_url": "  https://h.example  ",
-                               "other": "y"}})
-              == {"webhook_url": "https://h.example"})
+            WebRequest("POST", {"how": "restore", "backup": oldfile}))
+        check("a file from an earlier build with secrets: restored without "
+              "them", "secrets" not in got and "file" not in "".join(
+                  str(got["view"].get(k)) for k in pn.cfgmod.SECRET_FIELDS)
+              and "filetoken" not in json.dumps(got), list(got))
+        notes = await server.endpoints["/server/pushraker/backup"](
+            WebRequest("POST", {"how": "inspect", "backup": oldfile}))
+        check("...and the Restore dialog says so",
+              "Not used by this version: tokens and passwords."
+              in notes["notes"], notes["notes"])
         # Reset…: sections back to a new install's, with their secrets
         rs = await server.endpoints["/server/pushraker/backup"](
             WebRequest("POST", {"how": "reset", "sections": ["email"]}))
@@ -1546,8 +1545,6 @@ async def test_file_mode():
         sent.clear()
         res = await server.endpoints["/server/pushraker/backup"](
             WebRequest("POST", {"how": "push"}))
-        check("...a restore of one without secrets hands over none",
-              back["secrets"] == {}, back["secrets"])
         check("backup sent by push, as a file",
               res["sent"] == "ntfy" and sent and sent[0][2]
               and sent[0][2].endswith(".json")
@@ -2390,6 +2387,133 @@ async def test_notification_files():
         t.cancel()
 
 
+async def test_review_fixes():
+    print("Review findings: a template can't change what's shared; the "
+          "filament rows; JPEG ends")
+    jj = pn.jj
+    shared = {"printer": {"x": {"list": [1]}}, "event": {"a": 1}}
+    jj.render("{% set _ = printer.x.list.append(2) %}"
+              "{% set _ = event.update({'b': 2}) %}", shared)
+    check("a template changes its own copy, never the values others read",
+          shared == {"printer": {"x": {"list": [1]}}, "event": {"a": 1}},
+          shared)
+    # The filament rows (only sent through _send_parts)
+    reset_world()
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    server, c = make({}, {"filament_low": [("ntfy", ntfy, False)]})
+    c.rows["filament_low"] = ("snapshot", c.rows["filament_low"][1])
+
+    async def no_picture(*_a, **_k):
+        return pn.SnapshotProblem("", "the camera is off")
+    c._fetch_snapshot = no_picture
+    attached = []
+    real_deliver = c._deliver
+
+    async def spy(rid, d, t, msgs, report=None):
+        attached.extend(m[2] for m in msgs)
+        return await real_deliver(rid, d, t, msgs, report)
+    c._deliver = spy
+
+    async def no_parity(*_a, **_k):
+        return None
+    c._parity = no_parity
+    ok = await c._send_parts("filament_low", [("Low", "Spool 1", [])])
+    check("a filament row with a failing camera: sent, says why, no empty "
+          "attachment", ok and log and log[-1]["ok"]
+          and "Error sending camera image: the camera is off"
+          in log[-1]["body"] and attached == [None],
+          (ok, [e["body"] for e in log], attached))
+    st = c._sent.get("filament_low") or {}
+    check("the filament rows count in pushraker.<row>.fired and "
+          "pushraker.last", st.get("count") == 1 and not st.get("failed")
+          and c._sent_last == "filament_low", st)
+    for t in list(c._tasks):
+        t.cancel()
+    # Restore: a saved token never goes to a backup's other server
+    reset_world()
+    for name in ("config/pushraker.conf", "pushraker.secrets"):
+        try:
+            os.remove(os.path.join(WORK, "data", name))
+        except OSError:
+            pass
+    server = Server()
+    c = pn.PushNotifications(Config(server, dict(name="Hi",
+                                                 settle_time="0.1")))
+    STATE["print_stats"] = ps("standby")
+    await server.handlers["server:klippy_ready"]()
+    cfg = server.endpoints["/server/pushraker/config"]
+    ep = server.endpoints["/server/pushraker/backup"]
+    await cfg(WebRequest("POST", dict(
+        enabled=True, provider="ntfy", server="https://ntfy.example.com",
+        topic="t1", auth="token", secret="tk_mine")))
+    bk = (await ep(WebRequest("POST", {"how": "download"})))["backup"]
+    same = await ep(WebRequest("POST", {"how": "restore", "backup": bk}))
+    check("restore, the same host: the token stays",
+          same["view"]["has_secret"] is True, same["view"]["has_secret"])
+    other = json.loads(json.dumps(bk))
+    other["settings"]["server"] = "https://evil.example.net"
+    got = await ep(WebRequest("POST", {"how": "restore", "backup": other}))
+    check("restore, another host: its server, without the token",
+          got["view"]["server"] == "https://evil.example.net"
+          and got["view"]["has_secret"] is False, got["view"]["has_secret"])
+    check("...and the token here is untouched until Save",
+          c.settings["secret"] == "tk_mine")
+    for t in list(c._tasks):
+        t.cancel()
+    # JPEG: an EXIF thumbnail has an end marker of its own
+    import io
+    from PIL import Image
+    thumb = io.BytesIO()
+    Image.new("RGB", (8, 8), (9, 200, 9)).save(thumb, "JPEG")
+    main = io.BytesIO()
+    Image.effect_noise((64, 64), 40).convert("RGB").save(main, "JPEG")
+    t, m = thumb.getvalue(), main.getvalue()
+    app1 = b"Exif\0\0" + t
+    jpeg = m[:2] + b"\xff\xe1" + (len(app1) + 2).to_bytes(2, "big") + app1 \
+        + m[2:]
+    check("jpeg_end: past the EXIF thumbnail, to the real end",
+          pn.jpeg_end(jpeg, 0) == len(jpeg))
+    check("...not yet when the picture is incomplete",
+          pn.jpeg_end(jpeg[:len(app1) + 20], 0) is None)
+    import threading
+    from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+    part = b"--f\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
+
+    class Cam(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            if self.path == "/s":
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(jpeg)))
+                self.end_headers()
+                self.wfile.write(jpeg)
+                return
+            self.send_header("Content-Type",
+                             "multipart/x-mixed-replace;boundary=f")
+            self.end_headers()
+            try:
+                for _ in range(5):
+                    self.wfile.write(part)
+                    self.wfile.flush()
+                    time.sleep(0.05)
+            except OSError:
+                pass
+
+        def log_message(self, *a):
+            pass
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Cam)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    got, why = pn.PushNotifications._read_picture(base + "/s")
+    check("a snapshot with an EXIF thumbnail arrives whole", got == jpeg,
+          (len(got or b""), len(jpeg), why))
+    got, why = pn.PushNotifications._read_picture(base + "/m")
+    check("...and from an MJPEG stream, one whole frame", got == jpeg,
+          (len(got or b""), len(jpeg), why))
+    httpd.shutdown()
+
+
 async def test_unusable_webcams():
     print("Moonraker webcams that can't give a picture: not offered unless "
           "chosen")
@@ -2843,8 +2967,20 @@ async def test_camera_error_line():
               c3.settings.get("camera"))
         view = await server.endpoints["/server/pushraker/config"](
             WebRequest("POST", {"camera": ""}))
-        check("...also when the camera is emptied again",
-              c3.settings["camera"] == "Printer camera")
+        check("None chosen on the page stays none",
+              c3.settings["camera"] == "" and c3.settings["camera_none"],
+              c3.settings["camera"])
+        text = open(c3.store.settings_path).read()
+        check("...saved readably", "\ncamera: none\n" in text)
+        await server.handlers["server:klippy_ready"]()
+        again = await server.endpoints["/server/pushraker/config"](
+            WebRequest("GET"))
+        check("...and survives a reload", again["camera"] == ""
+              and c3.settings["camera"] == "", again["camera"])
+        await server.endpoints["/server/pushraker/config"](
+            WebRequest("POST", {"camera": "Printer camera"}))
+        check("...until another is chosen", c3.settings["camera"]
+              == "Printer camera" and not c3.settings["camera_none"])
         # Restore: a camera this printer doesn't have keeps the one here
         bk = await server.endpoints["/server/pushraker/backup"](
             WebRequest("POST", {"how": "download"}))
@@ -4879,7 +5015,19 @@ async def test_template_limits():
         "a growing namespace": "{% set ns = namespace(s='ab') %}"
         "{% for i in range(40) %}{% set ns.s = ns.s ~ ns.s %}{% endfor %}",
         "huge powers": "{{ ((10 ** 100) ** 100) ** 100 }}",
-        "changing a list": "{% set l = [1] %}{{ l.append(2) }}",
+        "a list growing without end": "{% set l = [1] %}{% for i in "
+        "range(30) %}{% set _ = l.extend(l) %}{% endfor %}",
+        "appending past the limit": "{% set l = [0] * 99999 %}"
+        "{% for i in range(9) %}{% set _ = l.append(i) %}{% endfor %}",
+        "a dict growing without end": "{% set d = {} %}{% for i in "
+        "range(1000) %}{% for j in range(1000) %}"
+        "{% set _ = d.update({i * 1000 + j: 1}) %}{% endfor %}{% endfor %}",
+        "replace blowing up": "{{ ('x' * 90000).replace('x', 'y' * 90000) }}",
+        "|replace blowing up": "{{ ('x' * 90000)|replace('x', 'y' * 90000) }}",
+        "join blowing up": "{{ ''.join(['x' * 90000] * 90000) }}",
+        "|join blowing up": "{{ ['x' * 90000] * 90000|join }}",
+        "indent": "{{ 'a'|indent(999999999) }}",
+        "zfill": "{{ '1'.zfill(999999999) }}",
         "lipsum": "{{ lipsum(n=1000) }}",
     }
     bad = []
@@ -4894,7 +5042,20 @@ async def test_template_limits():
             "{{ '{:>4}'.format(7) }}": "   7", "{{ 2 ** 10 }}": "1024",
             "{% set ns = namespace(n=0) %}{% for i in range(5) %}"
             "{% set ns.n = ns.n + i %}{% endfor %}{{ ns.n }}": "10",
-            "{{ 'a'|center(5) }}|": "  a  |"}
+            "{{ 'a'|center(5) }}|": "  a  |",
+            # Large numbers passed to a call are fine (review finding 3)
+            "{{ '%d'|format(1795282110) }}": "1795282110",
+            "{{ '{:,}'.format(1795282110) }}": "1,795,282,110",
+            "{% macro m(s) %}{{ s + 1 }}{% endmacro %}{{ m(200000) }}":
+            "200001",
+            "{{ '%.0f mm'|format(250000.4) }}": "250000 mm",
+            "{{ 1795282110|string|length }}": "10",
+            # A template's own lists and dicts (finding 4)
+            "{% set xs = [] %}{% for i in range(3) %}"
+            "{% set _ = xs.append(i) %}{% endfor %}{{ xs|join(',') }}":
+            "0,1,2",
+            "{% set d = {'a': 1} %}{% set _ = d.update({'b': 2}) %}"
+            "{{ d.pop('a') }}{{ d.setdefault('c', 3) }}{{ d|length }}": "132"}
     got = {t: jj.render(t, {}) for t in fine}
     check("...ordinary use still works", got == fine, got)
     t0 = time.monotonic()
@@ -5592,7 +5753,7 @@ async def run_component_tests():
               test_two_fixes, test_more_notifications, test_template_variants, test_templates_sending, test_custom_notifications, test_custom_events, test_camera_pictures, test_codemirror,
               test_data, test_old_moonraker, test_page_current_moonraker,
               test_creality_layers, test_missing_hardware_rows,
-              test_backup_from, test_discovered_cameras, test_web_pages, test_unusable_webcams, test_notification_files,
+              test_backup_from, test_discovered_cameras, test_web_pages, test_unusable_webcams, test_notification_files, test_review_fixes,
               test_header_thumbnail, test_file_metadata,
               test_printer_camera_route, test_camera_error_line):
         try:
