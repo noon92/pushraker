@@ -137,8 +137,8 @@ MILESTONES = (25, 50, 75)
 ROW_IDS = (
     "started", "preprint_done", "layer_started", "first_layer", "progress_25", "progress_50", "progress_75",
     "status_report",
-    "paused", "file_pause", "resumed", "object_complete", "complete", "cancelled",
-    "bed_cooled",
+    "paused", "file_pause", "upcoming_pause", "resumed", "object_complete",
+    "complete", "cancelled", "bed_cooled",
     "calibration",
     "chamber_waiting", "chamber_reached", "chamber_fault",
     "filament_change",
@@ -219,6 +219,7 @@ TITLES = {
     "calibration_failed": "📐 {name} {what} failed",
     "intervention": "👋 {name} user intervention needed",
     "file_pause": "👋 {name} paused by the print job",
+    "upcoming_pause": "🔜 {name} pause in {left}",
     "chamber_waiting": "🌡️ {name} waiting for chamber temperature",
     "chamber_reached": "🌡️ {name} chamber temperature reached",
     "chamber_timeout": "⚠️ {name} timed out waiting for chamber "
@@ -1213,6 +1214,9 @@ class PushNotifications:
         # Bed cooled: below this after a print ends (the row: bed_cooled)
         self.bed_cool: float = num(
             "bed_cool_temp", BED_COOL_DEFAULT, 20., 100.)
+        # Upcoming pause: this many layers before a pause in the file
+        self.upcoming_layers: int = int(num("upcoming_pause_layers", 3,
+                                            1, 10))
         # Status report: every this many minutes of print time
         self.report_interval: float = num("report_interval", 30., 1., 720.)
         self.web_ui_url: str = get("web_ui_url", "")
@@ -3460,6 +3464,9 @@ class PushNotifications:
             return {"progress": 50}
         if key == "paused":
             return {"planned": False}
+        if key == "upcoming_pause":
+            return {"layer": 39, "layers_left": 3, "layers_before": 3,
+                    "pause": {"number": 1, "layer": 42}}
         if key.startswith("custom"):
             base, _, mode = key.partition("@")
             return {"name": str(base[len("custom_"):] or "my_notification"),
@@ -4975,6 +4982,12 @@ class PushNotifications:
         self._job_pauses = await self.eventloop.run_in_thread(
             self._scan_pauses, filename)
         self._pauses_seen = set()
+        # Upcoming pause: a job joined part-way (Moonraker restarted) has
+        # already had the ones it is past or inside the window of
+        self._upcoming_sent = {
+            i for i, p in enumerate(self._job_pauses)
+            if p["layer"] and int(layer) >= 1
+            and int(layer) >= p["layer"] - self.upcoming_layers}
         self._obj_start = {}
         self._obj_first_sent = set()
         self._obj_cur = self._status["exclude_object"].get("current_object")
@@ -6417,6 +6430,8 @@ class PushNotifications:
                          "hot": a in hot}
                         for a in self.printer.drivers.values()
                         if temps[a] is not None]}))
+        if "upcoming_pause" in self.rows and self._job_pauses:
+            self._upcoming_pause(filename)
         if self._by_object and not self._objects():
             # No EXCLUDE_OBJECT markers (label objects off): nothing to
             # track per object, so it's reported like a by-layer job
@@ -6729,6 +6744,37 @@ class PushNotifications:
                      " (layers " + ", ".join(str(n) for n in layers) + ")")
         return ("\n⏸️ Print job contains a pause" if len(ps) == 1 else
                 f"\n⏸️ Print job contains {len(ps)} pauses") + where + "."
+
+    def _upcoming_pause(self, filename: str) -> None:
+        """Upcoming pause: once per pause in the file whose layer is
+        known, when the print is this many layers before it (or at layer 1,
+        when the pause comes sooner than that)."""
+        layer = int(((self._status["print_stats"].get("info") or {})
+                     .get("current_layer")) or 0)
+        if layer < 1:
+            return
+        n = len(self._job_pauses)
+        for i, p in enumerate(self._job_pauses):
+            at = p["layer"]
+            if not at or i in self._upcoming_sent:
+                continue
+            if layer >= at:
+                # Already at it: the pause itself is reported
+                self._upcoming_sent.add(i)
+                continue
+            left = at - layer
+            if left > self.upcoming_layers:
+                continue
+            self._upcoming_sent.add(i)
+            layers = f"{left} layer" + ("" if left == 1 else "s")
+            line = ("Upcoming pause" + (f" {i + 1} of {n}" if n > 1 else "")
+                    + f" at layer {at}, in {layers}.")
+            self._spawn(self._send(
+                "upcoming_pause", self._title("upcoming_pause", left=layers),
+                self._lines(shown(filename), line),
+                event={"layer": layer, "layers_left": left,
+                       "layers_before": self.upcoming_layers,
+                       "pause": {"number": i + 1, "layer": at}}))
 
     def _file_pause(self, position: Any) -> Optional[int]:
         """Index of the file's pause the print job stopped at, if the file

@@ -1014,6 +1014,10 @@
             const bed = meta.id === 'bed_cooled'
                 ? `<span class="nt-sub">After a print ends, bed below <input class="nt-input nt-layer nt-deg" id="nt-bed-cool" type="number" min="20" max="100" inputmode="numeric" value="${esc(state.bed_cool_temp)}"> °C</span>`
                 : '';
+            const upcoming = meta.id === 'upcoming_pause'
+                ? `<span class="nt-sub"><select class="nt-input nt-layer" id="nt-upcoming-layers">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n =>
+                    `<option value="${n}"${n === state.upcoming_pause_layers ? ' selected' : ''}>${n}</option>`).join('')}</select> layers before each pause planned in the print job</span>`
+                : '';
             const marks = meta.id === 'progress'
                 ? `<span class="nt-sub">${(state.meta.progress_marks || [25, 50, 75]).map(m =>
                     `<label style="margin-right:12px; white-space:nowrap"><input type="checkbox" id="nt-pm-${m}"${progressMarks().includes(m) ? ' checked' : ''}> ${m}%</label>`).join('')}</span>`
@@ -1041,7 +1045,7 @@
                     ? '<span class="nt-sub"><code>RESPOND PREFIX=notify MSG="Title || Message || priority"</code> (priority optional)</span>'
                     : '';
             return html + `<tr data-row="${meta.id}">
-                <td><span class="nt-icon">${meta.icon}</span>${layer ? `${layer} <span class="nt-name">layer complete</span>` : `<span class="nt-name">${esc(meta.label)}</span>`}${objects}${marks}${driver}${bed}${report}${calib}<span class="nt-sub nt-data-inline"><span class="nt-dim">${editButton(meta.id)}</span></span></td>
+                <td><span class="nt-icon">${meta.icon}</span>${layer ? `${layer} <span class="nt-name">layer complete</span>` : `<span class="nt-name">${esc(meta.label)}</span>`}${objects}${marks}${driver}${bed}${upcoming}${report}${calib}<span class="nt-sub nt-data-inline"><span class="nt-dim">${editButton(meta.id)}</span></span></td>
                 <td class="nt-c nt-col-push"><input type="checkbox" data-enabled="${meta.id}"${row.enabled ? ' checked' : ''}></td>
                 <td class="nt-c nt-col-email"><input type="checkbox" data-email="${meta.id}"${row.email ? ' checked' : ''}></td>
                 <td class="nt-data"><span class="nt-dim">${editButton(meta.id)}</span></td>
@@ -2483,7 +2487,7 @@
             // Outlined once the rows are drawn
             setTimeout(() => {
                 liveCheckAll();
-                const FIELD_INPUT = { driver_temp: 'nt-driver-hot', bed_cool_temp: 'nt-bed-cool', report_interval: 'nt-report-interval', layers_complete: 'nt-layers', email_port: 'nt-email-port', filament_low_percent: 'nt-fl-percent' };
+                const FIELD_INPUT = { driver_temp: 'nt-driver-hot', bed_cool_temp: 'nt-bed-cool', upcoming_pause_layers: 'nt-upcoming-layers', report_interval: 'nt-report-interval', layers_complete: 'nt-layers', email_port: 'nt-email-port', filament_low_percent: 'nt-fl-percent' };
                 const input = el(FIELD_INPUT[pb.field] || '');
                 if (input) {
                     input.classList.add('nt-bad');
@@ -2710,6 +2714,7 @@
             filament_change_events: el('nt-fc-loaded') ? ['loaded', 'unloaded'].filter(e => el('nt-fc-' + e).checked).join(',') : [].concat(state.filament_change_events || []).join(','),
             driver_temp: el('nt-driver-hot') ? parseInt(el('nt-driver-hot').value, 10) || 105 : state.driver_temp,
             bed_cool_temp: el('nt-bed-cool') ? parseInt(el('nt-bed-cool').value, 10) || 40 : state.bed_cool_temp,
+            upcoming_pause_layers: el('nt-upcoming-layers') ? parseInt(el('nt-upcoming-layers').value, 10) || 3 : state.upcoming_pause_layers,
             report_interval: el('nt-report-interval') ? parseInt(el('nt-report-interval').value, 10) || 30 : state.report_interval,
             complete_objects: el('nt-complete-objects') ? el('nt-complete-objects').value : state.complete_objects,
             filament_low_percent: parseInt(el('nt-fl-percent').value, 10) || 0,

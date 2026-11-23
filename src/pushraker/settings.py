@@ -52,6 +52,9 @@ ROWS = [
      "default", "render", "print", False),
     ("paused", "Print paused", "⏸️", True, "default", "snapshot", "print",
      False),
+    # upcoming_pause_layers before each pause the print job's file asks for
+    ("upcoming_pause", "Upcoming pause", "🔜", True, "default", "snapshot",
+     "print", False),
     ("resumed", "Print resumed", "▶️", False, "default", "snapshot", "print",
      False),
     # Off by default: for watching the first layer go down after a long
@@ -127,6 +130,8 @@ TEMPLATES = [
     ("preprint_done", "preprint_done", "Pre-print calibrations finished",
      "render", JOB_IMAGES),
     ("paused", "paused", "Print paused", "camera", JOB_IMAGES),
+    ("upcoming_pause", "upcoming_pause", "Upcoming pause", "camera",
+     JOB_IMAGES),
     ("resumed", "resumed", "Print resumed", "camera", JOB_IMAGES),
     ("layer_started", "layer_started", "First layer started", "camera",
      JOB_IMAGES),
@@ -266,7 +271,7 @@ STRING_FIELDS = ("provider", "server", "topic", "auth", "username",
 SECRET_FIELDS = ("secret", "email_password", "webhook_url")
 INT_FIELDS = ("layers_complete", "email_port", "filament_low_percent",
               "filament_low_grams", "driver_temp", "report_interval",
-              "bed_cool_temp")
+              "bed_cool_temp", "upcoming_pause_layers")
 BOOL_FIELDS = ("enabled", "push_enabled", "email_enabled", "webhook_enabled",
                "filament_unknown")
 # Settings the form fills in for common providers
@@ -403,6 +408,8 @@ def _defaults(name: str) -> Dict[str, Any]:
         "time_left": "",
         "driver_temp": 105,     # °C, X or Y stepper driver (row: driver_hot)
         "bed_cool_temp": 40,    # °C, the bed after a print (row: bed_cooled)
+        # layers before a pause in the file (row: upcoming_pause)
+        "upcoming_pause_layers": 3,
         "report_interval": 30,  # minutes of print time between status reports
         "email_enabled": False,
         "webhook_enabled": False,
@@ -987,6 +994,15 @@ def validate(data: Dict[str, Any], current: Dict[str, Any],
             raise ConfigError("Bed temperature must be a number", "bed_cool_temp")
     if not 20 <= s["bed_cool_temp"] <= 100:
         raise ConfigError("Bed cooled: the temperature must be 20 to 100 °C", "bed_cool_temp")
+    if "upcoming_pause_layers" in data:
+        try:
+            s["upcoming_pause_layers"] = int(data["upcoming_pause_layers"])
+        except (TypeError, ValueError):
+            raise ConfigError("Upcoming pause: layers must be a number",
+                              "upcoming_pause_layers")
+    if not 1 <= s["upcoming_pause_layers"] <= 10:
+        raise ConfigError("Upcoming pause: layers must be 1 to 10",
+                          "upcoming_pause_layers")
     if "report_interval" in data:
         try:
             s["report_interval"] = int(data["report_interval"])
@@ -1604,7 +1620,8 @@ RESET_SECTIONS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
                "filament_change_events", "complete_objects",
                "filament_low_percent", "filament_low_grams",
                "filament_unknown", "progress_marks", "time_left",
-               "driver_temp", "bed_cool_temp", "report_interval"), ()),
+               "driver_temp", "bed_cool_temp", "upcoming_pause_layers",
+               "report_interval"), ()),
     "custom": (("custom",), ()),
 }
 
@@ -1743,6 +1760,7 @@ ROW_OPTIONS: Dict[str, Tuple[str, ...]] = {
     "progress": ("progress_marks",),
     "status_report": ("report_interval",),
     "bed_cooled": ("bed_cool_temp",),
+    "upcoming_pause": ("upcoming_pause_layers",),
     "driver_hot": ("driver_temp",),
     "filament_low": ("filament_low_percent", "filament_low_grams"),
     "filament_short": ("filament_unknown",),
@@ -2053,6 +2071,8 @@ def render_options(s: Dict[str, Any], env: Env) -> Dict[str, str]:
         out["driver_temp"] = str(s["driver_temp"])
     if "bed_cooled" in rows:
         out["bed_cool_temp"] = str(s["bed_cool_temp"])
+    if "upcoming_pause" in rows:
+        out["upcoming_pause_layers"] = str(s["upcoming_pause_layers"])
     if "status_report" in rows:
         out["report_interval"] = str(s["report_interval"])
     tz = time_zone(s)

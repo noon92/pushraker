@@ -47,7 +47,7 @@ pushraker to another printer, see the [porting guide](docs/porting-guide.md).
 | Camera picture | ✅ | ✅ from the printer's own camera |
 | Live Camera link | ✅ | ✅ |
 | Model preview, time left and ETA | ✅ | ✅ |
-| Layers (first layer, layer complete) | ✅ | ✅ |
+| Layers (first layer, layer complete, upcoming pause) | ✅ | ✅ |
 | Pre-print calibrations | ✅ listed in *Print started*, reported when done | ✅ reported when done |
 | Bed cooled | ✅ | ✅ |
 | Chamber temperature, driver temperature | ✅ | ❌ no such hardware |

@@ -1,0 +1,3 @@
+{{ job.file }}
+{# Sent this many layers before each pause written into the print job's file (set under the notification) #}
+Upcoming pause{% if job.pauses.count > 1 %} {{ event.pause.number }} of {{ job.pauses.count }}{% endif %} at layer {{ event.pause.layer }}, in {{ event.layers_left }} layer{% if event.layers_left != 1 %}s{% endif %}.

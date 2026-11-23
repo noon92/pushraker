@@ -1265,6 +1265,81 @@ async def test_file_pauses():
         JobEvent.COMPLETE, {}, ps("complete"))
 
 
+async def test_upcoming_pause():
+    print("Upcoming pause: N layers before each pause in the file")
+    reset_world()
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    server, c = make({"upcoming_pause_layers": "3"},
+                     {"upcoming_pause": [("ntfy", ntfy, False)]})
+    body = ["; start\n", "G28\n"]
+    for layer in range(1, 60):
+        body.append(";LAYER_CHANGE\n;Z:%d\n" % layer)
+        body.append("G1 X10 Y10 E1\n" * 5)
+        if layer == 2:
+            body.append("M601\n")
+        if layer == 12:
+            body.append(";PAUSE_PRINT\nM117 Insert magnet now\nM601\n")
+        if layer == 40:
+            body.append("M600\n")
+    with open(os.path.join(GCODES, "Magnets.gcode"), "w") as f:
+        f.write("".join(body))
+    await start_job(server, "Magnets.gcode")
+    await asyncio.sleep(0.4)
+
+    async def at(layer):
+        STATE["print_stats"] = ps("printing", "Magnets.gcode", info={
+            "total_layer": 59, "current_layer": layer})
+        await c._on_status_update({"print_stats": {"info": {
+            "total_layer": 59, "current_layer": layer}}}, 0.)
+        await asyncio.sleep(0.3)
+    await at(1)
+    check("a pause sooner than 3 layers: sent at layer 1, with the real count",
+          [(e["title"], e["body"]) for e in log] == [
+              ("🔜 U1 pause in 1 layer",
+               "Magnets\nUpcoming pause 1 of 3 at layer 2, in 1 layer.")],
+          [(e["title"], e["body"]) for e in log])
+    log.clear()
+    for n in (2, 3, 4, 5, 6, 8):
+        await at(n)
+    check("nothing before the window", not log, [e["title"] for e in log])
+    await at(9)
+    await at(10)
+    check("3 layers before: once, no message or kind in the text",
+          [(e["title"], e["body"]) for e in log] == [
+              ("🔜 U1 pause in 3 layers",
+               "Magnets\nUpcoming pause 2 of 3 at layer 12, in 3 layers.")],
+          [(e["title"], e["body"]) for e in log])
+    log.clear()
+    for n in range(11, 37):
+        await at(n)
+    check("then quiet until the next one", not log, [e["title"] for e in log])
+    await at(38)
+    check("a layer skipped past the window's start: sent with the real count",
+          [e["title"] for e in log] == ["🔜 U1 pause in 2 layers"],
+          [e["title"] for e in log])
+    await server.handlers["job_state:state_changed"](
+        JobEvent.COMPLETE, {}, ps("complete", "Magnets.gcode"))
+    await asyncio.sleep(0.2)
+    log.clear()
+    # Moonraker restarted at layer 10: the pause at 12 was already had
+    STATE["print_stats"] = ps("printing", "Magnets.gcode", info={
+        "total_layer": 59, "current_layer": 10})
+    STATE["virtual_sdcard"] = {"file_position": 1000, "progress": 0.2}
+    server2, c = make({"upcoming_pause_layers": "3"},
+                      {"upcoming_pause": [("ntfy", ntfy, False)]})
+    await server2.handlers["server:klippy_ready"]()
+    await asyncio.sleep(0.4)
+    check("joined part-way: the file's pauses read", len(c._job_pauses) == 3,
+          c._job_pauses)
+    await at(10)
+    await at(11)
+    check("joined inside a window: not sent again", not log,
+          [e["title"] for e in log])
+    _, c2 = make({}, {"upcoming_pause": [("ntfy", ntfy, False)]})
+    check("default: 3 layers", c2.upcoming_layers == 3, c2.upcoming_layers)
+
+
 async def test_file_mode():
     print("Settings from pushraker.conf, the page's endpoints, live apply")
     reset_world()
@@ -5746,7 +5821,7 @@ async def run_component_tests():
     for t in (test_order_and_priority, test_expiry_and_independence,
               test_fault_dedup, test_same_preparation_everywhere,
               test_email_threads, test_filament_measured, test_filament_alerts,
-              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_render_thread, test_job_moments, test_current_extruder, test_macro_topic, test_template_limits, test_now_values, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
+              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_upcoming_pause, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_render_thread, test_job_moments, test_current_extruder, test_macro_topic, test_template_limits, test_now_values, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
               test_driver_hot, test_bed_cooled, test_pushraker_values,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint, test_preprint_generic,

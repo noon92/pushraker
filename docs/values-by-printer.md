@@ -11,6 +11,7 @@ Which notifications a printer can send, and which template values have data on i
 | Print started (`started`) | ✅ | ✅ | ✅ |
 | Pre-print calibrations finished (`preprint_done`) | ✅ | ✅ | ✅ |
 | Print paused (`paused`) | ✅ | ✅ | ✅ |
+| Upcoming pause (`upcoming_pause`) | ✅ | ✅ | ✅ |
 | Print resumed (`resumed`) | ✅ | ✅ | ✅ |
 | First layer started (`layer_started`) | ✅ | ✅ | ✅ |
 | Layer complete (`first_layer`) | ✅ | ✅ | ✅ |

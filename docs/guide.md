@@ -27,6 +27,7 @@ server), and/or to a webhook for home automation.
 | ▶️ Print started | Model preview | The slicer thumbnail, and the slicer's estimated print time and ETA. With Moonraker's job queue in use: "Print 1/N remaining in queue", counting this one, and their total time. When the file has pauses in it (Orca's *add pause* and *change filament*, or a `PAUSE`, `M601`, `M226`, `M0`, `M1` or `M600` typed in): "⏸️ Print job contains 3 pauses (layers 12, 40 and 55)." With pre-print calibrations chosen when the print job started (Snapmaker U1: bed levelling, extrusion flow calibration): "📐 Pre-print calibrations selected: ..." |
 | 📐 Pre-print calibrations finished | Model preview | When the chosen pre-print calibrations are done, before the park, heat-up and priming line (Snapmaker U1). On other printers with a bed mesh, Z tilt or quad gantry level: when the first layer starts, listing what ran and how long, e.g. "Bed mesh (3 min 20 s) done." (what a start macro will run isn't known in advance, so *Print started* doesn't list them); none ran, none sent |
 | ⏸️ Print paused / ▶️ Print resumed | Camera | Resumed includes time left and ETA. A pause the file itself asks for comes as "👋 … paused by the print job" instead, with its number, layer and any message the slicer put with it ("Pause 2 of 3 at layer 40, as planned in the print job. \"Insert magnet now\"") — the file wants something from you, like a normal pause doesn't, so its template sets the highest priority (`event.planned`; see [Priority](#priority)). Told apart by where in the file the print job stopped |
+| 🔜 Upcoming pause | Camera | Before each pause the file asks for, 1 to 10 layers ahead (default 3): "Upcoming pause 2 of 3 at layer 40, in 3 layers." (the "2 of 3" only when the file has more than one). Once per pause; a pause sooner than that after the start is announced at layer 1. Needs the pause's layer in the file (layer markers, as Orca and Creality Print write them) and the printer's current layer |
 | 🎬 First layer started | Camera | Off by default. When the first layer begins, after the start routine (homing, bed mesh, flow calibration can take a while): time to watch it go down. With time left and ETA |
 | 🔍 1st / 2nd / 3rd layer complete | Camera | Choose after which layer (default: 2nd). With time left and ETA. When printing by object (Orca's *print sequence: by object*), once per object, counted from the object's own first layer, or once per print job |
 | ⏳ Progress | Camera | Off by default. At 25, 50 and/or 75 % (checkboxes under the row), the same percentage as Fluidd and the Snapmaker app, with time left and ETA |
@@ -540,6 +541,7 @@ the tree lists what each one has. For example:
 | Error, Warning, Klipper shutdown | `event.kind`, `event.file`, `event.fault.code` `.title` `.details` `.message` `.text` |
 | Print cancelled | `event.kind`, `event.file`, `event.fault` (when a fault caused it) |
 | Layer complete, Progress | `event.layer`, `event.progress` |
+| Upcoming pause | `event.layer` (now), `event.layers_left`, `event.layers_before` (the setting), `event.pause.number` `.layer` |
 | Print complete | `event.object.name` `.number` `.count`: an object finished (printing by object); none for the print job |
 | Print paused | `event.planned` (a pause written into the file), `event.pause.number` `.layer` `.kind` `.message` |
 | From macros and G-code | `event.title` `event.message` `event.priority` |
@@ -900,7 +902,7 @@ been tested on any printer.
 | Print started | ✅ with the calibrations chosen | ✅ | ✅ |
 | Pre-print calibrations complete | ✅ | ✅ bed mesh | ➖ ¹ |
 | Paused / Resumed | ✅ | ✅ | ✅ |
-| First layer started, Layer complete | ✅ | ✅ | ➖ ² |
+| First layer started, Layer complete, Upcoming pause | ✅ | ✅ | ➖ ² |
 | Progress, Status report | ✅ | ✅ | ✅ |
 | Print complete, Print cancelled | ✅ | ✅ from the job event | ✅ |
 | Bed cooled | ✅ | ✅ | ➖ heated bed |
@@ -1200,6 +1202,7 @@ name: U1
 layers_complete: 2
 driver_temp: 105             # °C, X or Y stepper driver
 bed_cool_temp: 40            # °C, the bed after a print (Bed cooled)
+upcoming_pause_layers: 3     # layers before each pause in the file (Upcoming pause)
 # When printing by object: each | once
 first_layer_objects: each
 complete_objects: each

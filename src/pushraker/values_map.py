@@ -38,6 +38,8 @@ VALUES: Dict[str, Tuple[str, ...]] = {
     'event.issues': ('creality', 'generic', 'snapmaker_u1'),
     'event.kind': ('creality', 'generic', 'snapmaker_u1'),
     'event.layer': ('creality', 'generic', 'snapmaker_u1'),
+    'event.layers_before': ('creality', 'generic', 'snapmaker_u1'),
+    'event.layers_left': ('creality', 'generic', 'snapmaker_u1'),
     'event.limit': ('creality', 'generic', 'snapmaker_u1'),
     'event.loaded': ('creality', 'generic', 'snapmaker_u1'),
     'event.message': ('creality', 'generic', 'snapmaker_u1'),

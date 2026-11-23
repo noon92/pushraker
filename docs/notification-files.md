@@ -63,6 +63,7 @@ email), and **Import…** under the custom notifications.
 | `started` | Print started | |
 | `preprint_done` | Pre-print calibrations finished | |
 | `paused` | Print paused | |
+| `upcoming_pause` | Upcoming pause | `upcoming_pause_layers`: 1 to 10 |
 | `resumed` | Print resumed | |
 | `layer_started` | First layer started | |
 | `first_layer` | Layer complete | `layers_complete`: 1, 2 or 3; `first_layer_objects`: `each` (per object when printing by object) or `once` |
