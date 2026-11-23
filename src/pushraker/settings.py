@@ -53,7 +53,7 @@ ROWS = [
     ("paused", "Print paused", "⏸️", True, "default", "snapshot", "print",
      False),
     # upcoming_pause_layers before each pause the print job's file asks for
-    ("upcoming_pause", "Upcoming pause", "🔜", True, "default", "snapshot",
+    ("upcoming_pause", "Upcoming pause", "🔜", True, "high", "snapshot",
      "print", False),
     ("resumed", "Print resumed", "▶️", False, "default", "snapshot", "print",
      False),
