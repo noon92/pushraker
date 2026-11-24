@@ -1,3 +1,3 @@
-{{ job.file }}
+{{ event.file }}
 {# event.kind: how the print ended (complete, cancelled, error); event.cooled_in: how long the bed took #}
 Bed {{ event.temperature|round|int }} °C, {{ event.cooled_in }} after the print {% if event.kind == "complete" %}finished{% elif event.kind == "error" %}failed{% else %}was cancelled{% endif %}

@@ -3953,11 +3953,20 @@ async def test_bed_cooled():
         STATE["heater_bed"] = {"temperature": 52.0, "target": 0.0}
         await asyncio.sleep(0.3)
         check("not while the bed is over 40 °C", not log, log)
+        # Cools after job.* stopped describing the print (5 min after it)
+        keep = pn.JOB_KEEP
+        pn.JOB_KEEP = 0.
+        await c._on_status_update({"print_stats": {"state": "complete"}}, 0.)
+        check("(job.* no longer has the print)",
+              not c._job_on(False), c._job_on(False))
         STATE["heater_bed"] = {"temperature": 39.4, "target": 0.0}
         await asyncio.sleep(0.4)
-        check("sent once below 40 °C, with the file and how it ended",
+        pn.JOB_KEEP = keep
+        check("sent once below 40 °C, with the file and how it ended "
+              "(also after job.* has let go of the print)",
               len(log) == 1 and log[0]["title"].endswith(
                   "bed cooled to 40 °C")
+              and log[0]["body"].startswith("Benchy\n")
               and "Bed 39 °C," in log[0]["body"]
               and "after the print finished" in log[0]["body"],
               [(e["title"], e["body"]) for e in log])
