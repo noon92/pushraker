@@ -368,8 +368,9 @@ FILE_CAP = 30
 # join it while printing and this long after the print ended.
 THREAD_ROWS = ("started", "preprint_done", "layer_started", "first_layer",
                "progress_25", "progress_50",
-               "progress_75", "status_report", "paused", "file_pause", "resumed", "object_complete",
-               "complete", "cancelled",
+               "progress_75", "status_report", "paused", "file_pause",
+               "upcoming_pause", "resumed", "object_complete",
+               "complete", "cancelled", "bed_cooled",
                "chamber_waiting", "chamber_reached", "chamber_fault",
                "filament_change", "filament_short", "filament_low",
                "spool_switch", "slot_empty")

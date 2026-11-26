@@ -519,16 +519,24 @@ async def test_email_threads():
     ap.add(url)
     server, c = make({"web_ui_url": "http://u1/"},
                      {r: [("email", ap, True)] for r in ("started",
-                                                         "complete")})
+                                                         "complete",
+                                                         "bed_cooled")})
     await start_job(server)
     await asyncio.sleep(0.3)
     await c._send_unchecked("complete", "✅ U1 complete", "Benchy\nPrint time: 10m")
+    # Bed cooled, an hour after the print ended
+    c._job_active = False
+    c._job_ended = time.monotonic() - 3600
+    await c._send_unchecked("bed_cooled", "🛏️ U1 bed cooled to 40 °C",
+                            "Benchy\nBed 39 °C, 1h after the print finished")
     msgs = [email.message_from_string(m) for m in sent]
-    check("two emails sent", len(msgs) == 2, len(msgs))
-    if len(msgs) == 2:
+    check("three emails sent", len(msgs) == 3, len(msgs))
+    if len(msgs) == 3:
         refs = [m["References"] for m in msgs]
-        check("both in one thread (same References)",
-              refs[0] and refs[0] == refs[1], refs)
+        check("all in one thread (same References), Bed cooled an hour "
+              "later too", refs[0] and refs[0] == refs[1] == refs[2], refs)
+        subj = [str(m["Subject"]) for m in msgs]
+        check("...with the print's subject", len(set(subj)) == 1, subj)
         parts = [p.get_content_type() for p in msgs[1].walk()]
         check("HTML with a plain-text version and the image inline",
               "text/html" in parts and "text/plain" in parts

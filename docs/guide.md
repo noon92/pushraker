@@ -293,7 +293,8 @@ Emails can go to up to 5 addresses. Each email is a card with a coloured bar for
 
 Emails about one print are one conversation in your email app: they share
 the subject (printer and file name, e.g. `U1: Benchy`) and the notification
-itself is the heading of the email. Faults join the print's conversation
+itself is the heading of the email. Bed cooled joins it too, however long
+after the print it comes. Faults join the print's conversation
 while it prints and up to 2 minutes after it ends, and a power loss joins
 the print it interrupted; other emails (e.g. an idle warning) have the
 notification as their subject.
