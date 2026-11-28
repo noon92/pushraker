@@ -37,6 +37,12 @@ class Frame(bytes):
 class Printer:
     """A plain Moonraker printer."""
     name = "generic"
+    # Minutes the printer usually spends preparing before it prints
+    # (heating, homing, the default calibrations): added to the ETA until
+    # printing begins, and the ETA is then shown as approximate. A rough
+    # figure: it changes with the macros and the calibrations chosen.
+    # 0: not known.
+    prep_minutes = 0
     # The printer's model as people know it ("Snapmaker U1"), for backups'
     # "from"; empty: the profile's name stands in
     model_name = ""

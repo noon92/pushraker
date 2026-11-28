@@ -154,6 +154,7 @@ Which notifications a printer can send, and which template values have data on i
 | `job.state` | ✅ | ✅ | ✅ |
 | `job.time.elapsed` | ✅ | ✅ | ✅ |
 | `job.time.eta` | ✅ | ✅ | ✅ |
+| `job.time.prep` | ✅ | ✅ | ❌ |
 | `job.time.remaining.blend` | ✅ | ✅ | ✅ |
 | `job.time.remaining.default` | ✅ | ✅ | ✅ |
 | `job.time.remaining.filament` | ✅ | ✅ | ✅ |

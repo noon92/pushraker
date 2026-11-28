@@ -2645,12 +2645,27 @@ class PushNotifications:
 
     def _times(self, remaining: Dict[str, Optional[float]],
                default: Optional[float], elapsed: float,
-               sample: bool = False) -> Dict[str, Any]:
+               sample: bool = False, prep: float = 0.) -> Dict[str, Any]:
         rem = {m: self._dur(v) for m, v in remaining.items()}
         rem["default"] = self._dur(default)
         return {"remaining": rem,
                 "elapsed": self._dur(elapsed) if elapsed else None,
-                "eta": self._eta(default, sample)}
+                # Until printing begins, the ETA allows for the printer's
+                # preparation (job.time.prep)
+                "prep": self._dur(prep) if prep else None,
+                "eta": self._eta(default + prep if default is not None
+                                 else None, sample)}
+
+    def _prep_left(self, printed: float) -> float:
+        """Seconds of the printer's usual preparation still to come (the
+        profile's prep_minutes): only before printing begins, less the
+        time the print job has already been preparing."""
+        allowance = self.printer.prep_minutes * 60.
+        if not allowance or printed > 0. or not self._job_active:
+            return 0.
+        total = float(self._status["print_stats"].get("total_duration")
+                      or 0.)
+        return max(0., allowance - total)
 
     def _eta(self, left: Optional[float],
              sample: bool = False) -> Optional[tp.Clock]:
@@ -2713,7 +2728,8 @@ class PushNotifications:
                 filename, self._left_seconds(self._time_method())),
             "time": dict(self._times(
                 {m: self._left_seconds(m) for m in self._time_methods()},
-                self._left_seconds(self._time_method()), pd),
+                self._left_seconds(self._time_method()), pd,
+                prep=self._prep_left(pd)),
                 estimated=self._dur(self._estimated_time(filename) or None),
                 started=self._clock_at(self._started_at()),
                 sliced=self._clock_at(self._job_sliced)),
@@ -2862,8 +2878,9 @@ class PushNotifications:
                 "pauses": self._pauses_values([self._sample_pause(1)]),
                 "objects": {"count": 3, "names": ["Base", "Lid", "Hinge"],
                             "current": "Lid", "by_object": True},
-                "time": dict(self._times(spread, SAMPLE_LEFT,
-                                         18 * 3600 + 51 * 60, sample=True),
+                "time": dict(self._times(
+                    spread, SAMPLE_LEFT, 18 * 3600 + 51 * 60, sample=True,
+                    prep=self.printer.prep_minutes * 60.),
                              estimated=self._dur(46 * 3600 + 3 * 60),
                              started=self._clock_at(
                                  time.time() - (18 * 3600 + 51 * 60), True),
@@ -3319,7 +3336,13 @@ class PushNotifications:
                 n("remaining", children=remaining),
                 leaf("time.elapsed", info="Print time; stops while "
                      "paused."),
-                leaf("time.eta", info="Your time zone; +1d tomorrow."),
+                leaf("time.eta", info="Your time zone; +1d tomorrow. "
+                     "Before printing begins it allows for time.prep."),
+                *([leaf("time.prep", info="The printer's usual "
+                        "preparation still to come (heating, homing, "
+                        "calibrations), before printing begins: a rough "
+                        "figure, added to the ETA. Empty once printing.")]
+                  if self.printer.prep_minutes else []),
                 leaf("time.started", info="When it was sent to print; "
                      "the date when that was another day."),
                 leaf("time.sliced", info="When the slicer made the file "
@@ -4730,9 +4753,13 @@ class PushNotifications:
         est = self._estimated_time(filename)
         if est <= 0.:
             return ""
-        clock = self._clock(est)
+        # Before printing begins the ETA allows for the printer's usual
+        # preparation, and says "~" (job.time.prep)
+        prep = self._prep_left(float(
+            self._status["print_stats"].get("print_duration") or 0.))
+        clock = self._clock(est + prep)
         return f"Estimated print time {format_duration(est)}" + (
-            f", ETA {clock}" if clock else "")
+            f", ETA {'~' if prep else ''}{clock}" if clock else "")
 
     def _custom(self, rid: str) -> Optional[Dict[str, Any]]:
         """A custom notification's settings, by the component's name for

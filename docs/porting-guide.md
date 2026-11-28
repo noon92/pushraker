@@ -176,6 +176,7 @@ Apprise 1.2.x works, with two quirks pushraker handles (§8). Verify with `check
 | nginx serving Fluidd/Mainsail, and you may edit its config (your own setup) | optionally `location /notifications/ { alias <…>/pushraker/web/; }` (README) |
 | vendor nginx in the firmware | don't edit it; use Moonraker's route |
 | the web UI's address is fixed for the model | profile: `web_page` + `web_page_name` (§5.6). It becomes the Printer URL's default and first Fill-in choice |
+| the printer spends minutes preparing before it prints (heating, homing, calibrations) | profile: `prep_minutes` (Snapmaker U1: 5, Creality Hi: 8). Added to the ETA until printing begins, and *Print started* shows that ETA with "~". A rough figure; 0 (the default) when not known |
 | not fixed | nothing: Fill in offers the web pages found on the printer (`discover.web_pages`), never Moonraker's port |
 
 ### 4.7 Model name (backups' "from", restore rules)

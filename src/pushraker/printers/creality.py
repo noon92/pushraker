@@ -168,6 +168,7 @@ class Creality(Printer):
     # Fluidd, served by Creality's nginx on 4408 (the Hi; its port 80 is
     # Creality's own web-server: 404 at "/")
     web_page = "http://{host}:4408/"
+    prep_minutes = 8
     web_page_name = "Fluidd"
     timelapse = TIMELAPSE
     print_refer = PRINT_REFER
