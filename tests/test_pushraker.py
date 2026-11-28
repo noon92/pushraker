@@ -1348,6 +1348,71 @@ async def test_upcoming_pause():
     check("default: 3 layers", c2.upcoming_layers == 3, c2.upcoming_layers)
 
 
+async def test_prep_time():
+    print("Preparation allowance: the ETA before printing begins")
+    reset_world()
+    log = []
+    ntfy = FakeService(log, "ntfy")
+    server, c = make({}, {"started": [("ntfy", ntfy, False)]})
+    c.tz = datetime.timezone.utc
+    META.update(estimated_time=3600.0)
+    with open(os.path.join(GCODES, "Prep.gcode"), "wb") as f:
+        f.write(b"G1 X1\n" * 50)
+
+    def eta_minutes(body):
+        m = re.search(r"ETA (~?)(\d+):(\d+)", body)
+        at = int(m.group(2)) * 60 + int(m.group(3))
+        now = datetime.datetime.now(datetime.timezone.utc)
+        return m.group(1), (at - (now.hour * 60 + now.minute)) % 1440
+
+    async def start_preparing(profile):
+        # A print job that hasn't begun printing (start_job's has)
+        STATE["print_stats"] = ps("printing", "Prep.gcode", print_duration=0,
+                                  total_duration=0)
+        STATE["virtual_sdcard"] = {"file_position": 0, "progress": 0}
+        await server.handlers["server:klippy_ready"]()
+        c.printer = profile
+        log.clear()
+        await server.handlers["job_state:state_changed"](
+            JobEvent.STARTED, {}, STATE["print_stats"])
+        await asyncio.sleep(0.3)
+
+    for profile, minutes in ((pn.printers.SnapmakerU1([]), 5),
+                             (pn.printers.Creality([]), 8)):
+        await start_preparing(profile)
+        body = log[-1]["body"] if log else ""
+        tilde, ahead = eta_minutes(body)
+        check(f"{profile.name}: Print started's ETA is ~, the estimate "
+              f"plus {minutes} minutes", tilde == "~"
+              and ahead in (60 + minutes - 1, 60 + minutes, 60 + minutes + 1),
+              body)
+        check("job.time.prep says how much is still to come",
+              float(c._job_live()["time"]["prep"]) == minutes * 60.,
+              c._job_live()["time"]["prep"])
+        # Three minutes into preparing: that much less is added
+        await c._on_status_update({"print_stats": {"total_duration": 180.0}},
+                                  0.)
+        check("less what the print job has already spent preparing",
+              float(c._job_live()["time"]["prep"]) == (minutes - 3) * 60.,
+              c._job_live()["time"]["prep"])
+        # Printing has begun: no allowance, an exact ETA again
+        await c._on_status_update({"print_stats": {"print_duration": 30.0}},
+                                  0.)
+        live = c._job_live()["time"]
+        check("none once printing has begun", live["prep"] is None,
+              live["prep"])
+        await server.handlers["job_state:state_changed"](
+            JobEvent.COMPLETE, {}, ps("complete", "Prep.gcode"))
+        await asyncio.sleep(0.2)
+    # A printer whose preparation time isn't known: as before
+    await start_preparing(pn.printers.Printer([]))
+    body = log[-1]["body"] if log else ""
+    tilde, ahead = eta_minutes(body)
+    check("other printers: no allowance, no ~", tilde == ""
+          and ahead in (59, 60, 61), body)
+    META.clear()
+
+
 async def test_file_mode():
     print("Settings from pushraker.conf, the page's endpoints, live apply")
     reset_world()
@@ -5743,7 +5808,7 @@ async def test_data():
     check("time: remaining (default first, then alphabetical), elapsed, "
           "eta, started, sliced",
           names(job["time"]["children"]) == ["remaining", "elapsed", "eta",
-                                             "started", "sliced"]
+                                             "prep", "started", "sliced"]
           and names(rem["children"])[0] == "default"
           and names(rem["children"])[1:] == sorted(names(rem["children"])[1:])
           and [f["label"] for f in rem["children"][0]["formats"]]
@@ -5838,7 +5903,7 @@ async def run_component_tests():
     for t in (test_order_and_priority, test_expiry_and_independence,
               test_fault_dedup, test_same_preparation_everywhere,
               test_email_threads, test_filament_measured, test_filament_alerts,
-              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_upcoming_pause, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_render_thread, test_job_moments, test_current_extruder, test_macro_topic, test_template_limits, test_now_values, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
+              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_upcoming_pause, test_prep_time, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_render_thread, test_job_moments, test_current_extruder, test_macro_topic, test_template_limits, test_now_values, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
               test_driver_hot, test_bed_cooled, test_pushraker_values,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint, test_preprint_generic,

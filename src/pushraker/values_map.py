@@ -184,6 +184,7 @@ VALUES: Dict[str, Tuple[str, ...]] = {
     'job.state': ('creality', 'generic', 'snapmaker_u1'),
     'job.time.elapsed': ('creality', 'generic', 'snapmaker_u1'),
     'job.time.eta': ('creality', 'generic', 'snapmaker_u1'),
+    'job.time.prep': ('creality', 'snapmaker_u1'),
     'job.time.remaining.blend': ('creality', 'generic', 'snapmaker_u1'),
     'job.time.remaining.default': ('creality', 'generic', 'snapmaker_u1'),
     'job.time.remaining.filament': ('creality', 'generic', 'snapmaker_u1'),

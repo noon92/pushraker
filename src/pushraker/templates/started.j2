@@ -1,7 +1,7 @@
 {{ job.file }}
-{# The slicer's estimate for the whole print job #}
+{# The slicer's estimate for the whole print job; "~" while the ETA allows for the printer's preparation (job.time.prep) #}
 {% if job.time.estimated %}
-Estimated print time {{ job.time.estimated }}{% if job.time.eta %}, ETA {{ job.time.eta }}{% endif %}
+Estimated print time {{ job.time.estimated }}{% if job.time.eta %}, ETA {% if job.time.prep %}~{% endif %}{{ job.time.eta }}{% endif %}
 {% endif %}
 {# Moonraker's job queue: this print job, then the ones waiting #}
 {% if job.queue.remaining %}

@@ -22,6 +22,7 @@ class SnapmakerU1(Printer):
     # also serves this page at /notifications/); confirmed by noon on her
     # U1 (http://snapmaker-u1/), 2026-11-21
     web_page = "http://{host}/"
+    prep_minutes = 5
     web_page_name = "Web UI"
     # machine_state_manager.main_state values of the manual calibrations run
     # from the touchscreen (klippy/extras/machine_state_manager.py); the
