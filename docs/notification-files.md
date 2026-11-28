@@ -1,4 +1,4 @@
-# Notification files
+<img width="1288" height="1228" alt="image" src="https://github.com/user-attachments/assets/f3006ee6-096f-4db2-96d4-f1d6c1ba6db1" /># Notification files
 
 One notification in a JSON file: to give it to someone, keep it, or have
 an AI assistant write one from a plain request. On the settings page:
@@ -207,6 +207,8 @@ lists the materials the print really uses, from the file on any printer;
 ```
 
 ## Writing one with an AI assistant
+
+<img width="1288" height="1228" alt="image" src="https://github.com/user-attachments/assets/e9441909-cef4-4633-86bb-3c9ab8ea8454" />
 
 Paste this into any AI assistant. It asks what you want next:
 
