@@ -1,4 +1,4 @@
-<img width="1288" height="1228" alt="image" src="https://github.com/user-attachments/assets/f3006ee6-096f-4db2-96d4-f1d6c1ba6db1" /># Notification files
+# Notification files
 
 One notification in a JSON file: to give it to someone, keep it, or have
 an AI assistant write one from a plain request. On the settings page:
