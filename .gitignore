@@ -3,3 +3,7 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+
+# Bespok3d package: baked at build time, never committed
+bespok3d/files/site-packages/
+bespok3d/dist/
