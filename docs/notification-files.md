@@ -208,7 +208,7 @@ lists the materials the print really uses, from the file on any printer;
 
 ## Writing one with an AI assistant
 
-Paste this into any AI assistant, and add what you want at the end:
+Paste this into any AI assistant. It asks what you want next:
 
 ```text
 pushraker sends 3D printer notifications from Klipper and Moonraker. Help me create one importable notification JSON file.
@@ -221,8 +221,6 @@ https://raw.githubusercontent.com/noon92/pushraker/main/docs/values-by-printer.m
 Before writing it, ask me anything I haven't said: printer model (to use only values it has); push, email or both; priority; image (render, camera, graphic or none); title and wording; when it fires; how often (once per print or every time), unless it can only be true once, like one layer number; whether to show time left. Then confirm your understanding in one sentence.
 
 Give the result as a downloadable .json file if you can make files, otherwise as exactly one JSON code block. Omit "from" and any topic. Then explain in two lines how to import it (Import... on the settings page) and what each condition does.
-
-What I want:
 ```
 
 Rules for the assistant:
