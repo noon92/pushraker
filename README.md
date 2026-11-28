@@ -89,7 +89,7 @@ and has been tested on a Snapmaker U1.
 
 1. Set up the Bespok3d app with your printer, and turn on **Advanced
    mode** on the printer's screen (Settings > Maintenance > Advanced Mode).
-2. Download `pushraker-<version>.b3` from the
+2. Download `pushraker-bespok3d-<version>.b3` from the
    [latest release](https://github.com/noon92/pushraker/releases/latest)
    and drop it on the Bespok3d app window. Install it with the printer
    idle. It isn't in the Bespok3d store yet and isn't signed, so the app

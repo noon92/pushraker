@@ -86,7 +86,7 @@ jobs:
 
 
   # The Bespok3d package (bespok3d/), built from the version just put on
-  # PyPI and attached to the GitHub release as pushraker-<version>.b3
+  # PyPI and attached to the GitHub release as pushraker-bespok3d-<version>.b3
   bespok3d:
     needs: notes
     runs-on: ubuntu-latest
@@ -125,4 +125,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release upload "$TAG" "$RUNNER_TEMP/dist/pushraker-${TAG#v}.b3" --clobber
+        run: |
+          # The builder names it pushraker-<version>.b3
+          cp "$RUNNER_TEMP/dist/pushraker-${TAG#v}.b3" "pushraker-bespok3d-${TAG#v}.b3"
+          gh release upload "$TAG" "pushraker-bespok3d-${TAG#v}.b3" --clobber
