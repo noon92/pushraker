@@ -14,8 +14,9 @@ report the event there, so the snapshot is taken before the printer parks.
 
 No file the printer maker ships is changed: the original commands are
 taken over in memory, the way Klipper's own rename_existing does. A hook
-that fails is logged and skipped, so the printer's own print-end routine
-(heaters and motors off) always runs.
+that fails is logged and skipped, and the G-code state (absolute or
+relative moves, speed) is put back as it was before it, so the printer's
+own print-end routine (heaters and motors off) always runs as usual.
 
 Klipper config:
 
@@ -27,6 +28,7 @@ import logging
 # Command, then the prefix of the macros run before it
 HOOKED = (("PRINT_END", "_PRINT_END_"), ("CANCEL_PRINT", "_CANCEL_PRINT_"))
 MACRO = "gcode_macro "
+STATE = "pushraker_print_hooks"
 
 
 class PushrakerPrintHooks:
@@ -85,13 +87,28 @@ class PushrakerPrintHooks:
 
     def run_hooks(self, prefix):
         for name in self.hook_names(prefix):
-            try:
-                self.gcode.run_script_from_command(name)
-            except Exception as e:
-                logging.exception("pushraker_print_hooks: %s failed", name)
-                self.gcode.respond_info(
-                    "pushraker print hooks: %s failed (%s); carrying on"
-                    % (name, e))
+            self.run_hook(name)
+
+    def run_hook(self, name):
+        run = self.gcode.run_script_from_command
+        try:
+            run("SAVE_GCODE_STATE NAME=%s" % STATE)
+            run(name)
+        except Exception as e:
+            logging.exception("pushraker_print_hooks: %s failed", name)
+            self.gcode.respond_info(
+                "pushraker print hooks: %s failed (%s); carrying on"
+                % (name, e))
+            self.restore_state()
+
+    def restore_state(self):
+        """A hook that failed part-way may have left relative moves on
+        (G91); the printer's own macro must start from what it expects."""
+        try:
+            self.gcode.run_script_from_command(
+                "RESTORE_GCODE_STATE NAME=%s" % STATE)
+        except Exception:
+            logging.exception("pushraker_print_hooks: state not restored")
 
     def get_status(self, eventtime):
         return {"taken_over": list(self.taken_over)}

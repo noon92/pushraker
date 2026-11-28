@@ -23,6 +23,10 @@ def load_extra():
     return module
 
 
+SAVE = "SAVE_GCODE_STATE NAME=pushraker_print_hooks"
+RESTORE = "RESTORE_GCODE_STATE NAME=pushraker_print_hooks"
+
+
 class GCode:
     def __init__(self, log):
         self.log = log
@@ -103,10 +107,11 @@ def test_hooks_run_before_the_stock_macros_in_config_order():
         ["_NTFY_HOOKS", "_PRINT_END_NTFY", "_CANCEL_PRINT_NTFY",
          "_PRINT_END_OTHER", "PRINT_START"])
     gcode.run("PRINT_END")
-    assert log == ["_PRINT_END_NTFY", "_PRINT_END_OTHER", "stock end"]
+    assert log == [SAVE, "_PRINT_END_NTFY", SAVE, "_PRINT_END_OTHER",
+                   "stock end"]
     log.clear()
     gcode.run("CANCEL_PRINT")
-    assert log == ["_CANCEL_PRINT_NTFY", "stock cancel"]
+    assert log == [SAVE, "_CANCEL_PRINT_NTFY", "stock cancel"]
     assert hooks.taken_over == ["PRINT_END", "CANCEL_PRINT"]
     assert gcode.gcode_help["PRINT_END"] == "stock print end"
 
@@ -115,16 +120,18 @@ def test_a_failing_hook_never_stops_the_stock_macro():
     log, gcode, _ = stock_printer(["_PRINT_END_NTFY", "_PRINT_END_OTHER"])
     gcode.failing.add("_PRINT_END_NTFY")
     gcode.run("PRINT_END")
-    assert log[0] == "_PRINT_END_NTFY"
-    assert log[1].startswith("info: pushraker print hooks: _PRINT_END_NTFY "
+    assert log[:2] == [SAVE, "_PRINT_END_NTFY"]
+    assert log[2].startswith("info: pushraker print hooks: _PRINT_END_NTFY "
                              "failed")
-    assert log[2:] == ["_PRINT_END_OTHER", "stock end"]
+    # The state from before the failed hook is put back (it may have
+    # left G91 on), before anything else runs
+    assert log[3:] == [RESTORE, SAVE, "_PRINT_END_OTHER", "stock end"]
 
 
 def test_lowercase_macro_names_count():
     log, gcode, _ = stock_printer(["_print_end_ntfy"])
     gcode.run("PRINT_END")
-    assert log == ["_print_end_ntfy", "stock end"]
+    assert log == [SAVE, "_print_end_ntfy", "stock end"]
 
 
 def test_left_alone_when_the_firmware_already_calls_the_hooks():

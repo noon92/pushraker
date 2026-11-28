@@ -1,7 +1,7 @@
 {
   "name": "pushraker",
   "title": "pushraker",
-  "version": "0.4.1-test1",
+  "version": "0.4.1-test2",
   "author": "noon92",
   "description": "Push and email notifications for your print jobs: started, first layer, progress, paused, upcoming pause, complete, cancelled, errors, filament and calibrations, with a camera picture or the model preview. Sent through ntfy, Pushover, Gotify, Telegram, Discord, a webhook or email.\n\nEvery notification's title and text are editable templates, and you can write your own notifications that fire when a condition you set is true, or from G-code. Set it up on its own settings page (Notifications, under the printer's links).\n\nThe print-end and cancel pictures are taken before the printer parks: pushraker's macros run at the start of PRINT_END and CANCEL_PRINT, without changing the printer's own macros.",
   "tagline": "Notifications for your print jobs, with pictures, fully customizable.",
@@ -16,27 +16,11 @@
   "sw_version": "pushraker 0.4.1",
   "min_daemon_version": "0.14.0",
   "requires": {
-    "capabilities": ["klipper-generic"],
-    "variables": [
-      {
-        "name": "PUSHRAKER_PRINTER_NAME",
-        "description": "The printer's name in notifications.",
-        "required": true
-      }
-    ]
+    "capabilities": [
+      "klipper-generic"
+    ],
+    "variables": []
   },
-  "config": [
-    {
-      "key": "PUSHRAKER_PRINTER_NAME",
-      "label": "Printer name",
-      "type": "text",
-      "default": "U1",
-      "hint": "Shown in every notification. Can be changed later on the settings page too.",
-      "required": true,
-      "userEditable": true,
-      "scope": "printer"
-    }
-  ],
   "permissions": [
     "moonraker-component",
     "moonraker-config",
@@ -52,9 +36,7 @@
       },
       {
         "class": "moonraker-config",
-        "src": "files/cfg/moonraker/pushraker.cfg.tmpl",
-        "name": "pushraker.cfg",
-        "render": true
+        "src": "files/cfg/moonraker/pushraker.cfg"
       },
       {
         "class": "klipper-extra",
@@ -69,7 +51,10 @@
         "src": "files/cfg/klipper/pushraker.cfg"
       }
     ],
-    "restart": ["klipper", "moonraker"]
+    "restart": [
+      "klipper",
+      "moonraker"
+    ]
   },
   "endpoints": [
     {

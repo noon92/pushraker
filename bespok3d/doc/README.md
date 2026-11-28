@@ -6,8 +6,8 @@ Push and email notifications for your print jobs, with a camera picture or the m
   complete, cancelled, bed cooled.
 - **Faults:** errors and warnings with the same text as the printer's screen, Klipper shutdown,
   power loss recovery.
-- **Filament and calibrations:** not enough filament, spool running low, switched to backup spool
-  (with Spoolman), and the calibrations you start from the screen.
+- **More, where the printer has it:** filament (with Spoolman) and calibration notifications. Only
+  the ones your printer can send are shown on the settings page.
 - **Services:** ntfy, Pushover, Gotify, Telegram, Discord, a webhook, email.
 
 ## Customizable
@@ -20,7 +20,8 @@ every time, or straight from a macro with `RESPOND PREFIX=notify_custom MSG=push
 ## Setting it up
 
 After installing, open **Notifications** from the printer's links in the app, or
-`http://<printer>/server/pushraker/page`. Nothing is sent until you turn notifications on and set
+`http://<printer>/server/pushraker/page` (if that doesn't open:
+`http://<printer>:7125/server/pushraker/page`). Give the printer its name there. Nothing is sent until you turn notifications on and set
 up a service. Tokens and passwords stay on the printer.
 
 ## Pictures at the end of a print
@@ -34,7 +35,9 @@ carries on. The printer's macros themselves are not changed.
 
 - On the Snapmaker U1, turn on **Advanced mode** on the printer's screen (Settings > Maintenance >
   Advanced Mode). With it off, every reboot drops the lines that load this plugin.
-- Your settings live in `pushraker.conf` beside `moonraker.conf`, so they survive an update or an
-  uninstall and reinstall.
+- Your settings are kept in `pushraker.conf`, beside `moonraker.conf`. Uninstalling the plugin
+  leaves that file where it is.
+- `PRINT_END` and `CANCEL_PRINT` are taken over while the plugin is installed (see above). Another
+  plugin or macro that replaces those two commands may run before or after pushraker's macros.
 
 Full guide: https://github.com/noon92/pushraker/blob/main/docs/guide.md

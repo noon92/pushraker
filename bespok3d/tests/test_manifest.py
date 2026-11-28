@@ -42,18 +42,15 @@ def test_permissions_cover_every_class_and_restart():
     assert set(data["install"]["restart"]) == {"klipper", "moonraker"}
 
 
-def test_every_template_variable_is_declared_and_asked():
+def test_nothing_is_asked_at_install_and_nothing_is_a_template():
+    # The printer's name is set on pushraker's own settings page: a second
+    # place to set it in the app would be ignored once that is saved
     data = manifest()
-    keys = {item["key"] for item in data["config"]}
-    variables = {item["name"] for item in data["requires"]["variables"]}
+    assert not data.get("config") and not data["requires"]["variables"]
     for entry in data["install"]["place"]:
-        if not entry.get("render"):
-            continue
-        assert entry["src"].endswith(".tmpl")
-        used = set(re.findall(r"\$\{?([A-Z][A-Z0-9_]*)",
-                              read(PLUGIN, entry["src"])))
-        assert used, entry["src"]
-        assert used <= keys and used <= variables, used - keys
+        assert not entry.get("render") and not entry["src"].endswith(".tmpl")
+        assert not re.search(r"\$\{?[A-Z][A-Z0-9_]*",
+                             read(PLUGIN, entry["src"])), entry["src"]
 
 
 def test_versions_agree():
@@ -76,8 +73,8 @@ def test_component_and_extra_names():
         by_class.setdefault(entry["class"], []).append(name)
     # Moonraker loads a component by its file name, the [pushraker] section
     assert by_class["moonraker-component"] == ["pushraker.py"]
-    assert "[pushraker]" in read(PLUGIN, "files", "cfg", "moonraker",
-                                 "pushraker.cfg.tmpl")
+    fragment = read(PLUGIN, "files", "cfg", "moonraker", "pushraker.cfg")
+    assert "[pushraker]\nname: Printer\nerror_index_url: https://" in fragment
     # Klipper loads an extra by its file name, from its config section
     assert by_class["klipper-extra"] == ["pushraker_print_hooks.py"]
     assert "[pushraker_print_hooks]" in read(
