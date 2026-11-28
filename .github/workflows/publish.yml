@@ -37,7 +37,8 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
 
   # Release notes from the commit messages since the previous release
-  # (subject as the bullet, the body under it), on the GitHub release
+  # (subject as the bullet, the body under it), on the GitHub release,
+  # when the release was published without text of its own
   notes:
     needs: pypi
     runs-on: ubuntu-latest
@@ -76,7 +77,52 @@ jobs:
             echo "Install or upgrade: \`pip install --upgrade pushraker\`, then \`python -m pushraker install\`."
           } > notes.md
           cat notes.md
-          gh release view "$TAG" >/dev/null 2>&1 \
-            && gh release edit "$TAG" --notes-file notes.md \
-            || gh release create "$TAG" --title "$TAG" --notes-file notes.md
+          # A release that already has its own text keeps it
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --notes-file notes.md
+          elif [ -z "$(gh release view "$TAG" --json body -q .body | tr -d '[:space:]')" ]; then
+            gh release edit "$TAG" --notes-file notes.md
+          fi
 
+
+  # The Bespok3d package (bespok3d/), built from the version just put on
+  # PyPI and attached to the GitHub release as pushraker-<version>.b3
+  bespok3d:
+    needs: notes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"    # the printers' Python: the wheels are picked for it
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: The package is for this version
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          test "$(cat bespok3d/klipper_requirements.txt)" = "pushraker==$v"
+          test "$(python3 -c 'import json; print(json.load(open("bespok3d/manifest.json"))["version"])')" = "$v"
+          sh bespok3d/tests/run.sh
+      - name: Build it
+        env:
+          PIP_NO_CACHE_DIR: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          # The builder, at a fixed commit
+          npm install --prefix "$RUNNER_TEMP/b3" github:Bespok3d/b3-builder#836f8242b005ce4e3188ee33af72e6b3d7968e62
+          # PyPI can take a minute to serve a version it has just accepted
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            "$RUNNER_TEMP/b3/node_modules/.bin/b3-builder" build --source ./bespok3d \
+              --out "$RUNNER_TEMP/dist" --atom-repo "$GITHUB_REPOSITORY" --bake && break
+            test "$attempt" != 10
+            sleep 30
+          done
+          ls -l "$RUNNER_TEMP/dist"
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$TAG" "$RUNNER_TEMP/dist/pushraker-${TAG#v}.b3" --clobber
