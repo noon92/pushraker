@@ -211,7 +211,8 @@ lists the materials the print really uses, from the file on any printer;
 ## Writing one with an AI assistant
 
 <p align="center">
-<img width="420" alt="An AI assistant writing a notification file from the prompt below" src="https://github.com/user-attachments/assets/e9441909-cef4-4633-86bb-3c9ab8ea8454" /><br>
+<img width="420" alt="An AI assistant writing a notification file from the prompt below" src="https://github.com/user-attachments/assets/609b8dd1-586b-42c4-b60f-5478d81cf950" /><br>
+
 <em>An AI assistant writing a notification file from the prompt below.</em>
 </p>
 
