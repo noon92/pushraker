@@ -24,6 +24,12 @@ where it is built in.
   so it writes one for you.
 - [Porting guide](docs/porting-guide.md): bringing pushraker to another printer.
 
+**Questions, problems, ideas:** the
+[pushraker channel](https://discord.com/channels/1086575708903571536/1561488591228510308)
+on the Snapmaker Discord server. The channel link only opens once you are a
+member: [join the server](https://discord.com/invite/snapmaker-official-1086575708903571536)
+first.
+
 ## Supported printers
 
 pushraker has been tested on two printers:
