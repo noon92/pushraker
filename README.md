@@ -31,6 +31,7 @@ pushraker has been tested on two printers:
 | Printer | How it's installed | Settings page |
 |---|---|---|
 | Snapmaker U1 | Built into the [Snapmaker U1 Extended Firmware](https://github.com/paxx12-snapmaker-u1/SnapmakerU1-Extended-Firmware) | `http://<printer>/notifications/` |
+| Snapmaker U1, stock firmware | With [Bespok3d](https://github.com/Bespok3d) ([below](#install-with-bespok3d-snapmaker-u1-on-stock-firmware)) | `http://<printer>/server/pushraker/page` |
 | Creality Hi | Stock firmware; one command over SSH ([below](#install-on-the-creality-hi)) | `http://<printer>:7125/server/pushraker/page` |
 
 **Other printers are untested.** The same package runs on every printer;
@@ -79,6 +80,30 @@ What pushraker needs from the printer (the installer checks these):
   requests. Pillow 8.2 or newer is optional with the SSH installer (pip
   installs it); without it notifications go without spool pictures and
   model previews.
+
+## Install with Bespok3d (Snapmaker U1 on stock firmware)
+
+[Bespok3d](https://github.com/Bespok3d) adds plugins to a printer that
+keeps its stock firmware: nothing is flashed. pushraker is packaged for it
+and has been tested on a Snapmaker U1.
+
+1. Set up the Bespok3d app with your printer, and turn on **Advanced
+   mode** on the printer's screen (Settings > Maintenance > Advanced Mode).
+2. Download `pushraker-<version>.b3` from the
+   [latest release](https://github.com/noon92/pushraker/releases/latest)
+   and drop it on the Bespok3d app window. Install it with the printer
+   idle. It isn't in the Bespok3d store yet and isn't signed, so the app
+   shows it as coming from an unknown publisher.
+3. Open **Notifications** from the printer's links in the app, or
+   `http://<printer>/server/pushraker/page`, and set it up.
+
+The print-end and cancel pictures are taken before the printer parks, as
+on the extended firmware: a small Klipper extra in the package runs
+pushraker's macros at the start of `PRINT_END` and `CANCEL_PRINT`, without
+changing the printer's own macros. Uninstalling from the app removes
+everything except your settings (`pushraker.conf`). After a firmware
+update, press **Recover** in the app. The package's source is in
+[`bespok3d/`](bespok3d/).
 
 ## Install on the Creality Hi
 
