@@ -1413,6 +1413,28 @@ async def test_prep_time():
     META.clear()
 
 
+async def test_error_index_default():
+    print("Error Index: the printer profile's own, unless the harness "
+          "names one")
+    reset_world()
+    server, c = make({}, {})
+    c.printer = pn.printers.SnapmakerU1([])
+    check("Snapmaker U1: its error codes page, with nothing configured",
+          c.error_index_url.startswith("https://wiki.snapmaker.com/")
+          and (await c._env()).error_index_url == c.error_index_url,
+          c.error_index_url)
+    c.printer = pn.printers.Creality([])
+    check("a printer without one: no link", c.error_index_url == "",
+          c.error_index_url)
+    server = Server()
+    server.extra_components = {"webcam": Webcams([]), "spoolman": Spoolman()}
+    named = pn.PushNotifications(Config(server, dict(
+        name="U1", error_index_url="https://wiki.example.com/errors")))
+    named.printer = pn.printers.SnapmakerU1([])
+    check("the harness's own wins", named.error_index_url
+          == "https://wiki.example.com/errors", named.error_index_url)
+
+
 async def test_file_mode():
     print("Settings from pushraker.conf, the page's endpoints, live apply")
     reset_world()
@@ -5903,7 +5925,7 @@ async def run_component_tests():
     for t in (test_order_and_priority, test_expiry_and_independence,
               test_fault_dedup, test_same_preparation_everywhere,
               test_email_threads, test_filament_measured, test_filament_alerts,
-              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_upcoming_pause, test_prep_time, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_render_thread, test_job_moments, test_current_extruder, test_macro_topic, test_template_limits, test_now_values, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
+              test_faults_over_a_job, test_spool_switch, test_ace, test_file_pauses, test_upcoming_pause, test_prep_time, test_error_index_default, test_file_mode, test_generic_printer, test_status_report, test_time_left, test_calibration, test_gotify, test_image_names, test_fault_emoji, test_send_gap, test_macro_notify, test_render_thread, test_job_moments, test_current_extruder, test_macro_topic, test_template_limits, test_now_values, test_queue_line, test_chamber, test_filament_change, test_backup_order, test_console,
               test_driver_hot, test_bed_cooled, test_pushraker_values,
               test_print_by_object,
               test_no_secrets_in_logs, test_config_lines, test_old_names, test_preprint, test_preprint_generic,

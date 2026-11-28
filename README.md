@@ -63,7 +63,7 @@ taken after the printer has parked, not before.
 
 Full chart: [Features by printer](docs/guide.md#features-by-printer) in the guide.
 
-**Status: 0.4.1.** pushraker has been in use on the Snapmaker U1 since its
+**Status: 0.4.2.** pushraker has been in use on the Snapmaker U1 since its
 first release; Creality Hi support is new in 0.4. Notifications a printer
 can't send are off and left off its settings page; one can still be
 turned on in `pushraker.conf`.

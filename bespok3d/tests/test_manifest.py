@@ -74,7 +74,7 @@ def test_component_and_extra_names():
     # Moonraker loads a component by its file name, the [pushraker] section
     assert by_class["moonraker-component"] == ["pushraker.py"]
     fragment = read(PLUGIN, "files", "cfg", "moonraker", "pushraker.cfg")
-    assert "[pushraker]\nname: Printer\nerror_index_url: https://" in fragment
+    assert fragment.endswith("[pushraker]\nname: Printer\n")
     # Klipper loads an extra by its file name, from its config section
     assert by_class["klipper-extra"] == ["pushraker_print_hooks.py"]
     assert "[pushraker_print_hooks]" in read(

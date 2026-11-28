@@ -196,6 +196,7 @@ VALUES: Dict[str, Tuple[str, ...]] = {
     'job.time.sliced': ('creality', 'generic', 'snapmaker_u1'),
     'job.time.started': ('creality', 'generic', 'snapmaker_u1'),
     'machine.hostname': ('creality', 'generic', 'snapmaker_u1'),
+    'machine.links.errors': ('snapmaker_u1',),
     'machine.model': ('creality', 'generic', 'snapmaker_u1'),
     'machine.name': ('creality', 'generic', 'snapmaker_u1'),
     'machine.pushraker_version': ('creality', 'generic', 'snapmaker_u1'),

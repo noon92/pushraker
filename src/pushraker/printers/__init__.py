@@ -37,6 +37,9 @@ class Frame(bytes):
 class Printer:
     """A plain Moonraker printer."""
     name = "generic"
+    # The printer maker's page of error codes, linked from fault
+    # notifications ("Error Index") unless the harness names another
+    error_index_url = ""
     # Minutes the printer usually spends preparing before it prints
     # (heating, homing, the default calibrations): added to the ETA until
     # printing begins, and the ETA is then shown as approximate. A rough

@@ -166,6 +166,7 @@ Which notifications a printer can send, and which template values have data on i
 | `job.time.sliced` | ✅ | ✅ | ✅ |
 | `job.time.started` | ✅ | ✅ | ✅ |
 | `machine.hostname` | ✅ | ✅ | ✅ |
+| `machine.links.errors` | ✅ | ❌ | ❌ |
 | `machine.model` | ✅ | ✅ | ✅ |
 | `machine.name` | ✅ | ✅ | ✅ |
 | `machine.pushraker_version` | ✅ | ✅ | ✅ |

@@ -23,6 +23,8 @@ class SnapmakerU1(Printer):
     # U1 (http://snapmaker-u1/), 2026-11-21
     web_page = "http://{host}/"
     prep_minutes = 5
+    error_index_url = ("https://wiki.snapmaker.com/en/snapmaker_u1/"
+                       "troubleshooting/u1_error_codes")
     web_page_name = "Web UI"
     # machine_state_manager.main_state values of the manual calibrations run
     # from the touchscreen (klippy/extras/machine_state_manager.py); the

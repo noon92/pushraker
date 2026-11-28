@@ -278,6 +278,7 @@ pushraker's settings, and what each notification sent since pushraker started.
 | Value | Kind | Example | About |
 |---|---|---|---|
 | `machine.hostname` |  |  |  |
+| `machine.links.errors` |  |  |  |
 | `machine.model` |  |  |  |
 | `machine.name` |  |  |  |
 | `machine.pushraker_version` |  |  |  |

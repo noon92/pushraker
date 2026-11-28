@@ -990,7 +990,8 @@ class PushNotifications:
         self.store: Optional[cfgmod.Store] = None
         self.settings: Dict[str, Any] = {}
         self.env = cfgmod.Env()
-        self.error_index_url: str = config.get("error_index_url", "")
+        # The harness's, when it names one; else the printer profile's
+        self._error_index_url: str = config.get("error_index_url", "")
         # A harness moving users over from an older setup: settings to read
         # when there is no pushraker.conf yet ("<file> <section>", INI; the
         # secrets likewise), and files that setup generated, renamed to
@@ -2655,6 +2656,18 @@ class PushNotifications:
                 "prep": self._dur(prep) if prep else None,
                 "eta": self._eta(default + prep if default is not None
                                  else None, sample)}
+
+    @property
+    def error_index_url(self) -> str:
+        """The printer maker's error-code index: the one the harness or
+        pushraker.conf names, else the printer profile's own."""
+        profile = getattr(self, "printer", None)
+        return self._error_index_url or getattr(profile,
+                                                "error_index_url", "")
+
+    @error_index_url.setter
+    def error_index_url(self, url: str) -> None:
+        self._error_index_url = url
 
     def _prep_left(self, printed: float) -> float:
         """Seconds of the printer's usual preparation still to come (the
