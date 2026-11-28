@@ -661,7 +661,7 @@
                 <button type="button" role="menuitem" data-bk="email" id="bk-email">Send by email</button>
             </div>
         </span>
-        <button type="button" class="btn btn-secondary" id="bk-restore">Restore…</button>
+        <button type="button" class="btn btn-secondary" id="bk-restore">Restore / Import…</button>
         <button type="button" class="btn btn-secondary" id="rs-open">Reset…</button>
         <input type="file" id="bk-file" accept=".json,application/json" style="display:none">
         <span class="bk-status" id="bk-status"></span>
@@ -893,7 +893,6 @@
         </div>
     </div>
 </div>
-<input type="file" id="nx-file" accept=".json,application/json" style="display:none">
 
 <div class="pr-modal" id="pr-modal">
     <div class="pr-modal-box">
@@ -1090,15 +1089,13 @@
                 <td class="nt-c nt-col-email nt-x-cell"><button type="button" class="nt-x nt-x-m" data-cdel="${id}" aria-label="Delete">✕</button><input type="checkbox" data-cemail="${id}"${c.email ? ' checked' : ''}></td>
                 <td class="nt-data"><span class="nt-dim"><button type="button" class="btn btn-secondary nt-data-btn" data-ctpl="${id}">Edit</button></span><button type="button" class="nt-x" data-cdel="${id}" aria-label="Delete">✕</button></td>
             </tr>`;
-        }).join('') + '<tr class="nt-add"><td colspan="4">' + (customs.length < max
-            ? '<button type="button" class="btn btn-secondary nt-data-btn" id="nt-add-custom">➕ Add custom notification</button> ' : '') +
-            '<button type="button" class="btn btn-secondary nt-data-btn" id="nt-import">Import…</button></td></tr>';
+        }).join('') + (customs.length < max
+            ? '<tr class="nt-add"><td colspan="4"><button type="button" class="btn btn-secondary nt-data-btn" id="nt-add-custom">➕ Add custom notification</button></td></tr>' : '');
         const rows = el('nt-crows');
         rows.querySelectorAll('[data-cenabled]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cenabled)).enabled = b.checked; updateRowDimming(); }; });
         rows.querySelectorAll('[data-cemail]').forEach(b => { b.onchange = () => { customById(Number(b.dataset.cemail)).email = b.checked; updateRowDimming(); }; });
         rows.querySelectorAll('[data-ctpl]').forEach(b => { b.onclick = e => { e.preventDefault(); openEditor('custom:' + b.dataset.ctpl); }; });
         rows.querySelectorAll('[data-cdel]').forEach(b => { b.onclick = async e => { e.preventDefault(); await deleteCustom(customById(Number(b.dataset.cdel))); }; });
-        el('nt-import').onclick = e => { e.preventDefault(); nxImport(); };
         if (el('nt-add-custom')) el('nt-add-custom').onclick = e => {
             e.preventDefault();
             draft = Object.assign({ _id: ++customSeq, _saved: null, name: '' }, JSON.parse(JSON.stringify(state.meta.custom_default)));
@@ -3053,6 +3050,8 @@
         bkSay('✓ Reset on this page: check it, then Save & Apply');
     };
     el('bk-restore').onclick = () => { if (state) { el('bk-file').value = ''; el('bk-file').click(); } };
+    // Restore / Import…: one file picker for both; what the file is
+    // decides: a notification file opens Import, a backup opens Restore
     el('bk-file').onchange = async () => {
         const f = el('bk-file').files[0];
         if (!f) return;
@@ -3060,7 +3059,19 @@
         try {
             if (f.size > 2000000) throw new Error('too big for a backup');
             data = JSON.parse(await f.text());
-            if (!data || typeof data !== 'object' || !('pushraker_backup' in data)) throw new Error('not a pushraker backup');
+        } catch (e) {
+            bkSay('⚠️ Can\'t open ' + f.name + ': ' + (e instanceof SyntaxError ? 'not a pushraker backup or notification file' : e.message));
+            return;
+        }
+        if (data && typeof data === 'object' && 'pushraker_notification' in data) {
+            await nxOpen(f, data);
+            return;
+        }
+        try {
+            if (!data || typeof data !== 'object' || !('pushraker_backup' in data)) {
+                bkSay('⚠️ Can\'t open ' + f.name + ': not a pushraker backup or notification file');
+                return;
+            }
             if (!data.settings || typeof data.settings !== 'object' || Array.isArray(data.settings)) throw new Error('the backup has no settings');
             if (Number(data.pushraker_backup) > 1) throw new Error('the backup is from a newer pushraker; update this one first');
         } catch (e) {
@@ -3209,7 +3220,7 @@
             go.textContent = label;
         }
     };
-    // Import…: pick a file, pushraker says what it is and what doesn't fit
+    // Import: pick a file, pushraker says what it is and what doesn't fit
     // here (settings.IMPORT_NOTES), then it lands on this page like an
     // edit; replacing one: Import works 5 seconds after the dialog opens
     const NX_TEXT = {
@@ -3220,27 +3231,16 @@
         replaces: n => `Replaces "${n}".`,
         full: n => `Up to ${n} custom notifications: delete one first.`,
     };
-    function nxImport() {
-        if (!state) return;
-        el('nx-file').value = '';
-        el('nx-file').click();
-    }
     let nxLeft = 0, nxTimer = null;
     function nxTick() {
         el('nx-yes').disabled = nxLeft > 0;
         el('nx-yes').textContent = nxLeft > 0 ? `Import (${nxLeft})` : 'Import';
         if (nxLeft > 0) nxTimer = setTimeout(() => { nxLeft--; nxTick(); }, 1000);
     }
-    el('nx-file').onchange = async () => {
-        const f = el('nx-file').files[0];
-        if (!f) return;
-        let data;
-        try {
-            if (f.size > 200000) throw new Error('too big for a notification file');
-            data = JSON.parse(await f.text());
-            if (!data || typeof data !== 'object' || !('pushraker_notification' in data)) throw new Error('not a pushraker notification file');
-        } catch (e) {
-            bkSay('⚠️ Can\'t import ' + f.name + ': ' + e.message);
+    // A notification file picked with Restore / Import…
+    async function nxOpen(f, data) {
+        if (f.size > 200000) {
+            bkSay('⚠️ Can\'t import ' + f.name + ': too big for a notification file');
             return;
         }
         let r;
@@ -3268,7 +3268,7 @@
         nxLeft = replaces ? 5 : 0;
         nxTick();
         el('nx-modal').classList.add('open');
-    };
+    }
     el('nx-no').onclick = () => { clearTimeout(nxTimer); el('nx-modal').classList.remove('open'); nxIn = null; };
     el('nx-yes').onclick = async () => {
         if (el('nx-yes').disabled || !nxIn) return;

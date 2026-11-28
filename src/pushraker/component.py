@@ -1819,7 +1819,7 @@ class PushNotifications:
         return await self._send_file(
             via, name, data, f"🔔 {s['name']} notification: {label}",
             f"pushraker notification \"{label}\". Import it on the "
-            "settings page (Custom notifications: Import…).",
+            "settings page (Backup: Restore / Import…).",
             str(args.get("to") or "").strip(), "notification")
 
     async def _send_file(self, how: str, name: str, data: Any, title: str,

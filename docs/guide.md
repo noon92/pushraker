@@ -777,7 +777,8 @@ that is also when the tokens and passwords are removed.
 **One notification** can go in a file of its own: **Export ▴** in its
 editor (Download, Send by push, Send by email; what's in the editor, with
 a warning when that includes unsaved changes; never addresses, tokens,
-server settings or its topic), and **Import…** under the custom notifications. Importing says
+server settings or its topic), and **Restore / Import…** under Backup,
+which takes a notification file as well as a backup. Importing says
 what the file is and what doesn't fit this printer (older or newer
 pushraker, another printer model, a notification this printer can't send,
 values it doesn't have or this version doesn't know, settings this
@@ -788,8 +789,9 @@ format, with examples: [notification files](notification-files.md),
 which also has [a prompt to paste into an AI assistant](notification-files.md#writing-one-with-an-ai-assistant)
 so it writes one for you.
 
-**Restore…** loads a backup file onto the page. ⚠️ All settings are
-replaced by the backup's (excluding tokens, passwords and the webhook URL,
+**Restore / Import…** with a backup file loads it onto the page (with a
+notification file, it imports that one notification, as above). ⚠️ All
+settings are replaced by the backup's (excluding tokens, passwords and the webhook URL,
 which stay as they are; a saved token isn't kept for a backup whose ntfy or
 Gotify server is on another host). Cameras this printer
 doesn't have (the default, or a notification's) are replaced by the ones
